@@ -1,0 +1,17 @@
+# --- runtime / build ---
+runs/
+ariadne
+ariadne.exe
+.env
+
+# --- private: how I'm learning this, not what I built ---
+# Never pushed. Keep a backup outside the repo — these are gitignored,
+# so a fresh clone will NOT bring them with it.
+CLAUDE.md
+PROGRESS.md
+docs/
+*.pdf
+
+# README.md is ignored while it's a stub.
+# Un-ignore it in week 15 when the real one exists (positioning, 3 headings, asciinema).
+README.md
