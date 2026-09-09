@@ -67,71 +67,13 @@ type oaError struct {
 	Type    string `json:"type"`
 }
 
+// ErrNoChoices is returned when a well-formed response carries no choices.
+// Distinct from a decode failure: the server answered, it just said nothing.
 var ErrNoChoices = errors.New("openai: response contained no choices")
-
-func fromWire(body []byte) (Response, error) {
-	var raw oaResponse
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return Response{}, fmt.Errorf("openai: decode response: %w", err)
-	}
-
-	// First, because gateways return this envelope with HTTP 200.
-	if raw.Error != nil {
-		return Response{}, fmt.Errorf("openai: %s: %s", raw.Error.Type, raw.Error.Message)
-	}
-	if len(raw.Choices) == 0 {
-		return Response{}, ErrNoChoices
-	}
-
-	c := raw.Choices[0]
-
-	var blocks []Block
-	if c.Message.Content != nil && *c.Message.Content != "" {
-		blocks = append(blocks, Block{Type: BlockText, Text: *c.Message.Content})
-	}
-	for _, tc := range c.Message.ToolCalls {
-		// Pass the arguments through unparsed. Weak models emit malformed JSON
-		// here; the right place for that to fail is the tool's Unmarshal, which
-		// becomes an IsError block the model can recover from.
-		args := json.RawMessage(tc.Function.Arguments)
-		if len(args) == 0 {
-			args = json.RawMessage(`{}`)
-		}
-		blocks = append(blocks, Block{
-			Type: BlockToolUse,
-			ID:   tc.ID,
-			Name: tc.Function.Name,
-			Args: args,
-		})
-	}
-
-	return Response{
-		Blocks: blocks,
-		Stop:   stopReason(c.FinishReason, len(c.Message.ToolCalls) > 0),
-		Usage: Usage{
-			InputTokens:  raw.Usage.PromptTokens,
-			OutputTokens: raw.Usage.CompletionTokens,
-		},
-	}, nil
-}
 
 // stopReason maps finish_reason, falling back to the payload when the value is
 // missing or unrecognised. OpenRouter proxies many backends and not all of them
 // send what the spec says.
-func stopReason(finish string, hasToolCalls bool) StopReason {
-	switch finish {
-	case "stop":
-		return StopEnd
-	case "tool_calls", "function_call":
-		return StopToolUse
-	case "length":
-		return StopMaxToken
-	}
-	if hasToolCalls {
-		return StopToolUse
-	}
-	return StopEnd
-}
 
 func toWire(req Request) (oaRequest, error) {
 	out := oaRequest{Model: req.Model}
@@ -196,4 +138,65 @@ func toWire(req Request) (oaRequest, error) {
 	}
 
 	return out, nil
+}
+
+func fromWire(body []byte) (Response, error) {
+	var raw oaResponse
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return Response{}, fmt.Errorf("openai: decode response: %w", err)
+	}
+
+	// First, because gateways return this envelope with HTTP 200.
+	if raw.Error != nil {
+		return Response{}, fmt.Errorf("openai: %s: %s", raw.Error.Type, raw.Error.Message)
+	}
+	if len(raw.Choices) == 0 {
+		return Response{}, ErrNoChoices
+	}
+
+	c := raw.Choices[0]
+
+	var blocks []Block
+	if c.Message.Content != nil && *c.Message.Content != "" {
+		blocks = append(blocks, Block{Type: BlockText, Text: *c.Message.Content})
+	}
+	for _, tc := range c.Message.ToolCalls {
+		// Pass the arguments through unparsed. Weak models emit malformed JSON
+		// here; the right place for that to fail is the tool's Unmarshal, which
+		// becomes an IsError block the model can recover from.
+		args := json.RawMessage(tc.Function.Arguments)
+		if len(args) == 0 {
+			args = json.RawMessage(`{}`)
+		}
+		blocks = append(blocks, Block{
+			Type: BlockToolUse,
+			ID:   tc.ID,
+			Name: tc.Function.Name,
+			Args: args,
+		})
+	}
+
+	return Response{
+		Blocks: blocks,
+		Stop:   stopReason(c.FinishReason, len(c.Message.ToolCalls) > 0),
+		Usage: Usage{
+			InputTokens:  raw.Usage.PromptTokens,
+			OutputTokens: raw.Usage.CompletionTokens,
+		},
+	}, nil
+}
+
+func stopReason(finish string, hasToolCalls bool) StopReason {
+	switch finish {
+	case "stop":
+		return StopEnd
+	case "tool_calls", "function_call":
+		return StopToolUse
+	case "length":
+		return StopMaxToken
+	}
+	if hasToolCalls {
+		return StopToolUse
+	}
+	return StopEnd
 }

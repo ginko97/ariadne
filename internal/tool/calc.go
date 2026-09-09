@@ -49,10 +49,6 @@ func (Calc) Schema() json.RawMessage {
 }`)
 }
 
-type calcArgs struct {
-	Expr string `json:"expr"`
-}
-
 func (Calc) Call(_ context.Context, args json.RawMessage) (string, error) {
 	var in calcArgs
 	if err := json.Unmarshal(args, &in); err != nil {
@@ -85,6 +81,10 @@ func (Calc) Call(_ context.Context, args json.RawMessage) (string, error) {
 // semantics; and non-decimal literals (0x10, 0b11, 1_000) are left alone
 // because appending ".0" to them is a syntax error. Any parse failure falls
 // through unchanged so the real error surfaces from types.Eval.
+type calcArgs struct {
+	Expr string `json:"expr"`
+}
+
 func floatify(expr string) string {
 	if strings.Contains(expr, "%") {
 		return expr

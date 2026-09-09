@@ -3,11 +3,17 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/ginko97/ariadne/internal/llm"
 )
+
+// ErrUnknownTool is returned by Registry.Call when the model names a tool that
+// is not registered. The loop turns it into a tool_result with IsError set, so
+// the model can choose a tool that exists rather than the run dying.
+var ErrUnknownTool = errors.New("tool: unknown tool")
 
 // Tool is one thing the model can ask for.
 //
@@ -23,8 +29,6 @@ type Tool interface {
 	Schema() json.RawMessage
 	Call(ctx context.Context, args json.RawMessage) (string, error)
 }
-
-var ErrUnknownTool = fmt.Errorf("tool: unknown tool")
 
 // Registry maps a name to a Tool. It is the typed replacement for Python's
 // dynamic dispatch on tool name — the model sends a string, this turns it into

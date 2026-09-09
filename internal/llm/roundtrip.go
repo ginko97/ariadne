@@ -8,6 +8,11 @@ import (
 	"net/http"
 )
 
+// ErrTransportExhausted is returned when the client makes more requests than
+// the test scripted responses for. It signals a mismatch between the test's
+// expectations and the code's behaviour, not a runtime failure.
+var ErrTransportExhausted = errors.New("llm: recorded transport exhausted")
+
 // RecordedTransport serves canned HTTP responses in order and records what was
 // sent. Swap it into an http.Client and the provider does real JSON encoding
 // and decoding against real bytes — with no network and no key.
@@ -19,8 +24,6 @@ type RecordedTransport struct {
 	Requests []*http.Request // what the provider sent
 	Bodies   [][]byte        // ...and the bodies, already read
 }
-
-var ErrTransportExhausted = errors.New("llm: recorded transport exhausted")
 
 func (t *RecordedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	// Cancellation first, so a cancelled ctx behaves here exactly as over the wire.
