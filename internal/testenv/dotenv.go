@@ -1,0 +1,57 @@
+package testenv
+
+import (
+	"bufio"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// Load walks up to the repo root (the directory holding go.mod) and reads
+// KEY=value pairs from .env into the environment. Existing variables win.
+// A missing .env or a missing go.mod is not an error.
+//
+// No testing import on purpose — that would link the testing package into any
+// binary importing this.
+func Load() error {
+	dir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil // no go.mod above us; nothing to load
+		}
+		dir = parent
+	}
+
+	f, err := os.Open(filepath.Join(dir, ".env"))
+	if err != nil {
+		return nil // no .env is fine
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		v = strings.Trim(strings.TrimSpace(v), `"'`)
+		if _, exists := os.LookupEnv(k); !exists {
+			if err := os.Setenv(k, v); err != nil {
+				return err
+			}
+		}
+	}
+	return sc.Err()
+}
