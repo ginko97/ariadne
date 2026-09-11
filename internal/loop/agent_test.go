@@ -45,9 +45,9 @@ func TestRunTwoStep(t *testing.T) {
 		Model:    "test",
 		MaxSteps: 10,
 		Price:    testPrice,
-		RunTool: func(_ context.Context, c llm.ToolCall) (string, error) {
+		RunTool: func(_ context.Context, c llm.ToolCall) (llm.ToolResult, error) {
 			gotCall = c
-			return "36", nil
+			return llm.ToolResult{Content: "36"}, nil
 		},
 	}
 
@@ -95,7 +95,7 @@ func TestRunStepLimit(t *testing.T) {
 	}}
 	a := &Agent{
 		Provider: fake, Model: "test", MaxSteps: 2, Price: testPrice,
-		RunTool: func(context.Context, llm.ToolCall) (string, error) { return "ok", nil },
+		RunTool: func(context.Context, llm.ToolCall) (llm.ToolResult, error) { return llm.ToolResult{Content: "ok"}, nil },
 	}
 
 	_, err := a.Run(context.Background(), NewState("r", "loop forever"))
@@ -115,7 +115,7 @@ func TestRunCostLimit(t *testing.T) {
 	}}
 	a := &Agent{
 		Provider: fake, Model: "test", MaxSteps: 10, MaxCost: 1.0, Price: testPrice,
-		RunTool: func(context.Context, llm.ToolCall) (string, error) { return "ok", nil },
+		RunTool: func(context.Context, llm.ToolCall) (llm.ToolResult, error) { return llm.ToolResult{Content: "ok"}, nil },
 	}
 
 	s := NewState("r", "expensive")
@@ -153,8 +153,8 @@ func TestRunToolErrorBecomesBlock(t *testing.T) {
 	}}
 	a := &Agent{
 		Provider: fake, Model: "test", MaxSteps: 10, Price: testPrice,
-		RunTool: func(context.Context, llm.ToolCall) (string, error) {
-			return "", errors.New("division by zero")
+		RunTool: func(context.Context, llm.ToolCall) (llm.ToolResult, error) {
+			return llm.ToolResult{}, errors.New("division by zero")
 		},
 	}
 

@@ -30,9 +30,10 @@ func (p Price) Cost(u llm.Usage) float64 {
 		float64(u.OutputTokens)/1e6*p.OutputPerMTok
 }
 
-// ToolRunner executes one tool call. Week 2 replaces this field with a registry;
-// the loop does not care which, because it only ever calls this signature.
-type ToolRunner func(ctx context.Context, call llm.ToolCall) (string, error)
+// ToolRunner executes one tool call. tool.Registry.Call satisfies it, and so
+// does a closure in a test — the loop does not care which, and deliberately
+// does not import internal/tool. That is why ToolResult lives in llm.
+type ToolRunner func(ctx context.Context, call llm.ToolCall) (llm.ToolResult, error)
 
 type Agent struct {
 	Provider llm.Provider
@@ -104,12 +105,20 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		// a half-finished parallel batch is a different checkpoint problem.
 		results := make([]llm.Block, 0, len(calls))
 		for _, c := range calls {
-			out, err := a.RunTool(ctx, c)
-			b := llm.Block{Type: llm.BlockToolResult, CallID: c.ID, Content: out}
+			// Two ways a tool reports failure, and they mean different things:
+			// res.IsError is "it ran and failed" (the model can react); a non-nil
+			// err is "it could not be reached at all".
+			res, err := a.RunTool(ctx, c)
+			b := llm.Block{
+				Type:    llm.BlockToolResult,
+				CallID:  c.ID,
+				Content: res.Content,
+				IsError: res.IsError,
+			}
 			if err != nil {
-				// A failing tool is information for the model, not a dead run.
-				// It sees the error and can retry, pick another tool, or give up.
-				// Cancellation is the exception: that is the caller leaving.
+				// Still information for the model, not a dead run — it can retry,
+				// pick another tool, or give up. Cancellation is the exception:
+				// that is the caller leaving.
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					return "", ctxErr
 				}

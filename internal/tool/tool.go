@@ -27,7 +27,9 @@ type Tool interface {
 	Name() string
 	Description() string
 	Schema() json.RawMessage
-	Call(ctx context.Context, args json.RawMessage) (string, error)
+	// callID is the provider-assigned id for this invocation. Forward it
+	// downstream as an idempotency key when the tool has side effects.
+	Call(ctx context.Context, callID string, args json.RawMessage) (llm.ToolResult, error)
 }
 
 // Registry maps a name to a Tool. It is the typed replacement for Python's
@@ -74,10 +76,10 @@ func (r *Registry) Defs() []llm.ToolDef {
 //
 // An unknown name is a normal error, not a panic: the loop turns it into a
 // tool_result with IsError set, and the model gets to pick a different tool.
-func (r *Registry) Call(ctx context.Context, c llm.ToolCall) (string, error) {
+func (r *Registry) Call(ctx context.Context, c llm.ToolCall) (llm.ToolResult, error) {
 	t, ok := r.tools[c.Name]
 	if !ok {
-		return "", fmt.Errorf("%w: %q", ErrUnknownTool, c.Name)
+		return llm.ToolResult{}, fmt.Errorf("%w: %q", ErrUnknownTool, c.Name)
 	}
-	return t.Call(ctx, c.Args)
+	return t.Call(ctx, c.ID, c.Args) // the ID stops being dropped here
 }

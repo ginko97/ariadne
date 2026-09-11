@@ -21,31 +21,45 @@ func TestCalcEvaluates(t *testing.T) {
 	}
 	for _, tc := range cases {
 		args, _ := json.Marshal(calcArgs{Expr: tc.expr})
-		got, err := Calc{}.Call(context.Background(), args)
+		got, err := Calc{}.Call(context.Background(), "call_1", args)
 		if err != nil {
-			t.Errorf("%s: %v", tc.expr, err)
+			t.Errorf("%s: unreachable-tool error: %v", tc.expr, err)
 			continue
 		}
-		if got != tc.want {
-			t.Errorf("%s = %s, want %s", tc.expr, got, tc.want)
+		if got.IsError {
+			t.Errorf("%s: reported failure: %s", tc.expr, got.Content)
+			continue
+		}
+		if got.Content != tc.want {
+			t.Errorf("%s = %s, want %s", tc.expr, got.Content, tc.want)
 		}
 	}
 }
 
-// The model will send nonsense eventually. It must come back as an error the
-// loop can turn into a tool_result, never a panic.
+// The model will send nonsense eventually. Every one of these is something the
+// model can fix, so they come back as IsError results — not as a returned error,
+// which is reserved for "the tool could not be reached at all".
 func TestCalcRejectsJunk(t *testing.T) {
 	for _, expr := range []string{"os.Exit(1)", "1+", "hello", ""} {
 		args, _ := json.Marshal(calcArgs{Expr: expr})
-		if _, err := (Calc{}).Call(context.Background(), args); err == nil {
-			t.Errorf("%q: expected an error, got none", expr)
+		res, err := (Calc{}).Call(context.Background(), "call_1", args)
+		if err != nil {
+			t.Errorf("%q: want IsError result, got a returned error: %v", expr, err)
+			continue
+		}
+		if !res.IsError {
+			t.Errorf("%q: expected IsError, got %q", expr, res.Content)
 		}
 	}
 }
 
 func TestCalcRejectsBadJSON(t *testing.T) {
-	if _, err := (Calc{}).Call(context.Background(), json.RawMessage(`{"expr":`)); err == nil {
-		t.Fatal("expected an error for malformed JSON")
+	res, err := (Calc{}).Call(context.Background(), "call_1", json.RawMessage(`{"expr":`))
+	if err != nil {
+		t.Fatalf("want IsError result, got a returned error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected IsError for malformed JSON, got %q", res.Content)
 	}
 }
 
@@ -55,8 +69,8 @@ type stub struct{ name string }
 func (s stub) Name() string            { return s.name }
 func (s stub) Description() string     { return "stub " + s.name }
 func (s stub) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
-func (s stub) Call(context.Context, json.RawMessage) (string, error) {
-	return s.name + " ran", nil
+func (s stub) Call(context.Context, string, json.RawMessage) (llm.ToolResult, error) {
+	return llm.ToolResult{Content: s.name + " ran"}, nil
 }
 
 // Sorted output keeps the prompt byte-identical run to run.
@@ -91,8 +105,8 @@ func TestRegistryDispatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "42" {
-		t.Errorf("got %s, want 42", got)
+	if got.Content != "42" {
+		t.Errorf("got %s, want 42", got.Content)
 	}
 }
 

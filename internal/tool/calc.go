@@ -11,6 +11,8 @@ import (
 	"go/token"
 	"go/types"
 	"strings"
+
+	"github.com/ginko97/ariadne/internal/llm"
 )
 
 // Calc evaluates an arithmetic expression.
@@ -49,23 +51,38 @@ func (Calc) Schema() json.RawMessage {
 }`)
 }
 
-func (Calc) Call(_ context.Context, args json.RawMessage) (string, error) {
+// Call evaluates the expression. callID is ignored: calc has no side effects,
+// so there is nothing downstream to make idempotent.
+//
+// Every failure here is one the model can fix, so they all come back as
+// ToolResult{IsError: true} rather than as an error. The error return is
+// reserved for "the tool could not be reached at all", which a pure function
+// has no way to be — so it is always nil.
+func (Calc) Call(_ context.Context, _ string, args json.RawMessage) (llm.ToolResult, error) {
+	fail := func(format string, a ...any) (llm.ToolResult, error) {
+		return llm.ToolResult{Content: fmt.Sprintf(format, a...), IsError: true}, nil
+	}
+
 	var in calcArgs
 	if err := json.Unmarshal(args, &in); err != nil {
-		return "", fmt.Errorf("calc: bad arguments: %w", err)
+		return fail("calc: bad arguments: %v", err)
 	}
 	if in.Expr == "" {
-		return "", fmt.Errorf("calc: expr is required")
+		return fail("calc: expr is required")
 	}
 
 	tv, err := types.Eval(token.NewFileSet(), nil, token.NoPos, floatify(in.Expr))
 	if err != nil {
-		return "", fmt.Errorf("calc: cannot evaluate %q: %w", in.Expr, err)
+		return fail("calc: cannot evaluate %q: %v", in.Expr, err)
 	}
 	if tv.Value == nil {
-		return "", fmt.Errorf("calc: %q is not a constant expression", in.Expr)
+		return fail("calc: %q is not a constant expression", in.Expr)
 	}
-	return tv.Value.String(), nil
+	return llm.ToolResult{Content: tv.Value.String()}, nil
+}
+
+type calcArgs struct {
+	Expr string `json:"expr"`
 }
 
 // floatify rewrites integer literals as floats so the tool divides like a
@@ -81,10 +98,6 @@ func (Calc) Call(_ context.Context, args json.RawMessage) (string, error) {
 // semantics; and non-decimal literals (0x10, 0b11, 1_000) are left alone
 // because appending ".0" to them is a syntax error. Any parse failure falls
 // through unchanged so the real error surfaces from types.Eval.
-type calcArgs struct {
-	Expr string `json:"expr"`
-}
-
 func floatify(expr string) string {
 	if strings.Contains(expr, "%") {
 		return expr

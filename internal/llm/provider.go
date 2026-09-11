@@ -43,6 +43,23 @@ type Response struct {
 	Usage  Usage      `json:"usage"`
 }
 
+// ToolResult is what a tool produced. It becomes a BlockToolResult in the
+// conversation, which is why the fields mirror that block's.
+type ToolResult struct {
+	// Content is the output, flattened to a string. MCP's CallToolResult carries
+	// []Content (text, image, audio, embedded resource); we keep text only,
+	// because Block.Content is a string on the wire regardless.
+	Content string
+
+	// IsError means the tool ran and reported failure — distinct from Call
+	// returning an error, which means the tool could not be reached at all.
+	IsError bool
+
+	// Metadata carries opaque tokens only, e.g. MCP's RequestState for resuming
+	// across retries. Not a general bag: if you want a typed field, add one.
+	Metadata map[string]string
+}
+
 // Text joins the text blocks with newlines. Blocks stay authoritative — this is
 // derived, never stored, so a resumed run can never disagree with a fresh one.
 func (r Response) Text() string {
