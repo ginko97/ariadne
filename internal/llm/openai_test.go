@@ -1,8 +1,10 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -209,5 +211,59 @@ func TestFromWireMissingFinishReason(t *testing.T) {
 	}
 	if got.Stop != StopToolUse {
 		t.Errorf("Stop = %q — the payload fallback in stopReason didn't fire", got.Stop)
+	}
+}
+
+func TestCompleteSendsAndDecodes(t *testing.T) {
+	rt := &RecordedTransport{Responses: [][]byte{[]byte(`{
+  "choices": [{
+    "index": 0,
+    "message": {"role":"assistant","content":"36"},
+    "finish_reason": "stop"
+  }],
+  "usage": {"prompt_tokens":12,"completion_tokens":3}
+}`)}}
+
+	o := NewOpenAI("test-key",
+		WithBaseURL("https://gateway.test/v1"),
+		WithHeader("X-Title", "ariadne"),
+		WithHTTPClient(&http.Client{Transport: rt}),
+	)
+
+	got, err := o.Complete(context.Background(), Request{
+		Model:    "some/model",
+		Messages: []Message{{Role: RoleUser, Blocks: []Block{{Type: BlockText, Text: "15% of 240?"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// what came back
+	if got.Text() != "36" || got.Stop != StopEnd {
+		t.Errorf("response = %+v", got)
+	}
+	if got.Usage.InputTokens != 12 {
+		t.Errorf("usage = %+v", got.Usage)
+	}
+
+	// what went out — the half that matters
+	req := rt.Requests[0]
+	if req.Method != http.MethodPost {
+		t.Errorf("method = %s", req.Method)
+	}
+	if req.URL.String() != "https://gateway.test/v1/chat/completions" {
+		t.Errorf("url = %s", req.URL)
+	}
+	if h := req.Header.Get("Authorization"); h != "Bearer test-key" {
+		t.Errorf("auth = %q", h)
+	}
+	if h := req.Header.Get("Content-Type"); h != "application/json" {
+		t.Errorf("content-type = %q", h)
+	}
+	if h := req.Header.Get("X-Title"); h != "ariadne" {
+		t.Errorf("extra header lost: %q", h)
+	}
+	if !strings.Contains(string(rt.Bodies[0]), `"model":"some/model"`) {
+		t.Errorf("body = %s", rt.Bodies[0])
 	}
 }
