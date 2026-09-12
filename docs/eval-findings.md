@@ -96,6 +96,28 @@ Two lessons, in order of importance:
 
 ---
 
+## What the suite does catch
+
+The same experiment run against a defect the model *cannot* work around — the
+scorer's number normalisation, removed deliberately — was caught:
+
+```
+33/34
+  FAIL hard-word-03 answer does not contain "74.5"
+REGRESSED since c3e2d3c: hard-word-03
+```
+
+The distinction is the whole point. A broken **tool** was invisible, because the
+model compensated. A broken **scorer** was not, because nothing downstream can
+compensate for the measurement itself being wrong.
+
+It also caught only *one* task where two had failed for this reason before:
+`hard-chain-02` passed this time because the model happened not to write a
+thousands separator. Same code, same task, different formatting — the noise
+described below, appearing in a place where it changes the conclusion.
+
+---
+
 ## This set is a regression suite, not a benchmark
 
 The baseline now scores 34/34. That means it measures nothing about *this*
