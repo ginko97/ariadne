@@ -13,6 +13,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -87,6 +88,7 @@ flags:
   -base-url       OpenAI-compatible endpoint (env ARIADNE_BASE_URL)
   -max-steps      ceiling on loop iterations (default 10)
   -allow          comma-separated tools this run may call (default: all)
+  -approve        tools needing a yes on the terminal before each call
 
 eval flags:
   -models         comma-separated model ids  (default: ARIADNE_MODEL)
@@ -107,6 +109,7 @@ func cmdRun(args []string) int {
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
 	allow := fs.String("allow", "", "comma-separated tools this run may call (default: all)")
+	approve := fs.String("approve", "", "comma-separated tools that need a yes on the terminal before each call")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -120,7 +123,7 @@ func cmdRun(args []string) int {
 
 	// Checked before anything is spent: a typo here would otherwise deny
 	// silently and look like the model failing to use a tool it never had.
-	if err := checkAllow(splitList(*allow), newRegistry().Defs()); err != nil {
+	if err := checkNames(newRegistry().Defs(), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne run: %v\n", err)
 		return exitUsage
 	}
@@ -147,7 +150,7 @@ func cmdRun(args []string) int {
 	}
 	defer closeTrace(tw)
 
-	agent := newAgentFor(key, *model, *baseURL, *maxSteps, splitList(*allow), store, tw)
+	agent := newAgentFor(key, *model, *baseURL, *maxSteps, splitList(*allow), splitList(*approve), store, tw)
 	state.BaseURL = *baseURL
 	fmt.Fprintf(os.Stderr, "run %s  model=%s\n", state.RunID, *model)
 
@@ -164,6 +167,7 @@ func cmdResume(args []string) int {
 	baseURL := fs.String("base-url", "", "OpenAI-compatible endpoint (defaults to endpoint from checkpoint)")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
 	allow := fs.String("allow", "", "narrow the tools this run may call; it can never widen the grant in the checkpoint")
+	approve := fs.String("approve", "", "add tools needing approval; a gate in the checkpoint cannot be dropped here")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -178,7 +182,7 @@ func cmdResume(args []string) int {
 	}
 	runID := fs.Args()[0]
 
-	if err := checkAllow(splitList(*allow), newRegistry().Defs()); err != nil {
+	if err := checkNames(newRegistry().Defs(), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
 		return exitUsage
 	}
@@ -218,7 +222,7 @@ func cmdResume(args []string) int {
 	// The checkpoint's model wins: a job that finishes on a different model
 	// than it started on is a different job. The checkpoint's endpoint wins
 	// unless explicitly overridden on the command line.
-	agent := newAgentFor(key, state.Model, endpoint, *maxSteps, splitList(*allow), store, tw)
+	agent := newAgentFor(key, state.Model, endpoint, *maxSteps, splitList(*allow), splitList(*approve), store, tw)
 
 	fmt.Fprintf(os.Stderr, "resume %s  model=%s  from step %d (%d messages)\n",
 		state.RunID, state.Model, state.Steps, len(state.Messages))
@@ -261,16 +265,20 @@ func newRegistry() *tool.Registry {
 	)
 }
 
-func newAgentFor(key, model, baseURL string, maxSteps int, allow []string, store *loop.Store, tw *trace.Writer) *loop.Agent {
+func newAgentFor(key, model, baseURL string, maxSteps int, allow, approve []string, store *loop.Store, tw *trace.Writer) *loop.Agent {
 	reg := newRegistry()
 	return &loop.Agent{
-		Trace:      tw.Emit,
-		Provider:   llm.NewOpenAI(key, llm.WithBaseURL(baseURL)),
-		Model:      model,
-		System:     systemPrompt,
-		BaseURL:    baseURL,
-		Tools:      reg.Defs(),
-		Allow:      allow,
+		Trace:    tw.Emit,
+		Provider: llm.NewOpenAI(key, llm.WithBaseURL(baseURL)),
+		Model:    model,
+		System:   systemPrompt,
+		BaseURL:  baseURL,
+		Tools:    reg.Defs(),
+		Allow:    allow,
+
+		RequireApproval: approve,
+		Approve:         approveOnTerminal(os.Stdin),
+
 		RunTool:    reg.Call,
 		Checkpoint: store.Save,
 		MaxSteps:   maxSteps,
@@ -284,16 +292,18 @@ func newAgentFor(key, model, baseURL string, maxSteps int, allow []string, store
 // A misspelled entry would otherwise deny silently: the run would start, the
 // model would be offered nothing it could use, and the failure would surface
 // several steps later as apparent confusion rather than as a typo.
-func checkAllow(allow []string, defs []llm.ToolDef) error {
+func checkNames(defs []llm.ToolDef, lists ...[]string) error {
 	known := make(map[string]bool, len(defs))
 	names := make([]string, 0, len(defs))
 	for _, d := range defs {
 		known[d.Name] = true
 		names = append(names, d.Name)
 	}
-	for _, n := range allow {
-		if !known[n] {
-			return fmt.Errorf("unknown tool %q (available: %s)", n, strings.Join(names, ", "))
+	for _, list := range lists {
+		for _, n := range list {
+			if !known[n] {
+				return fmt.Errorf("unknown tool %q (available: %s)", n, strings.Join(names, ", "))
+			}
 		}
 	}
 	return nil
@@ -440,7 +450,7 @@ func cmdEval(args []string) int {
 		traces = append(traces, tw)
 		// Unrestricted: an eval measures what the agent does when it is allowed
 		// to do its job, and a tool denied here would look like a model failure.
-		return newAgentFor(key, model, *baseURL, maxSteps, nil, store, tw)
+		return newAgentFor(key, model, *baseURL, maxSteps, nil, nil, store, tw)
 	}
 
 	commit := gitCommit()
@@ -530,5 +540,46 @@ func gitCommit() string {
 func closeTrace(tw *trace.Writer) {
 	if err := tw.Close(); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: trace incomplete: %v\n", err)
+	}
+}
+
+// approveOnTerminal asks the operator before a gated call runs.
+//
+// This is the one place the runtime blocks on a human, and it is why -approve
+// is opt-in. A run is a job: something you can schedule, walk away from, and
+// resume after a crash. A job that stops and waits for someone to type is none
+// of those things, so the gate exists for the calls where that trade is worth
+// making and not as a default.
+//
+// With stdin not a terminal there is nobody to ask, and the answer is no. That
+// is the whole reason this fails closed rather than assuming consent: the
+// unattended case is exactly the one where a wrong guess is unrecoverable.
+//
+// Known limit: a Ctrl-C while the prompt is waiting is not seen until the read
+// returns, because os.Stdin has no deadline. The context is accepted so the
+// interface does not have to change when that is fixed.
+func approveOnTerminal(in *os.File) func(context.Context, llm.ToolCall) (bool, error) {
+	reader := bufio.NewReader(in)
+	return func(_ context.Context, c llm.ToolCall) (bool, error) {
+		fi, err := in.Stat()
+		if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+			fmt.Fprintf(os.Stderr, "denied %s: approval required and no terminal to ask\n", c.Name)
+			return false, nil
+		}
+
+		fmt.Fprintf(os.Stderr, "\napprove %s %s ? [y/N] ", c.Name, c.Args)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			// EOF on a terminal means the operator closed the input rather than
+			// answering. Not an answer, so not a yes.
+			fmt.Fprintln(os.Stderr, "no answer; denied")
+			return false, nil
+		}
+		switch strings.ToLower(strings.TrimSpace(line)) {
+		case "y", "yes":
+			return true, nil
+		default:
+			return false, nil
+		}
 	}
 }

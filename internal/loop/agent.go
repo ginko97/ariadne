@@ -62,7 +62,27 @@ type Agent struct {
 	// outcome no longer depends on the model making a good decision.
 	//
 	// Copied onto State on the first step; State is authoritative from then on.
-	Allow   []string
+	Allow []string
+	// RequireApproval names tools that need a yes before each call, even though
+	// the allow-list permits them.
+	//
+	// The allow-list is a decision made once, before the run starts, by someone
+	// who cannot know what the run will encounter. Approval is a decision made
+	// per call, by someone looking at the actual arguments. The two answer
+	// different questions: "may this job ever write files" and "do I want this
+	// file written".
+	//
+	// Copied onto State on the first step, like Allow.
+	RequireApproval []string
+	// Approve is asked before each call to a tool in RequireApproval. A nil
+	// Approve denies: a requirement with nothing behind it must not silently
+	// become permission.
+	//
+	// An error stops the run, unlike a refusal. "You may not do this" is an
+	// answer; "the thing that decides could not be reached" is not, and
+	// continuing would mean guessing on the operator's behalf.
+	Approve func(ctx context.Context, call llm.ToolCall) (bool, error)
+
 	BaseURL string
 	Tools   []llm.ToolDef
 	RunTool ToolRunner
@@ -103,6 +123,11 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 	// with and a resuming command can only ever narrow it, never widen it.
 	if s.Allow == nil {
 		s.Allow = a.Allow
+	}
+	// Same rule, opposite direction: resume must not be able to drop a gate the
+	// run was started behind.
+	if s.RequireApproval == nil {
+		s.RequireApproval = a.RequireApproval
 	}
 	if s.BaseURL == "" && a.BaseURL != "" {
 		s.BaseURL = a.BaseURL
@@ -245,23 +270,34 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 		// from the task. Refusing is not a run failure: the model is told, and
 		// usually reports it, which is more useful than an aborted run.
 		if !s.allows(c.Name) {
-			msg := fmt.Sprintf("tool %q is not permitted in this run; permitted: %s",
-				c.Name, strings.Join(s.Allow, ", "))
-			a.emit(trace.Event{
-				Kind: trace.KindToolDenied, Step: s.Steps,
-				CallID: c.ID, Tool: c.Name, Args: c.Args,
-				Content: msg, IsError: true,
-			})
-			s.Messages[i].Blocks = append(s.Messages[i].Blocks, llm.Block{
-				Type:    llm.BlockToolResult,
-				CallID:  c.ID,
-				Content: msg,
-				IsError: true,
-			})
-			if err := a.checkpoint(s); err != nil {
+			err := a.deny(s, i, c, fmt.Sprintf("tool %q is not permitted in this run; permitted: %s",
+				c.Name, strings.Join(s.Allow, ", ")))
+			if err != nil {
 				return err
 			}
 			continue
+		}
+
+		// Permitted is not the same as wanted. The allow-list was decided before
+		// the run, by someone who could not know what the arguments would be;
+		// this asks about these arguments, now.
+		if s.needsApproval(c.Name) {
+			ok, err := a.askApproval(ctx, c)
+			if err != nil {
+				return err
+			}
+			a.emit(trace.Event{
+				Kind: trace.KindApproval, Step: s.Steps,
+				CallID: c.ID, Tool: c.Name, Args: c.Args,
+				Content: map[bool]string{true: "granted", false: "denied"}[ok],
+				IsError: !ok,
+			})
+			if !ok {
+				if err := a.deny(s, i, c, fmt.Sprintf("call to %q was not approved", c.Name)); err != nil {
+					return err
+				}
+				continue
+			}
 		}
 
 		toolStarted := time.Now()
@@ -301,6 +337,37 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 		}
 	}
 	return nil
+}
+
+// deny records a call the runtime refused to make.
+//
+// The model is told and the run continues. Aborting would be the more dramatic
+// choice and the less useful one: a refused call is information the model can
+// work with, and a run that ends with "I was not allowed to write that file" is
+// a better artefact than a stack trace. Checkpointed like any other result, or
+// resume would see the call as still pending and put it up again.
+func (a *Agent) deny(s *State, i int, c llm.ToolCall, msg string) error {
+	a.emit(trace.Event{
+		Kind: trace.KindToolDenied, Step: s.Steps,
+		CallID: c.ID, Tool: c.Name, Args: c.Args,
+		Content: msg, IsError: true,
+	})
+	s.Messages[i].Blocks = append(s.Messages[i].Blocks, llm.Block{
+		Type:    llm.BlockToolResult,
+		CallID:  c.ID,
+		Content: msg,
+		IsError: true,
+	})
+	return a.checkpoint(s)
+}
+
+// askApproval puts one call to the operator. A missing Approve is a no: a
+// requirement with nothing behind it must not decay into permission.
+func (a *Agent) askApproval(ctx context.Context, c llm.ToolCall) (bool, error) {
+	if a.Approve == nil {
+		return false, nil
+	}
+	return a.Approve(ctx, c)
 }
 
 func (a *Agent) checkpoint(s *State) error {

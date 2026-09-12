@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -302,5 +303,219 @@ func TestDeniedCallIsCheckpointed(t *testing.T) {
 	}
 	if saved == 0 {
 		t.Error("nothing was checkpointed")
+	}
+}
+
+// The allow-list answers "may this job ever write files". The gate answers "do
+// I want this file written". A tool can be permitted and still refused here.
+func TestApprovalGateBlocksWhenDenied(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "write_file", `{"path":"receipts/2291.txt"}`, 10, 10),
+		endResponse("The write was not approved.", 10, 10),
+	}}
+
+	ran := false
+	var asked []llm.ToolCall
+	var events []trace.Event
+	a := &Agent{
+		Provider:        fake,
+		Model:           "test",
+		MaxSteps:        10,
+		Allow:           []string{"write_file"}, // permitted...
+		RequireApproval: []string{"write_file"}, // ...and still gated
+		Tools:           []llm.ToolDef{{Name: "write_file"}},
+		Trace:           func(e trace.Event) { events = append(events, e) },
+		Approve: func(_ context.Context, c llm.ToolCall) (bool, error) {
+			asked = append(asked, c)
+			return false, nil
+		},
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			ran = true
+			return llm.ToolResult{Content: "wrote it"}, nil
+		},
+	}
+
+	if _, err := a.Run(context.Background(), NewState("run_test", "write the receipt")); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if ran {
+		t.Fatal("a denied call ran anyway")
+	}
+	// The arguments have to reach the approver, or there is nothing to judge.
+	if len(asked) != 1 || !strings.Contains(string(asked[0].Args), "receipts/2291.txt") {
+		t.Errorf("approver saw %+v", asked)
+	}
+
+	var approvals int
+	for _, e := range events {
+		if e.Kind == trace.KindApproval {
+			approvals++
+			if e.Content != "denied" {
+				t.Errorf("approval recorded as %q", e.Content)
+			}
+		}
+	}
+	if approvals != 1 {
+		t.Errorf("approval events = %d, want 1", approvals)
+	}
+}
+
+// A grant is recorded too. An audit log that only shows refusals cannot answer
+// "who let this happen", which is the question asked after something goes wrong.
+func TestApprovalGateRunsAndRecordsWhenGranted(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "write_file", `{"path":"ok.txt"}`, 10, 10),
+		endResponse("written", 10, 10),
+	}}
+
+	ran := false
+	var events []trace.Event
+	a := &Agent{
+		Provider:        fake,
+		Model:           "test",
+		MaxSteps:        10,
+		RequireApproval: []string{"write_file"},
+		Tools:           []llm.ToolDef{{Name: "write_file"}},
+		Trace:           func(e trace.Event) { events = append(events, e) },
+		Approve:         func(context.Context, llm.ToolCall) (bool, error) { return true, nil },
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			ran = true
+			return llm.ToolResult{Content: "wrote it"}, nil
+		},
+	}
+
+	if _, err := a.Run(context.Background(), NewState("run_test", "write it")); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !ran {
+		t.Fatal("an approved call did not run")
+	}
+	for _, e := range events {
+		if e.Kind == trace.KindApproval && e.Content != "granted" {
+			t.Errorf("grant recorded as %q", e.Content)
+		}
+	}
+}
+
+// A requirement with nothing behind it must not decay into permission. This is
+// the failure mode that matters: the flag is set, the operator believes calls
+// are gated, and nothing is actually asking.
+func TestApprovalWithNoApproverDenies(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "write_file", `{}`, 10, 10),
+		endResponse("not approved", 10, 10),
+	}}
+
+	ran := false
+	a := &Agent{
+		Provider:        fake,
+		Model:           "test",
+		MaxSteps:        10,
+		RequireApproval: []string{"write_file"},
+		Tools:           []llm.ToolDef{{Name: "write_file"}},
+		Approve:         nil, // nothing to ask
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			ran = true
+			return llm.ToolResult{Content: "wrote it"}, nil
+		},
+	}
+
+	if _, err := a.Run(context.Background(), NewState("run_test", "write it")); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if ran {
+		t.Fatal("a gated call ran with no approver configured")
+	}
+}
+
+// An ungated tool is not asked about. A gate that fires on everything would be
+// clicked through, which is the same as having no gate.
+func TestUngatedToolIsNotAsked(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "calc", `{"expr":"2+2"}`, 10, 10),
+		endResponse("4", 10, 10),
+	}}
+
+	asked := 0
+	a := &Agent{
+		Provider:        fake,
+		Model:           "test",
+		MaxSteps:        10,
+		RequireApproval: []string{"write_file"},
+		Tools:           []llm.ToolDef{{Name: "calc"}, {Name: "write_file"}},
+		Approve: func(context.Context, llm.ToolCall) (bool, error) {
+			asked++
+			return true, nil
+		},
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			return llm.ToolResult{Content: "4"}, nil
+		},
+	}
+
+	if _, err := a.Run(context.Background(), NewState("run_test", "2+2")); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if asked != 0 {
+		t.Errorf("approver was asked %d times about an ungated tool", asked)
+	}
+}
+
+// "You may not do this" is an answer. "The thing that decides could not be
+// reached" is not, and carrying on would mean guessing for the operator.
+func TestApproverErrorStopsTheRun(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "write_file", `{}`, 10, 10),
+		endResponse("unreachable", 10, 10),
+	}}
+
+	boom := errors.New("approval service unreachable")
+	a := &Agent{
+		Provider:        fake,
+		Model:           "test",
+		MaxSteps:        10,
+		RequireApproval: []string{"write_file"},
+		Tools:           []llm.ToolDef{{Name: "write_file"}},
+		Approve:         func(context.Context, llm.ToolCall) (bool, error) { return false, boom },
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			return llm.ToolResult{Content: "wrote it"}, nil
+		},
+	}
+
+	_, err := a.Run(context.Background(), NewState("run_test", "write it"))
+	if !errors.Is(err, boom) {
+		t.Fatalf("Run err = %v, want the approver's error", err)
+	}
+}
+
+// Resume must not be a way out from behind a gate, the mirror of the
+// allow-list rule.
+func TestResumeCannotDropTheApprovalGate(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "write_file", `{}`, 10, 10),
+		endResponse("not approved", 10, 10),
+	}}
+
+	ran := false
+	a := &Agent{
+		Provider:        fake,
+		Model:           "test",
+		MaxSteps:        10,
+		RequireApproval: nil, // the resuming command asks for no gate
+		Tools:           []llm.ToolDef{{Name: "write_file"}},
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			ran = true
+			return llm.ToolResult{Content: "wrote it"}, nil
+		},
+	}
+
+	s := NewState("run_test", "write it")
+	s.RequireApproval = []string{"write_file"} // what the checkpoint recorded
+
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if ran {
+		t.Fatal("resume dropped the approval gate")
 	}
 }

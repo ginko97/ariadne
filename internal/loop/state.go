@@ -30,10 +30,13 @@ type State struct {
 	// It lives on the state rather than only on the agent so that resume cannot
 	// widen it. A run that was granted calc and fetch must still have only calc
 	// and fetch an hour later, whatever flags the resuming command carries.
-	Allow    []string      `json:"allow,omitempty"`
-	Messages []llm.Message `json:"messages"`
-	Steps    int           `json:"steps"`
-	Cost     float64       `json:"cost_usd"`
+	Allow []string `json:"allow,omitempty"`
+	// RequireApproval is recorded for the mirror-image reason: resume must not
+	// be a way to drop a gate the run was started behind.
+	RequireApproval []string      `json:"require_approval,omitempty"`
+	Messages        []llm.Message `json:"messages"`
+	Steps           int           `json:"steps"`
+	Cost            float64       `json:"cost_usd"`
 }
 
 // allows reports whether name may be called in this run.
@@ -45,7 +48,16 @@ func (s *State) allows(name string) bool {
 	if len(s.Allow) == 0 {
 		return true
 	}
-	for _, n := range s.Allow {
+	return contains(s.Allow, name)
+}
+
+// needsApproval reports whether name must be approved before each call.
+func (s *State) needsApproval(name string) bool {
+	return contains(s.RequireApproval, name)
+}
+
+func contains(names []string, name string) bool {
+	for _, n := range names {
 		if n == name {
 			return true
 		}

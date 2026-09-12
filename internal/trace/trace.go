@@ -34,6 +34,11 @@ const (
 	// permitted to do" is the line you want to be able to grep for on its own,
 	// and it reads very differently from a tool that ran and failed.
 	KindToolDenied = "tool_denied"
+	// KindApproval records that a human was asked about a call, and what they
+	// said. Both answers are recorded: an audit that only shows refusals cannot
+	// answer "who let this happen", which is the question actually asked after
+	// something goes wrong.
+	KindApproval = "approval"
 )
 
 // Event is one thing that happened. Fields are shared across kinds and omitted
