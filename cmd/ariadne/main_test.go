@@ -1,0 +1,102 @@
+package main
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/ginko97/ariadne/internal/llm"
+)
+
+// The delta printer is the only user-visible part of streaming, and it has
+// enough state to get wrong: a tool must be announced once rather than once per
+// fragment, and argument fragments must not be echoed.
+func TestPrintDeltaAnnouncesEachToolOnce(t *testing.T) {
+	var out strings.Builder
+	p := printDelta(&out)
+
+	p(llm.Chunk{Text: "Let me "})
+	p(llm.Chunk{Text: "compute that."})
+	// One call, five fragments — the shape a real stream arrives in.
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c1", Name: "calc", Args: ""}})
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, Args: `{"expr"`}})
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, Args: `:"240*0.15"`}})
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, Args: `}`}})
+	p(llm.Chunk{Stop: llm.StopToolUse})
+
+	got := out.String()
+	if n := strings.Count(got, "calc"); n != 1 {
+		t.Errorf("announced calc %d times:\n%s", n, got)
+	}
+	if !strings.Contains(got, "Let me compute that.") {
+		t.Errorf("text deltas did not join:\n%s", got)
+	}
+	// Fragments are not valid JSON on their own; half a document scrolling past
+	// is noise, and the whole call is in the trace regardless.
+	if strings.Contains(got, `{"expr"`) || strings.Contains(got, "240*0.15") {
+		t.Errorf("argument fragments were echoed:\n%s", got)
+	}
+	// The announcement must start its own line rather than run on from the text.
+	if !strings.Contains(got, "compute that.\n") {
+		t.Errorf("tool announcement did not break the text line:\n%s", got)
+	}
+}
+
+func TestPrintDeltaSeparatesParallelCalls(t *testing.T) {
+	var out strings.Builder
+	p := printDelta(&out)
+
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "a", Name: "calc"}})
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 1, ID: "b", Name: "fetch"}})
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, Args: "{}"}})
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 1, Args: "{}"}})
+
+	got := out.String()
+	for _, name := range []string{"calc", "fetch"} {
+		if n := strings.Count(got, name); n != 1 {
+			t.Errorf("%s announced %d times:\n%s", name, n, got)
+		}
+	}
+}
+
+// splitList feeds --allow and --approve, where an empty flag has to mean
+// "unrestricted" rather than "restricted to nothing".
+func TestSplitList(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"   ", nil},
+		{",,", nil},
+		{"calc", []string{"calc"}},
+		{" calc , fetch ", []string{"calc", "fetch"}},
+		{"calc,,fetch,", []string{"calc", "fetch"}},
+	} {
+		got := splitList(tc.in)
+		if len(got) != len(tc.want) {
+			t.Errorf("splitList(%q) = %v, want %v", tc.in, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("splitList(%q) = %v, want %v", tc.in, got, tc.want)
+				break
+			}
+		}
+	}
+}
+
+func TestCheckNamesRejectsUnknownTool(t *testing.T) {
+	defs := newRegistry().Defs()
+
+	if err := checkNames(defs, []string{"calc"}, []string{"write_file"}); err != nil {
+		t.Errorf("known tools were rejected: %v", err)
+	}
+	err := checkNames(defs, []string{"calc"}, []string{"wrtie_file"})
+	if err == nil {
+		t.Fatal("a typo was accepted; the run would deny silently")
+	}
+	if !strings.Contains(err.Error(), "wrtie_file") || !strings.Contains(err.Error(), "write_file") {
+		t.Errorf("error should name the typo and the alternatives: %v", err)
+	}
+}

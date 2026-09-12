@@ -14,6 +14,50 @@ type oaRequest struct {
 	Model    string      `json:"model"`
 	Messages []oaMessage `json:"messages"`
 	Tools    []oaTool    `json:"tools,omitempty"`
+	Stream   bool        `json:"stream,omitempty"`
+	// StreamOptions asks for a final usage chunk. Without it a streamed
+	// response reports no token counts at all, so cost silently becomes zero
+	// and the cost ceiling stops meaning anything — the failure is invisible
+	// because a run with cost 0.0000 looks like a cheap run, not a broken
+	// meter.
+	StreamOptions *oaStreamOptions `json:"stream_options,omitempty"`
+}
+
+type oaStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
+// Streaming wire shapes. A chunk is a Response with `delta` where `message`
+// would be, and every field optional — the last chunk usually carries only a
+// finish_reason, and the one after that only usage.
+type oaStreamChunk struct {
+	Choices []oaStreamChoice `json:"choices"`
+	Usage   *oaUsage         `json:"usage"`
+	Error   *oaError         `json:"error"`
+}
+
+type oaStreamChoice struct {
+	Index        int           `json:"index"`
+	Delta        oaStreamDelta `json:"delta"`
+	FinishReason string        `json:"finish_reason"`
+}
+
+type oaStreamDelta struct {
+	Content   *string           `json:"content"`
+	ToolCalls []oaToolCallDelta `json:"tool_calls"`
+}
+
+// oaToolCallDelta is the fragmented form. Index is the identity: id and name
+// come on the first fragment only, and Function.Arguments is a slice of a JSON
+// document that is not parseable until every fragment has arrived.
+type oaToolCallDelta struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 type oaMessage struct {

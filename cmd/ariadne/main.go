@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -90,6 +91,7 @@ flags:
   -allow          comma-separated tools this run may call (default: all)
   -approve        tools needing a yes on the terminal before each call
   -context-budget compact the conversation past this many prompt tokens (0: never)
+  -stream         print tokens and tool calls as they arrive
 
 eval flags:
   -models         comma-separated model ids  (default: ARIADNE_MODEL)
@@ -112,6 +114,7 @@ func cmdRun(args []string) int {
 	allow := fs.String("allow", "", "comma-separated tools this run may call (default: all)")
 	approve := fs.String("approve", "", "comma-separated tools that need a yes on the terminal before each call")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
+	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -152,12 +155,12 @@ func cmdRun(args []string) int {
 	}
 	defer closeTrace(tw)
 
-	agent := newAgentFor(key, *model, *baseURL, *maxSteps, *budget, splitList(*allow), splitList(*approve), store, tw)
+	agent := newAgentFor(key, *model, *baseURL, *maxSteps, *budget, *stream, splitList(*allow), splitList(*approve), store, tw)
 	state.BaseURL = *baseURL
 	state.ContextBudget = *budget
 	fmt.Fprintf(os.Stderr, "run %s  model=%s\n", state.RunID, *model)
 
-	return execute(ctx, agent, state)
+	return execute(ctx, agent, state, *stream)
 }
 
 // cmdResume continues an interrupted run from its checkpoint.
@@ -172,6 +175,7 @@ func cmdResume(args []string) int {
 	allow := fs.String("allow", "", "narrow the tools this run may call; it can never widen the grant in the checkpoint")
 	approve := fs.String("approve", "", "add tools needing approval; a gate in the checkpoint cannot be dropped here")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
+	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -230,12 +234,12 @@ func cmdResume(args []string) int {
 	if budgetVal == 0 && state.ContextBudget > 0 {
 		budgetVal = state.ContextBudget
 	}
-	agent := newAgentFor(key, state.Model, endpoint, *maxSteps, budgetVal, splitList(*allow), splitList(*approve), store, tw)
+	agent := newAgentFor(key, state.Model, endpoint, *maxSteps, budgetVal, *stream, splitList(*allow), splitList(*approve), store, tw)
 
 	fmt.Fprintf(os.Stderr, "resume %s  model=%s  from step %d (%d messages)\n",
 		state.RunID, state.Model, state.Steps, len(state.Messages))
 
-	return execute(ctx, agent, state)
+	return execute(ctx, agent, state, *stream)
 }
 
 // systemPrompt is the standing instruction every run starts under.
@@ -273,30 +277,41 @@ func newRegistry() *tool.Registry {
 	)
 }
 
-func newAgentFor(key, model, baseURL string, maxSteps, budget int, allow, approve []string, store *loop.Store, tw *trace.Writer) *loop.Agent {
+func newAgentFor(key, model, baseURL string, maxSteps, budget int, stream bool, allow, approve []string, store *loop.Store, tw *trace.Writer) *loop.Agent {
 	reg := newRegistry()
+	client := llm.NewOpenAI(key,
+		llm.WithBaseURL(baseURL),
+		// Both, deliberately. The trace line is what an eval reads later to
+		// tell a slow model from a throttled one; the stderr line is what
+		// stops a person watching a stalled terminal from assuming it hung.
+		llm.WithOnRetry(func(attempt, status int, delay time.Duration) {
+			tw.Emit(trace.Event{
+				Kind:      trace.KindRetry,
+				Content:   fmt.Sprintf("http %d on attempt %d, waiting %s", status, attempt+1, delay),
+				LatencyMS: delay.Milliseconds(),
+				IsError:   true,
+			})
+			fmt.Fprintf(os.Stderr, "rate limited (http %d), retrying in %s\n", status, delay)
+		}),
+	)
+
+	// Streaming wraps the provider rather than branching the loop. The agent
+	// still receives one Response per step, so cost, checkpoints, compaction
+	// and the stop switch are untouched — nothing about a run changes because
+	// somebody is watching it.
+	var provider llm.Provider = client
+	if stream {
+		provider = llm.Streaming{S: client, OnDelta: printDelta(os.Stderr)}
+	}
+
 	return &loop.Agent{
-		Trace: tw.Emit,
-		Provider: llm.NewOpenAI(key,
-			llm.WithBaseURL(baseURL),
-			// Both, deliberately. The trace line is what an eval reads later to
-			// tell a slow model from a throttled one; the stderr line is what
-			// stops a person watching a stalled terminal from assuming it hung.
-			llm.WithOnRetry(func(attempt, status int, delay time.Duration) {
-				tw.Emit(trace.Event{
-					Kind:      trace.KindRetry,
-					Content:   fmt.Sprintf("http %d on attempt %d, waiting %s", status, attempt+1, delay),
-					LatencyMS: delay.Milliseconds(),
-					IsError:   true,
-				})
-				fmt.Fprintf(os.Stderr, "rate limited (http %d), retrying in %s\n", status, delay)
-			}),
-		),
-		Model:   model,
-		System:  systemPrompt,
-		BaseURL: baseURL,
-		Tools:   reg.Defs(),
-		Allow:   allow,
+		Trace:    tw.Emit,
+		Provider: provider,
+		Model:    model,
+		System:   systemPrompt,
+		BaseURL:  baseURL,
+		Tools:    reg.Defs(),
+		Allow:    allow,
 
 		RequireApproval: approve,
 		Approve:         approveOnTerminal(os.Stdin),
@@ -346,7 +361,7 @@ func splitList(s string) []string {
 
 // execute runs the agent and reports. Shared by run and resume so the two
 // cannot drift in how they print or what they exit with.
-func execute(ctx context.Context, agent *loop.Agent, state *loop.State) int {
+func execute(ctx context.Context, agent *loop.Agent, state *loop.State, streamed bool) int {
 	started := time.Now()
 	answer, err := agent.Run(ctx, state)
 	elapsed := time.Since(started).Round(time.Millisecond)
@@ -363,7 +378,15 @@ func execute(ctx context.Context, agent *loop.Agent, state *loop.State) int {
 		return exitFail
 	}
 
-	fmt.Println(answer)
+	// The answer goes to stdout, which is the contract that makes
+	// `ariadne run ... > answer.txt` useful. The one exception is a streamed
+	// run whose stdout is a terminal: the answer has already scrolled past on
+	// stderr, and printing it again is not a second copy, it is the same answer
+	// twice. Redirected stdout still gets it, because the streamed copy went to
+	// stderr and the file would otherwise be empty.
+	if !streamed || !isTerminal(os.Stdout) {
+		fmt.Println(answer)
+	}
 	fmt.Fprintf(os.Stderr, "run %s  steps=%d  cost=%.4f  %s\n",
 		state.RunID, state.Steps, state.Cost, elapsed)
 	return exitOK
@@ -477,7 +500,9 @@ func cmdEval(args []string) int {
 		traces = append(traces, tw)
 		// Unrestricted: an eval measures what the agent does when it is allowed
 		// to do its job, and a tool denied here would look like a model failure.
-		return newAgentFor(key, model, *baseURL, maxSteps, *budget, nil, nil, store, tw)
+		// Never streams: an eval reads scorecards, and printing tokens for 34
+		// tasks would bury them.
+		return newAgentFor(key, model, *baseURL, maxSteps, *budget, false, nil, nil, store, tw)
 	}
 
 	commit := gitCommit()
@@ -585,11 +610,20 @@ func closeTrace(tw *trace.Writer) {
 // Known limit: a Ctrl-C while the prompt is waiting is not seen until the read
 // returns, because os.Stdin has no deadline. The context is accepted so the
 // interface does not have to change when that is fixed.
+// isTerminal reports whether f is a console rather than a pipe or a file.
+//
+// Two different decisions need it — whether there is anybody to ask for
+// approval, and whether a streamed answer has already been seen — so it is one
+// function rather than the same Stat dance written twice.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
 func approveOnTerminal(in *os.File) func(context.Context, llm.ToolCall) (bool, error) {
 	reader := bufio.NewReader(in)
 	return func(_ context.Context, c llm.ToolCall) (bool, error) {
-		fi, err := in.Stat()
-		if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		if !isTerminal(in) {
 			fmt.Fprintf(os.Stderr, "denied %s: approval required and no terminal to ask\n", c.Name)
 			return false, nil
 		}
@@ -607,6 +641,41 @@ func approveOnTerminal(in *os.File) func(context.Context, llm.ToolCall) (bool, e
 			return true, nil
 		default:
 			return false, nil
+		}
+	}
+}
+
+// printDelta renders a stream as it arrives.
+//
+// To stderr, like every other diagnostic here, so `ariadne run ... > answer.txt`
+// still leaves a file containing only the answer. Streaming is something you
+// watch, not something you capture — the loop writes the finished answer to
+// stdout when the run ends, and that remains the only thing on it.
+//
+// Tool calls are announced by name as soon as the name arrives, and their
+// arguments are deliberately not echoed: they land as JSON fragments that are
+// not valid on their own, and half a JSON document scrolling past is noise
+// rather than progress. The full call is in the trace either way.
+func printDelta(w io.Writer) func(llm.Chunk) {
+	var open bool // a text run is in progress and needs a newline
+	announced := map[int]bool{}
+
+	return func(c llm.Chunk) {
+		if c.Text != "" {
+			fmt.Fprint(w, c.Text)
+			open = true
+		}
+		if d := c.ToolCall; d != nil && d.Name != "" && !announced[d.Index] {
+			announced[d.Index] = true
+			if open {
+				fmt.Fprintln(w)
+				open = false
+			}
+			fmt.Fprintf(w, "→ %s\n", d.Name)
+		}
+		if c.Stop != "" && open {
+			fmt.Fprintln(w)
+			open = false
 		}
 	}
 }
