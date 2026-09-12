@@ -7,18 +7,30 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
-// Save writes a scorecard to <dir>/<commit>_<model>.json.
+// Save writes a scorecard to <dir>/<timestamp>_<commit>_<model>.json.
 //
 // Committed, unlike runs/: a pass rate is only meaningful next to the pass rates
 // before it, and that history has to travel with the code that produced it.
+//
+// The timestamp leads so the directory sorts chronologically, and it means two
+// sweeps at the same commit are two files rather than one overwriting the other.
+// That matters while run-to-run variance is still unmeasured: the same model on
+// the same tasks does not always score the same, and collapsing repeats would
+// hide exactly the thing worth knowing.
 func (sc Scorecard) Save(dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("eval: history dir: %w", err)
 	}
 
-	name := fmt.Sprintf("%s_%s.json", orUnknown(sc.Commit), slug(sc.Model))
+	when := sc.When
+	if when.IsZero() {
+		when = time.Now().UTC()
+	}
+	name := fmt.Sprintf("%s_%s_%s.json",
+		when.Format("20060102T150405"), orUnknown(sc.Commit), slug(sc.Model))
 	path := filepath.Join(dir, name)
 
 	data, err := json.MarshalIndent(sc, "", "  ")

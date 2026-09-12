@@ -81,3 +81,37 @@ func TestRegressionsNamesTasks(t *testing.T) {
 		t.Fatalf("got %v, want [t2]", got)
 	}
 }
+
+// Two sweeps at the same commit must both survive. Collapsing them would hide
+// run-to-run variance, which is the thing the repeats exist to measure.
+func TestSaveKeepsRepeatsAtSameCommit(t *testing.T) {
+	dir := t.TempDir()
+
+	first := NewScorecard("vendor/model", "same123", []Result{{TaskID: "t1", Pass: true}})
+	first.When = time.Date(2026, 9, 12, 10, 0, 0, 0, time.UTC)
+	second := NewScorecard("vendor/model", "same123", []Result{{TaskID: "t1", Pass: false}})
+	second.When = time.Date(2026, 9, 12, 10, 5, 0, 0, time.UTC)
+
+	p1, err := first.Save(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := second.Save(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p1 == p2 {
+		t.Fatalf("both sweeps wrote to %s — the second overwrote the first", p1)
+	}
+
+	history, err := LoadHistory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("history has %d scorecards, want 2", len(history))
+	}
+	if history[0].Passed != 1 || history[1].Passed != 0 {
+		t.Errorf("history is not oldest-first: %+v", history)
+	}
+}
