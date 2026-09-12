@@ -234,7 +234,7 @@ func cmdResume(args []string) int {
 //
 // The second paragraph is the load-bearing one. A model given no system prompt
 // has no reason to treat a fetched document as different in kind from the task
-// it was set - both arrive as text in the same conversation, and the document
+// it was set — both arrive as text in the same conversation, and the document
 // is usually the more recent and more specific of the two. This says which is
 // which. It is guidance and not enforcement: the model may still comply with
 // what it reads, which is why the allow-list and the approval gate sit under it
