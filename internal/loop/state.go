@@ -16,7 +16,10 @@ type State struct {
 	// Model is recorded on the first step and is authoritative on resume: a job
 	// that finished on a different model than it started on is a different job,
 	// and week 7's evals need to know which model produced a trace.
-	Model    string        `json:"model,omitempty"`
+	Model string `json:"model,omitempty"`
+	// BaseURL is recorded so resume reaches the same provider endpoint rather
+	// than silently defaulting to Gemini and failing with an incompatible model.
+	BaseURL  string        `json:"base_url,omitempty"`
 	Messages []llm.Message `json:"messages"`
 	Steps    int           `json:"steps"`
 	Cost     float64       `json:"cost_usd"`

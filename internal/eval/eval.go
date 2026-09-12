@@ -82,13 +82,73 @@ func Score(t Task, s *loop.State, answer string, runErr error) Result {
 		return r
 	}
 
-	if t.Expect != "" && !strings.Contains(Normalise(answer), Normalise(t.Expect)) {
+	if t.Expect != "" && !matchExpect(answer, t.Expect) {
 		r.Reason = fmt.Sprintf("answer does not contain %q", t.Expect)
 		return r
 	}
 
 	r.Pass = true
 	return r
+}
+
+// matchExpect checks whether expect is found in answer at word/token boundaries.
+//
+// Models format the same fact differently and may echo the prompt: a single-token
+// expectation (e.g. "1") must match as an isolated token, not as an internal
+// substring of another number (e.g. "10") or arithmetic fraction (e.g. "1/3").
+func matchExpect(answer, expect string) bool {
+	normAnswer := Normalise(answer)
+	normExpect := Normalise(expect)
+	if normExpect == "" {
+		return true
+	}
+
+	start := 0
+	for {
+		idx := strings.Index(normAnswer[start:], normExpect)
+		if idx < 0 {
+			return false
+		}
+		pos := start + idx
+		end := pos + len(normExpect)
+
+		if isBounded(normAnswer, normExpect, pos, end) {
+			return true
+		}
+		start = pos + 1
+	}
+}
+
+func isBounded(s, expect string, pos, end int) bool {
+	if pos > 0 {
+		prev := s[pos-1]
+		if isWordOrDigit(prev) || prev == '/' {
+			return false
+		}
+		if prev == '.' && isDigit(expect[0]) {
+			return false
+		}
+	}
+
+	if end < len(s) {
+		next := s[end]
+		if isWordOrDigit(next) || next == '/' {
+			return false
+		}
+		if next == '.' && end+1 < len(s) && isDigit(s[end+1]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func isDigit(b byte) bool {
+	return b >= '0' && b <= '9'
+}
+
+func isWordOrDigit(b byte) bool {
+	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '_'
 }
 
 // missingCalls reports which of want never appears as a tool_use block.

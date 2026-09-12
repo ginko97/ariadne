@@ -11,6 +11,19 @@
 #
 # Neither is caught by go build, go vet, or a green test run.
 
+ifeq ($(OS),Windows_NT)
+    # On Windows, GNU Make defaults to cmd.exe unless sh.exe is found.
+    # Locate Git's sh and tools so recipes run under a POSIX shell.
+    GIT_SH := $(wildcard C:/PROGRA~1/Git/bin/sh.exe C:/Program\ Files/Git/bin/sh.exe C:/Program\ Files\ \(x86\)/Git/bin/sh.exe)
+    ifneq ($(GIT_SH),)
+        SHELL := $(firstword $(GIT_SH))
+        export PATH := C:/PROGRA~1/Git/usr/bin:$(PATH)
+    else
+        SHELL := sh.exe
+    endif
+    .SHELLFLAGS := -c
+endif
+
 GO     ?= go
 BINARY := ariadne
 PKGS   := ./...

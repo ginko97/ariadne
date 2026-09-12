@@ -86,6 +86,57 @@ func TestRunTwoStep(t *testing.T) {
 	}
 }
 
+func TestRunRecordsBaseURL(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		endResponse("done", 10, 5),
+	}}
+	a := &Agent{
+		Provider: fake,
+		Model:    "test-model",
+		BaseURL:  "https://custom.endpoint/v1",
+	}
+
+	s := NewState("r", "test")
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	if s.BaseURL != "https://custom.endpoint/v1" {
+		t.Errorf("BaseURL = %q, want https://custom.endpoint/v1", s.BaseURL)
+	}
+	if s.Model != "test-model" {
+		t.Errorf("Model = %q, want test-model", s.Model)
+	}
+
+	// Resuming a state with an existing BaseURL must not overwrite it:
+	s2 := &State{
+		RunID:   "r2",
+		Task:    "test",
+		Model:   "original-model",
+		BaseURL: "https://original.endpoint/v1",
+		Messages: []llm.Message{{
+			Role:   llm.RoleUser,
+			Blocks: []llm.Block{{Type: llm.BlockText, Text: "test"}},
+		}},
+	}
+	fake2 := &llm.Fake{Responses: []llm.Response{
+		endResponse("done2", 10, 5),
+	}}
+	a2 := &Agent{
+		Provider: fake2,
+		Model:    "different-model",
+		BaseURL:  "https://different.endpoint/v1",
+	}
+	if _, err := a2.Run(context.Background(), s2); err != nil {
+		t.Fatal(err)
+	}
+	if s2.BaseURL != "https://original.endpoint/v1" {
+		t.Errorf("BaseURL overwritten: got %q", s2.BaseURL)
+	}
+	if s2.Model != "original-model" {
+		t.Errorf("Model overwritten: got %q", s2.Model)
+	}
+}
+
 // A confused model must not loop forever.
 func TestRunStepLimit(t *testing.T) {
 	fake := &llm.Fake{Responses: []llm.Response{

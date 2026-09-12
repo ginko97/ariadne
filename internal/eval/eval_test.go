@@ -90,6 +90,39 @@ func TestScoreFailsOnWrongAnswer(t *testing.T) {
 	}
 }
 
+// Single-digit expectations like "1" must not match inside "10", "15", or "1/3".
+func TestScoreRejectsSubstringFalsePass(t *testing.T) {
+	modTask := Task{ID: "mod-01", Expect: "1", MustCall: []string{"calc"}}
+
+	// Model echoed prompt ("10") and gave wrong answer ("2"):
+	echoWrong := Score(modTask, stateWithCall(2, 0, "calc"),
+		"When 10 is divided by 3, the remainder is 2.", nil)
+	if echoWrong.Pass {
+		t.Fatal("expected failure: '1' matched inside '10'")
+	}
+
+	// Model echoed fraction ("1/3"):
+	fracWrong := Score(modTask, stateWithCall(2, 0, "calc"),
+		"Using the calc tool, 1/3 multiplied by 3 gives 0.999.", nil)
+	if fracWrong.Pass {
+		t.Fatal("expected failure: '1' matched inside '1/3'")
+	}
+
+	// Model said decimal ("1.5"):
+	decWrong := Score(modTask, stateWithCall(2, 0, "calc"),
+		"The answer is 1.5", nil)
+	if decWrong.Pass {
+		t.Fatal("expected failure: '1' matched inside '1.5'")
+	}
+
+	// Model answered correctly:
+	correct := Score(modTask, stateWithCall(2, 0, "calc"),
+		"When 10 is divided by 3, the remainder is 1.", nil)
+	if !correct.Pass {
+		t.Fatalf("expected pass, got failure: %s", correct.Reason)
+	}
+}
+
 // A failed run is a failed task, but the reason has to survive — the week 8
 // taxonomy is built by reading these.
 func TestScoreCarriesRunError(t *testing.T) {

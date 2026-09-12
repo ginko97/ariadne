@@ -46,6 +46,7 @@ type ToolRunner func(ctx context.Context, call llm.ToolCall) (llm.ToolResult, er
 type Agent struct {
 	Provider llm.Provider
 	Model    string
+	BaseURL  string
 	Tools    []llm.ToolDef
 	RunTool  ToolRunner
 
@@ -68,10 +69,13 @@ type Agent struct {
 // It mutates s as it goes, so a caller holding s can checkpoint it after any step
 // (week 5) and can inspect Steps and Cost after an error.
 func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
-	// Record the model once. A resumed state already carries it, and the caller
-	// is expected to have built the provider from it.
+	// Record the model and endpoint once. A resumed state already carries them,
+	// and the caller is expected to have built the provider from them.
 	if s.Model == "" {
 		s.Model = a.Model
+	}
+	if s.BaseURL == "" && a.BaseURL != "" {
+		s.BaseURL = a.BaseURL
 	}
 
 	for {

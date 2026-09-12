@@ -123,6 +123,7 @@ func cmdRun(args []string) int {
 	agent := newAgentFor(key, *model, *baseURL, *maxSteps, store)
 
 	state := loop.NewState(newRunID(), task)
+	state.BaseURL = *baseURL
 	fmt.Fprintf(os.Stderr, "run %s  model=%s\n", state.RunID, *model)
 
 	return execute(ctx, agent, state)
@@ -135,7 +136,7 @@ func cmdRun(args []string) int {
 func cmdResume(args []string) int {
 	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
+	baseURL := fs.String("base-url", "", "OpenAI-compatible endpoint (defaults to endpoint from checkpoint)")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
 
 	if err := fs.Parse(args); err != nil {
@@ -151,12 +152,6 @@ func cmdResume(args []string) int {
 	}
 	runID := fs.Args()[0]
 
-	key, envName := apiKey(*baseURL)
-	if key == "" {
-		fmt.Fprintf(os.Stderr, "ariadne resume: no api key for %s — set %s in the environment or .env\n", *baseURL, envName)
-		return exitUsage
-	}
-
 	store := &loop.Store{Dir: runsDir}
 	state, err := store.Load(runID)
 	if err != nil {
@@ -164,12 +159,28 @@ func cmdResume(args []string) int {
 		return exitFail
 	}
 
+	endpoint := *baseURL
+	if endpoint == "" {
+		if state.BaseURL != "" {
+			endpoint = state.BaseURL
+		} else {
+			endpoint = envOr("ARIADNE_BASE_URL", defaultBaseURL)
+		}
+	}
+
+	key, envName := apiKey(endpoint)
+	if key == "" {
+		fmt.Fprintf(os.Stderr, "ariadne resume: no api key for %s — set %s in the environment or .env\n", endpoint, envName)
+		return exitUsage
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
 	// The checkpoint's model wins: a job that finishes on a different model
-	// than it started on is a different job.
-	agent := newAgentFor(key, state.Model, *baseURL, *maxSteps, store)
+	// than it started on is a different job. The checkpoint's endpoint wins
+	// unless explicitly overridden on the command line.
+	agent := newAgentFor(key, state.Model, endpoint, *maxSteps, store)
 
 	fmt.Fprintf(os.Stderr, "resume %s  model=%s  from step %d (%d messages)\n",
 		state.RunID, state.Model, state.Steps, len(state.Messages))
@@ -182,6 +193,7 @@ func newAgentFor(key, model, baseURL string, maxSteps int, store *loop.Store) *l
 	return &loop.Agent{
 		Provider:   llm.NewOpenAI(key, llm.WithBaseURL(baseURL)),
 		Model:      model,
+		BaseURL:    baseURL,
 		Tools:      reg.Defs(),
 		RunTool:    reg.Call,
 		Checkpoint: store.Save,
@@ -342,11 +354,16 @@ func cmdEval(args []string) int {
 
 // gitCommit records which code produced a scorecard. Unknown is not an error:
 // an eval run outside a checkout is still a valid measurement, it just cannot
-// be placed in the history.
+// be placed in the history. A dirty working tree gets "-dirty" so uncommitted
+// tweaks do not masquerade as the commit they were built on top of.
 func gitCommit() string {
 	out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
 	if err != nil {
 		return "unknown"
 	}
-	return strings.TrimSpace(string(out))
+	commit := strings.TrimSpace(string(out))
+	if status, err := exec.Command("git", "status", "--porcelain").Output(); err == nil && len(strings.TrimSpace(string(status))) > 0 {
+		commit += "-dirty"
+	}
+	return commit
 }
