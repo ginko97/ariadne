@@ -102,10 +102,12 @@ The baseline now scores 34/34. That means it measures nothing about *this*
 model: there is no headroom, so no change to the prompt or the loop can show up
 as an improvement, and only a real breakage can show up as a decline.
 
-It is still useful, but for one job rather than two:
+It is still useful, but for a narrower job than it looks:
 
-- **as a regression suite** — it catches breakage. Reintroducing the `calc`
-  truncation bug drops the score, and the history names the tasks that fell over.
+- **as a regression suite, on the path rather than the answer** — the section
+  above is the caveat. A broken tool did not move the pass rate at all; what
+  moved was the number of tool calls. Breakage that changes *what the agent
+  does* is visible; breakage the model can paper over is not.
 - **not as a capability benchmark** — it cannot rank competent models, because
   they all score 100%. It does separate at the bottom: `mistral-nemo` scored 3/6
   and `ling-3.0-flash` 5/6 on the smaller early set.
