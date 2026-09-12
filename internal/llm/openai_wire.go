@@ -60,6 +60,9 @@ type oaChoice struct {
 type oaUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
+	// Cost is an OpenRouter extension, absent elsewhere. Decoding it costs
+	// nothing when the field is missing.
+	Cost float64 `json:"cost,omitempty"`
 }
 
 type oaError struct {
@@ -70,10 +73,6 @@ type oaError struct {
 // ErrNoChoices is returned when a well-formed response carries no choices.
 // Distinct from a decode failure: the server answered, it just said nothing.
 var ErrNoChoices = errors.New("openai: response contained no choices")
-
-// stopReason maps finish_reason, falling back to the payload when the value is
-// missing or unrecognised. OpenRouter proxies many backends and not all of them
-// send what the spec says.
 
 func toWire(req Request) (oaRequest, error) {
 	out := oaRequest{Model: req.Model}
@@ -193,10 +192,14 @@ func fromWire(body []byte) (Response, error) {
 		Usage: Usage{
 			InputTokens:  raw.Usage.PromptTokens,
 			OutputTokens: raw.Usage.CompletionTokens,
+			Cost:         raw.Usage.Cost,
 		},
 	}, nil
 }
 
+// stopReason maps finish_reason, falling back to the payload when the value is
+// missing or unrecognised. OpenRouter proxies many backends and not all of them
+// send what the spec says.
 func stopReason(finish string, hasToolCalls bool) StopReason {
 	switch finish {
 	case "stop":

@@ -23,9 +23,17 @@ type Price struct {
 	OutputPerMTok float64
 }
 
-// Cost converts provider-reported tokens into money. Never a local tokenizer —
-// the provider's own count is the only number that matches the bill.
+// Cost is what this turn cost, in USD.
+//
+// A gateway that knows the real price wins: OpenRouter reports usage.cost, and
+// its number beats any table we maintain, which would drift the moment somebody
+// changed a pricing page. Providers that do not report it fall back to Price,
+// applied to provider-reported tokens — never a local tokenizer, since only the
+// provider's count matches the bill.
 func (p Price) Cost(u llm.Usage) float64 {
+	if u.Cost > 0 {
+		return u.Cost
+	}
 	return float64(u.InputTokens)/1e6*p.InputPerMTok +
 		float64(u.OutputTokens)/1e6*p.OutputPerMTok
 }

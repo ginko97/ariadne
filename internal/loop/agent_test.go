@@ -360,3 +360,18 @@ func TestCheckpointOnErrorPaths(t *testing.T) {
 		})
 	}
 }
+
+// The gateway's own figure beats the local table; the table is the fallback.
+func TestPriceUsesReportedCost(t *testing.T) {
+	p := Price{InputPerMTok: 1000, OutputPerMTok: 1000} // deliberately absurd
+
+	reported := p.Cost(llm.Usage{InputTokens: 1, OutputTokens: 1, Cost: 0.25})
+	if reported != 0.25 {
+		t.Errorf("got %v, want the reported 0.25 — the table should not win", reported)
+	}
+
+	fallback := p.Cost(llm.Usage{InputTokens: 1_000_000, OutputTokens: 0})
+	if fallback != 1000 {
+		t.Errorf("got %v, want 1000 from the table when cost is unreported", fallback)
+	}
+}

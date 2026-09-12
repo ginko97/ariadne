@@ -9,6 +9,14 @@ import (
 type Usage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
+	// Cost is what the provider says it charged, in USD.
+	//
+	// Gateways that know the real price report it — OpenRouter does, in
+	// usage.cost. Providers that do not leave this zero, and the caller falls
+	// back to its own price table. Preferring the reported number means the
+	// cost ceiling does not depend on a table we have to keep in step with
+	// somebody else's pricing page.
+	Cost float64 `json:"cost,omitempty"`
 }
 
 type StopReason string

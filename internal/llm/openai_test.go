@@ -304,3 +304,32 @@ func TestFromWireSynthesisesMissingCallIDs(t *testing.T) {
 		t.Errorf("ids collide: both %q", calls[0].ID)
 	}
 }
+
+// A gateway that reports what it charged is believed over any local price
+// table. OpenRouter sends usage.cost; providers that do not leave it zero.
+func TestFromWireCarriesReportedCost(t *testing.T) {
+	withCost := []byte(`{
+  "choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],
+  "usage":{"prompt_tokens":2,"completion_tokens":10,"total_tokens":12,"cost":2.56e-05}
+}`)
+	got, err := fromWire(withCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Usage.Cost != 2.56e-05 {
+		t.Errorf("Cost = %v, want 2.56e-05", got.Usage.Cost)
+	}
+
+	// Gemini direct: no cost field, and its absence must not be an error.
+	without := []byte(`{
+  "choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],
+  "usage":{"prompt_tokens":2,"completion_tokens":10}
+}`)
+	got, err = fromWire(without)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Usage.Cost != 0 {
+		t.Errorf("Cost = %v, want 0 when unreported", got.Usage.Cost)
+	}
+}

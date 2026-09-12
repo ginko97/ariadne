@@ -102,9 +102,9 @@ func cmdRun(args []string) int {
 		return exitUsage
 	}
 
-	key := apiKey()
+	key, envName := apiKey(*baseURL)
 	if key == "" {
-		fmt.Fprintln(os.Stderr, "ariadne run: no api key — set ARIADNE_API_KEY (or GEMINI_API_KEY) in the environment or .env")
+		fmt.Fprintf(os.Stderr, "ariadne run: no api key for %s — set %s in the environment or .env\n", *baseURL, envName)
 		return exitUsage
 	}
 
@@ -146,9 +146,9 @@ func cmdResume(args []string) int {
 	}
 	runID := fs.Args()[0]
 
-	key := apiKey()
+	key, envName := apiKey(*baseURL)
 	if key == "" {
-		fmt.Fprintln(os.Stderr, "ariadne resume: no api key — set ARIADNE_API_KEY (or GEMINI_API_KEY)")
+		fmt.Fprintf(os.Stderr, "ariadne resume: no api key for %s — set %s in the environment or .env\n", *baseURL, envName)
 		return exitUsage
 	}
 
@@ -226,13 +226,35 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// apiKey prefers the neutral name, then the provider-specific ones, so pointing
-// -base-url at a different gateway does not also require renaming a variable.
-func apiKey() string {
-	for _, k := range []string{"ARIADNE_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"} {
+// apiKey resolves the key for one endpoint. ARIADNE_API_KEY always wins;
+// otherwise the host decides.
+//
+// Deciding by host matters as soon as .env holds more than one provider's key:
+// a fixed precedence order would send the Gemini key to OpenRouter and produce
+// a 401 that reads as "bad key" rather than "wrong key".
+func apiKey(baseURL string) (key, envName string) {
+	if v := os.Getenv("ARIADNE_API_KEY"); v != "" {
+		return v, "ARIADNE_API_KEY"
+	}
+
+	name := ""
+	switch {
+	case strings.Contains(baseURL, "openrouter.ai"):
+		name = "OPENROUTER_API_KEY"
+	case strings.Contains(baseURL, "googleapis.com"):
+		name = "GEMINI_API_KEY"
+	case strings.Contains(baseURL, "x.ai"):
+		name = "XAI_API_KEY"
+	}
+	if name != "" {
+		return os.Getenv(name), name
+	}
+
+	// Unrecognised host: take whatever is set, but say which one was used.
+	for _, k := range []string{"OPENROUTER_API_KEY", "GEMINI_API_KEY"} {
 		if v := os.Getenv(k); v != "" {
-			return v
+			return v, k
 		}
 	}
-	return ""
+	return "", "ARIADNE_API_KEY"
 }
