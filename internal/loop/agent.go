@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ginko97/ariadne/internal/llm"
@@ -240,10 +242,8 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 	}
 }
 
-// runCalls executes a batch, appending each result and checkpointing as it goes.
-//
-// Serial on purpose. Concurrent batches need a different completion record than
-// "append in order", so that is a separate change.
+// runCalls executes a batch, running independent calls in parallel when multiple
+// calls are requested, appending each result, and checkpointing under lock as it goes.
 func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) error {
 	if a.RunTool == nil {
 		return ErrNoToolRunner
@@ -255,14 +255,15 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 	}
 	i := len(s.Messages) - 1
 
+	// Pre-flight checks: evaluate allow-list and approval gates serially.
+	// This prevents interleaved interactive approval prompts on stdin and ensures
+	// denied tools are recorded deterministically.
+	var runnable []llm.ToolCall
 	for _, c := range calls {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		// Two ways a tool reports failure, and they mean different things:
-		// res.IsError is "it ran and failed" (the model can react); a non-nil
-		// err is "it could not be reached at all".
 		a.emit(trace.Event{
 			Kind: trace.KindToolCall, Step: s.Steps,
 			CallID: c.ID, Tool: c.Name, Args: c.Args,
@@ -304,43 +305,107 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 			}
 		}
 
-		toolStarted := time.Now()
-		res, err := a.RunTool(ctx, c)
-		content := res.Content
-		if res.Untrusted {
-			content = fence(c.Name, res.Content)
-		}
-		b := llm.Block{
-			Type:    llm.BlockToolResult,
-			CallID:  c.ID,
-			Content: content,
-			IsError: res.IsError,
-		}
-		if err != nil {
-			// Still information for the model, not a dead run — it can retry,
-			// pick another tool, or give up. Cancellation is the exception:
-			// that is the caller leaving.
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
-			}
-			b.Content = err.Error()
-			b.IsError = true
-		}
-		a.emit(trace.Event{
-			Kind: trace.KindToolResult, Step: s.Steps,
-			CallID: c.ID, Tool: c.Name, Content: b.Content, IsError: b.IsError,
-			LatencyMS: time.Since(toolStarted).Milliseconds(),
-		})
+		runnable = append(runnable, c)
+	}
 
-		s.Messages[i].Blocks = append(s.Messages[i].Blocks, b)
-
-		// Per call, not per step. This is the write that stops a resumed run
-		// re-firing a tool whose side effect already happened.
-		if err := a.checkpoint(s); err != nil {
+	if len(runnable) == 1 {
+		if err := a.runOne(ctx, s, i, runnable[0], nil); err != nil {
 			return err
 		}
+	} else if len(runnable) > 1 {
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		var errOnce sync.Once
+		var runErr error
+
+		setErr := func(err error) {
+			if err != nil {
+				errOnce.Do(func() {
+					runErr = err
+				})
+			}
+		}
+
+		for _, c := range runnable {
+			wg.Add(1)
+			go func(call llm.ToolCall) {
+				defer wg.Done()
+				if err := a.runOne(ctx, s, i, call, &mu); err != nil {
+					setErr(err)
+				}
+			}(c)
+		}
+		wg.Wait()
+
+		if runErr != nil {
+			return runErr
+		}
 	}
+
+	// Canonical ordering: sort results message blocks to match the assistant turn's
+	// tool call order, regardless of parallel completion order.
+	if i > 0 && len(calls) > 1 && i < len(s.Messages) {
+		assistant := s.Messages[i-1]
+		pos := make(map[string]int)
+		idx := 0
+		for _, b := range assistant.Blocks {
+			if b.Type == llm.BlockToolUse {
+				pos[b.ID] = idx
+				idx++
+			}
+		}
+		sort.SliceStable(s.Messages[i].Blocks, func(m, n int) bool {
+			return pos[s.Messages[i].Blocks[m].CallID] < pos[s.Messages[i].Blocks[n].CallID]
+		})
+	}
+
 	return nil
+}
+
+func (a *Agent) runOne(ctx context.Context, s *State, i int, c llm.ToolCall, mu *sync.Mutex) error {
+	toolStarted := time.Now()
+	res, err := a.RunTool(ctx, c)
+	content := res.Content
+	if res.Untrusted {
+		content = fence(c.Name, res.Content)
+	}
+	b := llm.Block{
+		Type:    llm.BlockToolResult,
+		CallID:  c.ID,
+		Content: content,
+		IsError: res.IsError,
+	}
+	if err != nil {
+		// Still information for the model, not a dead run — it can retry,
+		// pick another tool, or give up. Cancellation is the exception:
+		// that is the caller leaving.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		b.Content = err.Error()
+		b.IsError = true
+	}
+
+	if mu != nil {
+		mu.Lock()
+		defer mu.Unlock()
+	}
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+
+	a.emit(trace.Event{
+		Kind: trace.KindToolResult, Step: s.Steps,
+		CallID: c.ID, Tool: c.Name, Content: b.Content, IsError: b.IsError,
+		LatencyMS: time.Since(toolStarted).Milliseconds(),
+	})
+
+	s.Messages[i].Blocks = append(s.Messages[i].Blocks, b)
+
+	// Per call, not per step. This is the write that stops a resumed run
+	// re-firing a tool whose side effect already happened.
+	return a.checkpoint(s)
 }
 
 // deny records a call the runtime refused to make.
