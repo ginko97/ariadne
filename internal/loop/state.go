@@ -24,10 +24,33 @@ type State struct {
 	// reason as Model: a run that finishes under different instructions than it
 	// began with is a different run, and an eval needs to know which prompt
 	// produced a result.
-	System   string        `json:"system,omitempty"`
+	System string `json:"system,omitempty"`
+	// Allow is the set of tools this run may call; empty means all of them.
+	//
+	// It lives on the state rather than only on the agent so that resume cannot
+	// widen it. A run that was granted calc and fetch must still have only calc
+	// and fetch an hour later, whatever flags the resuming command carries.
+	Allow    []string      `json:"allow,omitempty"`
 	Messages []llm.Message `json:"messages"`
 	Steps    int           `json:"steps"`
 	Cost     float64       `json:"cost_usd"`
+}
+
+// allows reports whether name may be called in this run.
+//
+// Empty means everything, which is the permissive default a `--allow` flag
+// narrows. Expressing "no tools at all" is the job of giving the agent no
+// tools, not of an empty list — an empty slice does not survive JSON anyway.
+func (s *State) allows(name string) bool {
+	if len(s.Allow) == 0 {
+		return true
+	}
+	for _, n := range s.Allow {
+		if n == name {
+			return true
+		}
+	}
+	return false
 }
 
 // NewState seeds a fresh run with the user's task.

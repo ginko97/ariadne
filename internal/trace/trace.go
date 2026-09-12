@@ -29,6 +29,11 @@ const (
 	KindToolCall   = "tool_call"
 	KindToolResult = "tool_result"
 	KindRunEnd     = "run_end"
+	// KindToolDenied is a call the allow-list refused. It is deliberately not a
+	// tool_result with is_error set: "the agent tried to do something it was not
+	// permitted to do" is the line you want to be able to grep for on its own,
+	// and it reads very differently from a tool that ran and failed.
+	KindToolDenied = "tool_denied"
 )
 
 // Event is one thing that happened. Fields are shared across kinds and omitted

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ginko97/ariadne/internal/llm"
@@ -51,7 +52,17 @@ type Agent struct {
 	// System is prepended to every request. Without one there is nothing telling
 	// the model that a tool result is data rather than a further instruction,
 	// which is the gap an injected document walks through.
-	System  string
+	System string
+	// Allow, if non-empty, is the set of tool names this agent may call.
+	//
+	// Fencing asks the model not to obey a document. This does not ask. A run
+	// that only needs to read and calculate is given fetch and calc, and an
+	// injected instruction to write a file then fails at the loop rather than
+	// at the model's discretion — the same attack, the same page, but the
+	// outcome no longer depends on the model making a good decision.
+	//
+	// Copied onto State on the first step; State is authoritative from then on.
+	Allow   []string
 	BaseURL string
 	Tools   []llm.ToolDef
 	RunTool ToolRunner
@@ -87,6 +98,11 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 	}
 	if s.System == "" {
 		s.System = a.System
+	}
+	// nil means "not yet decided", so a resumed run keeps the grant it started
+	// with and a resuming command can only ever narrow it, never widen it.
+	if s.Allow == nil {
+		s.Allow = a.Allow
 	}
 	if s.BaseURL == "" && a.BaseURL != "" {
 		s.BaseURL = a.BaseURL
@@ -128,7 +144,7 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		resp, err := a.Provider.Complete(ctx, llm.Request{
 			Model:    s.Model,
 			Messages: withSystem(s.System, s.Messages),
-			Tools:    a.Tools,
+			Tools:    a.offeredTools(s),
 		})
 		latency := time.Since(started).Milliseconds()
 		if err != nil {
@@ -223,6 +239,31 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 			CallID: c.ID, Tool: c.Name, Args: c.Args,
 		})
 
+		// Checked here rather than only when building the tool list, because a
+		// model can name a tool it was never offered — and because this is the
+		// line that has to hold when the name came from a document rather than
+		// from the task. Refusing is not a run failure: the model is told, and
+		// usually reports it, which is more useful than an aborted run.
+		if !s.allows(c.Name) {
+			msg := fmt.Sprintf("tool %q is not permitted in this run; permitted: %s",
+				c.Name, strings.Join(s.Allow, ", "))
+			a.emit(trace.Event{
+				Kind: trace.KindToolDenied, Step: s.Steps,
+				CallID: c.ID, Tool: c.Name, Args: c.Args,
+				Content: msg, IsError: true,
+			})
+			s.Messages[i].Blocks = append(s.Messages[i].Blocks, llm.Block{
+				Type:    llm.BlockToolResult,
+				CallID:  c.ID,
+				Content: msg,
+				IsError: true,
+			})
+			if err := a.checkpoint(s); err != nil {
+				return err
+			}
+			continue
+		}
+
 		toolStarted := time.Now()
 		res, err := a.RunTool(ctx, c)
 		content := res.Content
@@ -290,6 +331,26 @@ func (a *Agent) endRun(s *State, err error) error {
 	}
 	a.emit(e)
 	return err
+}
+
+// offeredTools is the tool list the model is shown: Tools minus anything the
+// allow-list excludes.
+//
+// This is courtesy, not the control. The model can still name a tool it was
+// never offered, so the check in runCalls is what enforces the grant; filtering
+// here only avoids advertising a capability that would be refused, which would
+// waste a step and read as a malfunction.
+func (a *Agent) offeredTools(s *State) []llm.ToolDef {
+	if len(s.Allow) == 0 {
+		return a.Tools
+	}
+	out := make([]llm.ToolDef, 0, len(a.Tools))
+	for _, t := range a.Tools {
+		if s.allows(t.Name) {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // withSystem prepends the system prompt without storing it in the conversation.
