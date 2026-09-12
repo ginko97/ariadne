@@ -19,7 +19,12 @@ type State struct {
 	Model string `json:"model,omitempty"`
 	// BaseURL is recorded so resume reaches the same provider endpoint rather
 	// than silently defaulting to Gemini and failing with an incompatible model.
-	BaseURL  string        `json:"base_url,omitempty"`
+	BaseURL string `json:"base_url,omitempty"`
+	// System is the system prompt this run started under, recorded for the same
+	// reason as Model: a run that finishes under different instructions than it
+	// began with is a different run, and an eval needs to know which prompt
+	// produced a result.
+	System   string        `json:"system,omitempty"`
 	Messages []llm.Message `json:"messages"`
 	Steps    int           `json:"steps"`
 	Cost     float64       `json:"cost_usd"`

@@ -18,3 +18,4 @@ docs/*
 # README.md is ignored while it is a stub. Un-ignore it when the real one
 # exists: positioning, the three headings, and the asciinema.
 README.md
+workspace/

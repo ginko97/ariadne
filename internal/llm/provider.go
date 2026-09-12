@@ -63,6 +63,15 @@ type ToolResult struct {
 	// returning an error, which means the tool could not be reached at all.
 	IsError bool
 
+	// Untrusted marks content that came from outside the system — a fetched
+	// document, a scraped page, anything somebody else wrote. The loop fences
+	// such content so the model can tell data from instructions.
+	//
+	// It is a property of the tool, not of the content: a tool that can return
+	// attacker-controlled text always returns untrusted text, whether or not any
+	// particular result looks hostile.
+	Untrusted bool
+
 	// Metadata carries opaque tokens only, e.g. MCP's RequestState for resuming
 	// across retries. Not a general bag: if you want a typed field, add one.
 	Metadata map[string]string
