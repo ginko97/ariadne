@@ -46,6 +46,12 @@ const (
 	// provider does not know what a step is. Sequence puts it between the
 	// request and the response it belongs to.
 	KindRetry = "retry"
+	// KindCompact is the loop dropping the oldest turns to stay inside the
+	// context budget. It is the only event that records something being
+	// *removed* from the conversation, which makes the trace the only complete
+	// account of a long run: the checkpoint holds what the agent still knows,
+	// this holds what it used to.
+	KindCompact = "compact"
 )
 
 // Event is one thing that happened. Fields are shared across kinds and omitted

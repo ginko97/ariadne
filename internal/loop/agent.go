@@ -106,6 +106,11 @@ type Agent struct {
 	MaxSteps int // 0 = unlimited (tests only; never in production)
 	MaxCost  float64
 	Price    Price
+
+	// ContextBudget is the prompt-token ceiling this run aims to stay under.
+	// 0 disables compaction, which is right for short jobs: a conversation that
+	// never approaches the window should never lose anything.
+	ContextBudget int
 }
 
 // Run drives the agent loop until the model stops, a limit trips, or ctx is cancelled.
@@ -166,6 +171,30 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 			return "", a.endRun(s, fmt.Errorf("%w: $%.4f spent", ErrCostLimit, s.Cost))
 		}
 
+		// Compacted here, and nowhere else, because this is the one line in the
+		// loop where the conversation is known to be whole: the pending-calls
+		// branch above has already finished any half-executed batch, so every
+		// tool_use in the history has its result. Trimming anywhere else would
+		// have to reason about a batch in flight.
+		if a.ContextBudget > 0 && s.InputTokens > a.ContextBudget {
+			if n := compact(s, s.InputTokens, a.ContextBudget); n > 0 {
+				a.emit(trace.Event{
+					Kind: trace.KindCompact, Step: s.Steps,
+					InTokens: s.InputTokens, Messages: len(s.Messages),
+					Content: fmt.Sprintf("dropped %d messages (%d total) over budget %d",
+						n, s.Dropped, a.ContextBudget),
+				})
+				// The compacted conversation is what the run continues from, so
+				// it is what has to be on disk. The dropped messages are not
+				// lost: the trace holds every message that ever existed, which
+				// is the division of labour — the checkpoint is working state,
+				// the trace is the record.
+				if err := a.checkpoint(s); err != nil {
+					return "", a.endRun(s, err)
+				}
+			}
+		}
+
 		a.emit(trace.Event{
 			Kind: trace.KindRequest, Step: s.Steps + 1,
 			Model: s.Model, Messages: len(s.Messages),
@@ -189,6 +218,10 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		// Charged whether or not the turn was useful.
 		s.Steps++
 		s.Cost += a.Price.Cost(resp.Usage)
+		// The provider's own count of what that prompt cost. This is what the
+		// next iteration compacts against, and recording it on the state is what
+		// makes a resumed run behave like one that never stopped.
+		s.InputTokens = resp.Usage.InputTokens
 
 		a.emit(trace.Event{
 			Kind: trace.KindResponse, Step: s.Steps,

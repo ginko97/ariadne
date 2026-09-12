@@ -37,6 +37,16 @@ type State struct {
 	Messages        []llm.Message `json:"messages"`
 	Steps           int           `json:"steps"`
 	Cost            float64       `json:"cost_usd"`
+	// InputTokens is the prompt size the provider reported for the last
+	// request. Recorded rather than recomputed because compaction is driven by
+	// it, and a resumed run has to make the same decision the original would
+	// have — otherwise the first request after a resume is the one that blows
+	// the context window.
+	InputTokens int `json:"input_tokens,omitempty"`
+	// Dropped counts messages compaction has removed over the life of the run.
+	// The conversation no longer says how long it was; this does, and the trace
+	// still holds every message that ever existed.
+	Dropped int `json:"dropped,omitempty"`
 }
 
 // allows reports whether name may be called in this run.

@@ -89,6 +89,7 @@ flags:
   -max-steps      ceiling on loop iterations (default 10)
   -allow          comma-separated tools this run may call (default: all)
   -approve        tools needing a yes on the terminal before each call
+  -context-budget compact the conversation past this many prompt tokens (0: never)
 
 eval flags:
   -models         comma-separated model ids  (default: ARIADNE_MODEL)
@@ -110,6 +111,7 @@ func cmdRun(args []string) int {
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
 	allow := fs.String("allow", "", "comma-separated tools this run may call (default: all)")
 	approve := fs.String("approve", "", "comma-separated tools that need a yes on the terminal before each call")
+	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -150,7 +152,7 @@ func cmdRun(args []string) int {
 	}
 	defer closeTrace(tw)
 
-	agent := newAgentFor(key, *model, *baseURL, *maxSteps, splitList(*allow), splitList(*approve), store, tw)
+	agent := newAgentFor(key, *model, *baseURL, *maxSteps, *budget, splitList(*allow), splitList(*approve), store, tw)
 	state.BaseURL = *baseURL
 	fmt.Fprintf(os.Stderr, "run %s  model=%s\n", state.RunID, *model)
 
@@ -168,6 +170,7 @@ func cmdResume(args []string) int {
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
 	allow := fs.String("allow", "", "narrow the tools this run may call; it can never widen the grant in the checkpoint")
 	approve := fs.String("approve", "", "add tools needing approval; a gate in the checkpoint cannot be dropped here")
+	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -222,7 +225,7 @@ func cmdResume(args []string) int {
 	// The checkpoint's model wins: a job that finishes on a different model
 	// than it started on is a different job. The checkpoint's endpoint wins
 	// unless explicitly overridden on the command line.
-	agent := newAgentFor(key, state.Model, endpoint, *maxSteps, splitList(*allow), splitList(*approve), store, tw)
+	agent := newAgentFor(key, state.Model, endpoint, *maxSteps, *budget, splitList(*allow), splitList(*approve), store, tw)
 
 	fmt.Fprintf(os.Stderr, "resume %s  model=%s  from step %d (%d messages)\n",
 		state.RunID, state.Model, state.Steps, len(state.Messages))
@@ -265,7 +268,7 @@ func newRegistry() *tool.Registry {
 	)
 }
 
-func newAgentFor(key, model, baseURL string, maxSteps int, allow, approve []string, store *loop.Store, tw *trace.Writer) *loop.Agent {
+func newAgentFor(key, model, baseURL string, maxSteps, budget int, allow, approve []string, store *loop.Store, tw *trace.Writer) *loop.Agent {
 	reg := newRegistry()
 	return &loop.Agent{
 		Trace: tw.Emit,
@@ -293,9 +296,10 @@ func newAgentFor(key, model, baseURL string, maxSteps int, allow, approve []stri
 		RequireApproval: approve,
 		Approve:         approveOnTerminal(os.Stdin),
 
-		RunTool:    reg.Call,
-		Checkpoint: store.Save,
-		MaxSteps:   maxSteps,
+		RunTool:       reg.Call,
+		Checkpoint:    store.Save,
+		MaxSteps:      maxSteps,
+		ContextBudget: budget,
 		// MaxCost stays 0 (unlimited) until Price is a per-model table —
 		// a ceiling with no prices behind it would be theatre.
 	}
@@ -420,6 +424,10 @@ func cmdEval(args []string) int {
 	tasksPath := fs.String("tasks", "testdata/tasks.json", "task set")
 	minPass := fs.Float64("min-pass-rate", 0, "exit non-zero if any model scores below this (0 = report only)")
 	save := fs.Bool("save", false, "write each scorecard to "+historyDir+" and report regressions")
+	// Present so compaction can be measured against the same task set it was
+	// built beside: a budget small enough to force trimming should not collapse
+	// the pass rate. That is the whole exit condition for the feature.
+	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -464,7 +472,7 @@ func cmdEval(args []string) int {
 		traces = append(traces, tw)
 		// Unrestricted: an eval measures what the agent does when it is allowed
 		// to do its job, and a tool denied here would look like a model failure.
-		return newAgentFor(key, model, *baseURL, maxSteps, nil, nil, store, tw)
+		return newAgentFor(key, model, *baseURL, maxSteps, *budget, nil, nil, store, tw)
 	}
 
 	commit := gitCommit()
