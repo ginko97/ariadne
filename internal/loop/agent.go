@@ -357,6 +357,17 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 		sort.SliceStable(s.Messages[i].Blocks, func(m, n int) bool {
 			return pos[s.Messages[i].Blocks[m].CallID] < pos[s.Messages[i].Blocks[n].CallID]
 		})
+
+		// Write the canonical order down. Each call checkpoints as it finishes,
+		// so until this line the newest file on disk holds completion order —
+		// and a crash here would resume with a different message order than the
+		// same run would have had without the crash. Ordering among tool results
+		// is not load-bearing for any provider, but a checkpoint that does not
+		// match memory is the kind of difference that later gets debugged for an
+		// afternoon.
+		if err := a.checkpoint(s); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -391,9 +402,14 @@ func (a *Agent) runOne(ctx context.Context, s *State, i int, c llm.ToolCall, mu 
 		defer mu.Unlock()
 	}
 
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return ctxErr
-	}
+	// Deliberately no cancellation check here. By this line the tool has
+	// already run and its side effect has already happened, so a context that
+	// was cancelled in the meantime is a reason to stop starting work — never a
+	// reason to discard the record of work that is done. Dropping the result
+	// would leave the call looking pending on disk, and the next resume would
+	// fire it a second time, which is the exact double-fire that per-call
+	// checkpointing exists to prevent. Cancellation is enforced at the top of
+	// the loop and before each call, which is where nothing has been spent yet.
 
 	a.emit(trace.Event{
 		Kind: trace.KindToolResult, Step: s.Steps,
@@ -521,8 +537,20 @@ func fence(toolName, content string) string {
 		toolName, content)
 }
 
-// intersect returns items in base that are also present in narrow, preserving base order.
-// If narrow has no overlap with base, base is returned to prevent accidentally widening or clearing.
+// intersect returns items in base that are also present in narrow, preserving
+// base order.
+//
+// The empty-overlap case returns base, and that is not caution, it is required.
+// An empty Allow means *unrestricted* — see State.allows — so narrowing a grant
+// down to nothing would not lock the run down, it would take the lid off, and
+// the next resume would then read nil from the checkpoint and adopt whatever the
+// resuming command asked for. A control whose strictest setting is "no control"
+// is worse than none, because it looks like one.
+//
+// The cost is that a disjoint request is ignored rather than rejected: resuming
+// a run granted only calc with --allow write_file silently continues with calc.
+// The checkpoint is authoritative by design, so that is the right outcome, but
+// it is quiet, and the command line is the place to say so out loud.
 func intersect(base, narrow []string) []string {
 	var out []string
 	for _, b := range base {
