@@ -383,6 +383,13 @@ func cmdEval(args []string) int {
 				return exitFail
 			}
 			if before, ok := eval.Previous(history, model); ok {
+				// Reported even when the pass rate is unchanged: an agent taking
+				// more steps for the same answer is usually working around
+				// something that broke.
+				if slower := eval.StepRegressions(before, sc); len(slower) > 0 {
+					fmt.Fprintf(os.Stderr, "MORE STEPS since %s: %s\n",
+						before.Commit, strings.Join(slower, ", "))
+				}
 				if regressed := eval.Regressions(before, sc); len(regressed) > 0 {
 					fmt.Fprintf(os.Stderr, "REGRESSED since %s: %s\n",
 						before.Commit, strings.Join(regressed, ", "))

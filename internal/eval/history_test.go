@@ -115,3 +115,37 @@ func TestSaveKeepsRepeatsAtSameCommit(t *testing.T) {
 		t.Errorf("history is not oldest-first: %+v", history)
 	}
 }
+
+// Pass/fail alone missed a real defect: reintroducing a truncation bug in the
+// calculator left the pass rate at 34/34, because the model got a wrong number,
+// re-checked it a second way, and answered correctly from its own arithmetic.
+// The only evidence was an extra tool call.
+func TestStepRegressionsFindsSilentExtraWork(t *testing.T) {
+	before := Scorecard{Results: []Result{
+		{TaskID: "chain", Pass: true, Steps: 4},
+		{TaskID: "simple", Pass: true, Steps: 2},
+		{TaskID: "other", Pass: true, Steps: 3},
+	}}
+	after := Scorecard{Results: []Result{
+		{TaskID: "chain", Pass: true, Steps: 5},  // same answer, more work
+		{TaskID: "simple", Pass: true, Steps: 2}, // unchanged
+		{TaskID: "other", Pass: true, Steps: 2},  // fewer: not a regression
+	}}
+
+	got := StepRegressions(before, after)
+	if len(got) != 1 || got[0] != "chain 4->5" {
+		t.Fatalf("got %v, want [chain 4->5]", got)
+	}
+}
+
+// A task with no history cannot have regressed.
+func TestStepRegressionsIgnoresNewTasks(t *testing.T) {
+	before := Scorecard{Results: []Result{{TaskID: "old", Pass: true, Steps: 2}}}
+	after := Scorecard{Results: []Result{
+		{TaskID: "old", Pass: true, Steps: 2},
+		{TaskID: "brand-new", Pass: true, Steps: 9},
+	}}
+	if got := StepRegressions(before, after); len(got) != 0 {
+		t.Fatalf("got %v, want none", got)
+	}
+}

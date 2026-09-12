@@ -57,6 +57,45 @@ final answer alone would have ranked it first.
 
 ---
 
+## A capable model hides a broken tool
+
+The calculator's truncation bug was reintroduced deliberately, to check that the
+suite would catch it. **It did not.** The pass rate stayed at 34/34.
+
+The trace says why:
+
+```
+call   1000 + 1000*0.05      -> 1050
+call   1050 + 1050*0.05      -> 1102.5
+call   1102.5 + 1102.5*0.05  -> 1157.62     <- wrong, truncated
+call   1102.5*1.05           -> 1157.62     <- re-checked another way, same wrong number
+MODEL: ...answers 1157.625
+```
+
+The model got a wrong number, did not believe it, verified it a second way, got
+the same wrong number, and then answered correctly from its own arithmetic. The
+task passed. The tool was broken the whole time.
+
+**An end-to-end pass rate cannot see a component defect that the model works
+around.** That is a real limit of outcome-based scoring, and it is not obvious
+until you watch it happen.
+
+But the compensation was not free: three tool calls became four. That *is*
+detectable, and `StepRegressions` now reports it — a task that still passes while
+taking more steps than it used to is usually an agent working around something
+that broke.
+
+Two lessons, in order of importance:
+
+1. **Score the path, not only the destination.** Steps and tool calls are
+   signal. `must_call` was the first instance of this; step counts are the
+   second.
+2. **A unit test caught this bug in milliseconds and the suite never did.** Evals
+   earn their keep on regressions unit tests cannot see — prompt changes, loop
+   changes, model swaps. They are not a substitute for testing the components.
+
+---
+
 ## This set is a regression suite, not a benchmark
 
 The baseline now scores 34/34. That means it measures nothing about *this*

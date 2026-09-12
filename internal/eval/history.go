@@ -125,3 +125,30 @@ func orUnknown(s string) string {
 	}
 	return s
 }
+
+// StepRegressions lists tasks that still pass but now take more steps.
+//
+// Pass/fail alone is blind to a component defect a capable model works around.
+// Reintroducing a truncation bug in the calculator changed nothing in the pass
+// rate: the model got a wrong number, re-checked it a second way, got the same
+// wrong number, and answered correctly from its own arithmetic. The only trace
+// of the defect was an extra tool call.
+//
+// Extra steps are therefore a signal in their own right — the agent working
+// harder for the same answer — and worth reporting even when nothing failed.
+func StepRegressions(before, sc Scorecard) []string {
+	was := map[string]int{}
+	for _, r := range before.Results {
+		was[r.TaskID] = r.Steps
+	}
+
+	var out []string
+	for _, r := range sc.Results {
+		prev, ok := was[r.TaskID]
+		if ok && r.Steps > prev {
+			out = append(out, fmt.Sprintf("%s %d->%d", r.TaskID, prev, r.Steps))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
