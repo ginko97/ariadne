@@ -11,8 +11,12 @@ import "github.com/ginko97/ariadne/internal/llm"
 // The schema version lives on the checkpoint envelope, not here: it describes
 // the file format, not the run.
 type State struct {
-	RunID    string        `json:"run_id"`
-	Task     string        `json:"task"`
+	RunID string `json:"run_id"`
+	Task  string `json:"task"`
+	// Model is recorded on the first step and is authoritative on resume: a job
+	// that finished on a different model than it started on is a different job,
+	// and week 7's evals need to know which model produced a trace.
+	Model    string        `json:"model,omitempty"`
 	Messages []llm.Message `json:"messages"`
 	Steps    int           `json:"steps"`
 	Cost     float64       `json:"cost_usd"`

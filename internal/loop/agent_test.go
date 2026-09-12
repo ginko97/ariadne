@@ -184,3 +184,58 @@ func TestRunEmptyToolUse(t *testing.T) {
 		t.Fatalf("got %v, want ErrEmptyToolUse", err)
 	}
 }
+
+// The hook fires once per step and once more before Run returns, and the final
+// call sees the finished conversation. This is the test that catches a hook
+// that is declared but never called — which compiles and passes everything else.
+func TestCheckpointCalledEveryStep(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("call_a1", "calc", `{"expr":"240*0.15"}`, 52, 18),
+		endResponse("15% of 240 is 36.", 94, 11),
+	}}
+
+	var seen []int // messages present at each checkpoint
+	a := &Agent{
+		Provider: fake, Model: "test", MaxSteps: 10, Price: testPrice,
+		RunTool: func(context.Context, llm.ToolCall) (llm.ToolResult, error) {
+			return llm.ToolResult{Content: "36"}, nil
+		},
+		Checkpoint: func(s *State) error {
+			seen = append(seen, len(s.Messages))
+			return nil
+		},
+	}
+
+	if _, err := a.Run(context.Background(), NewState("run_cp", "t")); err != nil {
+		t.Fatal(err)
+	}
+
+	// step 1 writes after the tool result (3 messages), then StopEnd writes the
+	// finished conversation (4 messages).
+	want := []int{3, 4}
+	if len(seen) != len(want) {
+		t.Fatalf("checkpoint called %d times with %v, want %d", len(seen), seen, len(want))
+	}
+	for i := range want {
+		if seen[i] != want[i] {
+			t.Errorf("checkpoint %d saw %d messages, want %d", i, seen[i], want[i])
+		}
+	}
+}
+
+// A run that cannot be checkpointed cannot be resumed, so it must fail rather
+// than continue and quietly stop being durable.
+func TestCheckpointFailureFailsRun(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{endResponse("done", 1, 1)}}
+
+	boom := errors.New("disk full")
+	a := &Agent{
+		Provider: fake, Model: "test", MaxSteps: 10, Price: testPrice,
+		Checkpoint: func(*State) error { return boom },
+	}
+
+	_, err := a.Run(context.Background(), NewState("run_cp2", "t"))
+	if !errors.Is(err, boom) {
+		t.Fatalf("got %v, want the checkpoint error", err)
+	}
+}

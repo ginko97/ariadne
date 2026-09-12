@@ -41,6 +41,11 @@ type Agent struct {
 	Tools    []llm.ToolDef
 	RunTool  ToolRunner
 
+	// Checkpoint, if set, is called after every step and once more before Run
+	// returns. A failure fails the run: a run that cannot be checkpointed
+	// cannot be resumed, and continuing would be lying about durability.
+	Checkpoint func(*State) error
+
 	MaxSteps int // 0 = unlimited (tests only; never in production)
 	MaxCost  float64
 	Price    Price
@@ -51,6 +56,12 @@ type Agent struct {
 // It mutates s as it goes, so a caller holding s can checkpoint it after any step
 // (week 5) and can inspect Steps and Cost after an error.
 func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
+	// Record the model once. A resumed state already carries it, and the caller
+	// is expected to have built the provider from it.
+	if s.Model == "" {
+		s.Model = a.Model
+	}
+
 	for {
 		// --- guards: top of every iteration, before any work ---
 		if err := ctx.Err(); err != nil {
@@ -84,6 +95,11 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 
 		switch resp.Stop {
 		case llm.StopEnd:
+			// The assistant turn is already appended, so this write captures the
+			// finished conversation. Without it, resume would replay the last step.
+			if err := a.checkpoint(s); err != nil {
+				return "", err
+			}
 			return resp.Text(), nil
 		case llm.StopMaxToken:
 			return "", ErrTruncated
@@ -134,5 +150,22 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 			Role:   llm.RoleUser,
 			Blocks: results,
 		})
+
+		// Step boundary. A crash before here replays this step — the model call
+		// and the tool calls. Bounded and acceptable, because callID makes
+		// replay safe for any tool that forwards it downstream.
+		if err := a.checkpoint(s); err != nil {
+			return "", err
+		}
 	}
+}
+
+func (a *Agent) checkpoint(s *State) error {
+	if a.Checkpoint == nil {
+		return nil
+	}
+	if err := a.Checkpoint(s); err != nil {
+		return fmt.Errorf("loop: checkpoint failed at step %d: %w", s.Steps, err)
+	}
+	return nil
 }
