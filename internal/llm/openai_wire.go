@@ -199,8 +199,12 @@ func fromWire(body []byte) (Response, error) {
 
 // stopReason maps finish_reason, falling back to the payload when the value is
 // missing or unrecognised. OpenRouter proxies many backends and not all of them
-// send what the spec says.
+// send what the spec says: some send finish_reason: "stop" even when tool_calls
+// are present.
 func stopReason(finish string, hasToolCalls bool) StopReason {
+	if hasToolCalls {
+		return StopToolUse
+	}
 	switch finish {
 	case "stop":
 		return StopEnd
@@ -208,9 +212,6 @@ func stopReason(finish string, hasToolCalls bool) StopReason {
 		return StopToolUse
 	case "length":
 		return StopMaxToken
-	}
-	if hasToolCalls {
-		return StopToolUse
 	}
 	return StopEnd
 }

@@ -175,7 +175,7 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 			return "", a.endRun(s, errors.Join(ErrEmptyToolUse, a.checkpoint(s)))
 		}
 		if a.RunTool == nil {
-			return "", ErrNoToolRunner
+			return "", a.endRun(s, ErrNoToolRunner)
 		}
 
 		// Requested but not executed. A crash between here and the first result
@@ -183,7 +183,7 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		// top of the next iteration picks them up. Then loop — there is exactly
 		// one tool-execution path, shared by fresh and resumed batches.
 		if err := a.checkpoint(s); err != nil {
-			return "", err
+			return "", a.endRun(s, err)
 		}
 	}
 }

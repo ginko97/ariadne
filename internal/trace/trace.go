@@ -16,6 +16,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -83,6 +84,9 @@ func NewWriter(w io.Writer, runID string) *Writer {
 // Appending matters: a resumed run continues the same trace, so one file is the
 // whole history of a run across every process that worked on it.
 func NewFileWriter(dir, runID string) (*Writer, error) {
+	if strings.Contains(runID, "..") || strings.ContainsAny(runID, `/\`) {
+		return nil, fmt.Errorf("trace: refusing run id with path traversal %q", runID)
+	}
 	runDir := filepath.Join(dir, runID)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return nil, fmt.Errorf("trace: create dir: %w", err)

@@ -82,9 +82,15 @@ usage:
   ariadne eval   [flags]                 score a task set, one row per model
 
 flags:
-  -model      model id                  (env ARIADNE_MODEL)
-  -base-url   OpenAI-compatible endpoint (env ARIADNE_BASE_URL)
-  -max-steps  ceiling on loop iterations (default 10)
+  -model          model id                   (env ARIADNE_MODEL)
+  -base-url       OpenAI-compatible endpoint (env ARIADNE_BASE_URL)
+  -max-steps      ceiling on loop iterations (default 10)
+
+eval flags:
+  -models         comma-separated model ids  (default: ARIADNE_MODEL)
+  -tasks          path to task set           (default testdata/tasks.json)
+  -min-pass-rate  exit non-zero if any model scores below this
+  -save           write scorecard to eval/history and report regressions
 
 environment:
   ARIADNE_API_KEY   api key; falls back to GEMINI_API_KEY, then OPENROUTER_API_KEY
@@ -337,7 +343,7 @@ func cmdEval(args []string) int {
 		}
 	}()
 
-	newRunID := func(model, taskID string) string {
+	taskRunID := func(model, taskID string) string {
 		return fmt.Sprintf("%s_%s", newRunID(), taskID)
 	}
 	newAgent := func(model, runID string, maxSteps int) *loop.Agent {
@@ -363,7 +369,7 @@ func cmdEval(args []string) int {
 		fmt.Fprintf(os.Stderr, "eval %s over %d tasks...\n", model, len(tasks))
 
 		sc := eval.NewScorecard(model, commit,
-			eval.RunTasks(ctx, tasks, model, newAgent, newRunID))
+			eval.RunTasks(ctx, tasks, model, newAgent, taskRunID))
 
 		if i > 0 {
 			fmt.Println()

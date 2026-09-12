@@ -122,7 +122,7 @@ func matchExpect(answer, expect string) bool {
 func isBounded(s, expect string, pos, end int) bool {
 	if pos > 0 {
 		prev := s[pos-1]
-		if isWordOrDigit(prev) || prev == '/' {
+		if isWordOrDigit(prev) || prev == '/' || prev == '-' {
 			return false
 		}
 		if prev == '.' && isDigit(expect[0]) {
@@ -132,7 +132,7 @@ func isBounded(s, expect string, pos, end int) bool {
 
 	if end < len(s) {
 		next := s[end]
-		if isWordOrDigit(next) || next == '/' {
+		if isWordOrDigit(next) || next == '/' || next == '-' {
 			return false
 		}
 		if next == '.' && end+1 < len(s) && isDigit(s[end+1]) {

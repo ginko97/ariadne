@@ -41,6 +41,8 @@ func Load() error {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		line = strings.TrimPrefix(line, "export ")
+		line = strings.TrimSpace(line)
 		k, v, ok := strings.Cut(line, "=")
 		if !ok {
 			continue

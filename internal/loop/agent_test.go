@@ -515,3 +515,31 @@ func TestTraceRecordsFailure(t *testing.T) {
 		t.Errorf("run_end lost the cause: %q", last.Error)
 	}
 }
+
+func TestTraceRecordsNoToolRunnerFailure(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "calc", `{}`, 10, 10),
+	}}
+
+	var events []trace.Event
+	a := &Agent{
+		Provider: fake,
+		Model:    "test",
+		Trace:    func(e trace.Event) { events = append(events, e) },
+	}
+
+	if _, err := a.Run(context.Background(), NewState("run_fail", "t")); !errors.Is(err, ErrNoToolRunner) {
+		t.Fatalf("got %v, want ErrNoToolRunner", err)
+	}
+
+	if len(events) == 0 {
+		t.Fatal("no trace events emitted")
+	}
+	last := events[len(events)-1]
+	if last.Kind != trace.KindRunEnd {
+		t.Fatalf("last event = %q, want run_end", last.Kind)
+	}
+	if !strings.Contains(last.Error, "no ToolRunner") {
+		t.Errorf("run_end error = %q, want mention of ToolRunner", last.Error)
+	}
+}

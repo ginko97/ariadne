@@ -115,6 +115,34 @@ func TestScoreRejectsSubstringFalsePass(t *testing.T) {
 		t.Fatal("expected failure: '1' matched inside '1.5'")
 	}
 
+	// Model answered with negative number ("-1"):
+	negWrong := Score(modTask, stateWithCall(2, 0, "calc"),
+		"The remainder is -1.", nil)
+	if negWrong.Pass {
+		t.Fatal("expected failure: '1' matched inside '-1'")
+	}
+
+	// Positive expectation must reject negative answer:
+	posTask := Task{ID: "prec-02", Expect: "25", MustCall: []string{"calc"}}
+	negAnswer := Score(posTask, stateWithCall(2, 0, "calc"),
+		"The answer is -25.", nil)
+	if negAnswer.Pass {
+		t.Fatal("expected failure: '25' matched inside '-25'")
+	}
+
+	// Negative expectation must accept negative answer and reject positive answer:
+	negTask := Task{ID: "neg-01", Expect: "-25", MustCall: []string{"calc"}}
+	negCorrect := Score(negTask, stateWithCall(2, 0, "calc"),
+		"The result is -25.", nil)
+	if !negCorrect.Pass {
+		t.Fatalf("expected pass for negative answer: %s", negCorrect.Reason)
+	}
+	posWrong := Score(negTask, stateWithCall(2, 0, "calc"),
+		"The result is 25.", nil)
+	if posWrong.Pass {
+		t.Fatal("expected failure: '+25' matched '-25'")
+	}
+
 	// Model answered correctly:
 	correct := Score(modTask, stateWithCall(2, 0, "calc"),
 		"When 10 is divided by 3, the remainder is 1.", nil)

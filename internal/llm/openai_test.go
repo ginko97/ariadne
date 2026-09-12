@@ -333,3 +333,33 @@ func TestFromWireCarriesReportedCost(t *testing.T) {
 		t.Errorf("Cost = %v, want 0 when unreported", got.Usage.Cost)
 	}
 }
+
+// Some gateways (e.g. OpenRouter proxies or LiteLLM) send finish_reason: "stop"
+// even when tool_calls are present. The tool calls must not be dropped.
+func TestFromWireToolCallsWithStopFinishReason(t *testing.T) {
+	body := []byte(`{
+  "choices": [{
+    "index": 0,
+    "message": {
+      "role": "assistant",
+      "content": "Let me check that.",
+      "tool_calls": [
+        {"id":"c1","type":"function","function":{"name":"calc","arguments":"{\"expr\":\"1+1\"}"}}
+      ]
+    },
+    "finish_reason": "stop"
+  }],
+  "usage": {"prompt_tokens":5,"completion_tokens":10}
+}`)
+
+	got, err := fromWire(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Stop != StopToolUse {
+		t.Errorf("Stop = %v, want %v (tool calls must not be dropped)", got.Stop, StopToolUse)
+	}
+	if len(got.ToolCalls()) != 1 {
+		t.Fatalf("ToolCalls = %d, want 1", len(got.ToolCalls()))
+	}
+}

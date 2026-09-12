@@ -134,3 +134,12 @@ func TestReadMissingFile(t *testing.T) {
 		t.Fatalf("got %v, want not-exist", err)
 	}
 }
+
+func TestNewFileWriterRejectsPathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	for _, bad := range []string{"../escape", "../../etc", "a/b", `a\b`} {
+		if _, err := NewFileWriter(dir, bad); err == nil {
+			t.Errorf("NewFileWriter accepted traversing run id %q", bad)
+		}
+	}
+}
