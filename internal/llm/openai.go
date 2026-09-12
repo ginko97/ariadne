@@ -34,7 +34,12 @@ var _ Provider = (*OpenAI)(nil)
 
 // String redacts the key. This struct will end up inside a %+v eventually — in
 // a log line, or wrapped into an error — and that is how keys actually leak.
-func (o *OpenAI) String() string {
+//
+// Value receiver on purpose. With a pointer receiver only *OpenAI satisfies
+// Stringer, so fmt printing a copy — `%+v` on a dereferenced value, or a struct
+// that embeds one — falls back to the default formatter and prints APIKey in
+// full. The pointer gets this method either way.
+func (o OpenAI) String() string {
 	key := "<unset>"
 	if o.APIKey != "" {
 		key = "<redacted>"

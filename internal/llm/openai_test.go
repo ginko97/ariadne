@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -361,5 +362,45 @@ func TestFromWireToolCallsWithStopFinishReason(t *testing.T) {
 	}
 	if len(got.ToolCalls()) != 1 {
 		t.Fatalf("ToolCalls = %d, want 1", len(got.ToolCalls()))
+	}
+}
+
+func TestOpenAIStringRedaction(t *testing.T) {
+	const secretKey = "sk-secret-test-key-xyz"
+	o := NewOpenAI(secretKey, WithBaseURL("https://api.test.example"))
+
+	for _, fmtStr := range []string{"%s", "%v", "%+v"} {
+		got := fmt.Sprintf(fmtStr, o)
+		if strings.Contains(got, secretKey) {
+			t.Errorf("fmt.Sprintf(%q, o) leaked secret key: %s", fmtStr, got)
+		}
+		if !strings.Contains(got, "<redacted>") {
+			t.Errorf("fmt.Sprintf(%q, o) = %q, want '<redacted>'", fmtStr, got)
+		}
+	}
+
+	unset := &OpenAI{}
+	gotUnset := fmt.Sprintf("%v", unset)
+	if !strings.Contains(gotUnset, "<unset>") {
+		t.Errorf("unset OpenAI string = %q, want '<unset>'", gotUnset)
+	}
+
+	// A copy must redact too. With a pointer receiver only *OpenAI satisfied
+	// Stringer, so printing a dereferenced value fell back to the default
+	// formatter and wrote the key out in full.
+	for _, fmtStr := range []string{"%s", "%v", "%+v"} {
+		got := fmt.Sprintf(fmtStr, *o)
+		if strings.Contains(got, secretKey) {
+			t.Errorf("fmt.Sprintf(%q, *o) leaked secret key: %s", fmtStr, got)
+		}
+		if !strings.Contains(got, "<redacted>") {
+			t.Errorf("fmt.Sprintf(%q, *o) = %q, want '<redacted>'", fmtStr, got)
+		}
+	}
+
+	// And when embedded in something else, which is how it reaches most logs.
+	wrapper := struct{ Provider OpenAI }{Provider: *o}
+	if got := fmt.Sprintf("%+v", wrapper); strings.Contains(got, secretKey) {
+		t.Errorf("embedded OpenAI leaked secret key: %s", got)
 	}
 }

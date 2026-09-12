@@ -2,14 +2,17 @@ package loop
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/ginko97/ariadne/internal/llm"
+	"github.com/ginko97/ariadne/internal/trace"
 )
 
 func TestCheckpointRoundTrip(t *testing.T) {
@@ -137,5 +140,124 @@ func TestSaveOverwritesAndLeavesNoTemp(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Name() != "checkpoint.json" {
 		t.Errorf("run dir = %v, want only checkpoint.json", entries)
+	}
+}
+
+// An API key must never reach runs/ — not a checkpoint, not a trace line, not an
+// error string. Covers both a successful tool-calling run and one that fails on
+// a 401, since the error path is where a key is most likely to be echoed.
+func TestKeyNeverReachesRuns(t *testing.T) {
+	const sentinelKey = "sk-sentinel-secret-token-never-leak-98765"
+
+	t.Run("successful run with tool call", func(t *testing.T) {
+		dir := t.TempDir()
+		runID := "run_sec_success"
+		store := &Store{Dir: dir}
+		tw, err := trace.NewFileWriter(dir, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tw.Close()
+
+		rt := &llm.RecordedTransport{
+			Responses: [][]byte{
+				[]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"thinking","tool_calls":[{"id":"c1","type":"function","function":{"name":"calc","arguments":"{\"expr\":\"2+2\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":10}}`),
+				[]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"4"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":10}}`),
+			},
+		}
+
+		provider := llm.NewOpenAI(sentinelKey,
+			llm.WithBaseURL("https://api.test.example"),
+			llm.WithHTTPClient(&http.Client{Transport: rt}),
+		)
+
+		agent := &Agent{
+			Provider:   provider,
+			Model:      "test-model",
+			Trace:      tw.Emit,
+			Checkpoint: store.Save,
+			RunTool: func(_ context.Context, c llm.ToolCall) (llm.ToolResult, error) {
+				return llm.ToolResult{Content: "4"}, nil
+			},
+			MaxSteps: 5,
+		}
+
+		st := NewState(runID, "calculate 2+2")
+		_, err = agent.Run(context.Background(), st)
+		if err != nil {
+			t.Fatalf("agent.Run: %v", err)
+		}
+
+		assertNoSecretInDir(t, dir, sentinelKey)
+	})
+
+	t.Run("error run does not leak in trace or checkpoint", func(t *testing.T) {
+		dir := t.TempDir()
+		runID := "run_sec_error"
+		store := &Store{Dir: dir}
+		tw, err := trace.NewFileWriter(dir, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tw.Close()
+
+		rt := &llm.RecordedTransport{
+			Statuses: []int{http.StatusUnauthorized},
+			Responses: [][]byte{
+				[]byte(`{"error":{"message":"Invalid API key provided"}}`),
+			},
+		}
+
+		provider := llm.NewOpenAI(sentinelKey,
+			llm.WithBaseURL("https://api.test.example"),
+			llm.WithHTTPClient(&http.Client{Transport: rt}),
+		)
+
+		agent := &Agent{
+			Provider:   provider,
+			Model:      "test-model",
+			Trace:      tw.Emit,
+			Checkpoint: store.Save,
+			MaxSteps:   5,
+		}
+
+		st := NewState(runID, "hello")
+		_, err = agent.Run(context.Background(), st)
+		if err == nil {
+			t.Fatal("expected error from 401 response")
+		}
+		if strings.Contains(err.Error(), sentinelKey) {
+			t.Fatalf("returned error leaked key: %v", err)
+		}
+
+		assertNoSecretInDir(t, dir, sentinelKey)
+	})
+}
+
+func assertNoSecretInDir(t *testing.T, dir, secret string) {
+	t.Helper()
+	foundFiles := 0
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		foundFiles++
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if bytes.Contains(data, []byte(secret)) {
+			t.Errorf("file %s leaked secret key", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("filepath.Walk: %v", err)
+	}
+	if foundFiles == 0 {
+		t.Fatal("assertNoSecretInDir: expected files in dir, found none")
 	}
 }
