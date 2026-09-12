@@ -313,6 +313,18 @@ func TestInputTokensSurvivesForResume(t *testing.T) {
 // If an error or interruption happens immediately after compaction (e.g.
 // network failure on Complete), resume must not compact a second time against
 // the already compacted conversation.
+// A count recorded before compaction must not still be driving compaction
+// after it.
+//
+// The overshoot here is deliberately mild — 9000 against a budget of 8000, so
+// roughly half goes. A large overshoot cannot show this: the first pass takes
+// the conversation straight down to the keep-floor, the second finds nothing
+// left to drop, and the test passes whether the bug is present or not. That is
+// exactly how the first version of this test was written, and it stayed green
+// with the fix reverted.
+//
+// With a mild overshoot and three interrupted resumes the difference is plain:
+// 49 -> 25 -> 9 -> 3 messages without the reset, 49 -> 25 -> 25 -> 25 with it.
 func TestResumeAfterCompactionDoesNotDoubleCompact(t *testing.T) {
 	fakeFail := &llm.Fake{Errs: []error{errors.New("network down")}}
 	checkpointed := false
@@ -332,8 +344,8 @@ func TestResumeAfterCompactionDoesNotDoubleCompact(t *testing.T) {
 		},
 	}
 
-	s := conversation("long job", 12)
-	s.InputTokens = 80_000
+	s := conversation("long job", 24)
+	s.InputTokens = 9_000
 
 	// First run compacts, checkpoints, and then Complete fails with network error.
 	_, err := a.Run(context.Background(), s)
@@ -350,17 +362,22 @@ func TestResumeAfterCompactionDoesNotDoubleCompact(t *testing.T) {
 	droppedFirst := savedState.Dropped
 	messagesFirst := len(savedState.Messages)
 
-	// Resume run with a working provider.
-	fakeOK := &llm.Fake{Responses: []llm.Response{
-		endResponse("recovered", 2000, 10),
-	}}
-	a.Provider = fakeOK
-
-	_, err = a.Run(context.Background(), savedState)
-	if err != nil {
-		t.Fatalf("resumed run failed: %v", err)
+	// Resume, and be interrupted again. This is the leg that cascades: the
+	// checkpoint still holds a pre-compaction count unless it was reset.
+	a.Provider = &llm.Fake{Errs: []error{errors.New("network down again")}}
+	if _, err := a.Run(context.Background(), savedState); err == nil {
+		t.Fatal("expected the second run to fail too")
+	}
+	if savedState.Dropped != droppedFirst || len(savedState.Messages) != messagesFirst {
+		t.Errorf("interrupted resume compacted again: %d messages (was %d), dropped %d (was %d)",
+			len(savedState.Messages), messagesFirst, savedState.Dropped, droppedFirst)
 	}
 
+	// And a resume that succeeds carries on normally.
+	a.Provider = &llm.Fake{Responses: []llm.Response{endResponse("recovered", 2000, 10)}}
+	if _, err := a.Run(context.Background(), savedState); err != nil {
+		t.Fatalf("resumed run failed: %v", err)
+	}
 	if savedState.Dropped != droppedFirst {
 		t.Errorf("resumed run double-compacted: dropped %d, was %d",
 			savedState.Dropped, droppedFirst)
@@ -370,18 +387,64 @@ func TestResumeAfterCompactionDoesNotDoubleCompact(t *testing.T) {
 	}
 }
 
+// A resumed run keeps the budget it started under, even when the resuming
+// command passed no flag. Without this, `ariadne resume` silently turns
+// compaction off and the first request is the one that blows the window.
+//
+// Asserted by whether the run actually compacts, not by which field ends up
+// holding the number: the field is the mechanism, and the mechanism changed
+// once already.
 func TestStateContextBudgetInheritedOnResume(t *testing.T) {
 	fake := &llm.Fake{Responses: []llm.Response{endResponse("done", 100, 10)}}
-	// Agent has no ContextBudget set (simulating `ariadne resume` without flag),
-	// but State has ContextBudget = 5000.
+	// No budget on the agent — this is `ariadne resume` with no flag.
 	a := &Agent{Provider: fake, Model: "test", MaxSteps: 10}
-	s := NewState("run_test", "hi")
-	s.ContextBudget = 5000
+
+	s := conversation("long job", 12)
+	s.ContextBudget = 5_000
+	s.InputTokens = 9_000 // over the budget the checkpoint recorded
+	before := len(s.Messages)
 
 	if _, err := a.Run(context.Background(), s); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if a.ContextBudget != 5000 {
-		t.Errorf("Agent.ContextBudget = %d, want 5000 from State", a.ContextBudget)
+	if s.Dropped == 0 || len(s.Messages) >= before {
+		t.Errorf("resumed run did not compact: %d messages, was %d, dropped %d",
+			len(s.Messages), before, s.Dropped)
+	}
+	assertWellFormed(t, s.Messages)
+}
+
+// An Agent outlives a Run. A budget read off one checkpoint must not still be
+// in force for the next run started from the same agent — a job nobody gave a
+// budget would silently begin dropping history.
+//
+// This is the shared-mutable-field bug this project has already paid for once,
+// when a factory reading a shared run id filed every trace under the previous
+// task.
+func TestBudgetDoesNotLeakBetweenRuns(t *testing.T) {
+	a := &Agent{
+		Provider: &llm.Fake{Responses: []llm.Response{
+			endResponse("one", 10, 10), endResponse("two", 10, 10),
+		}},
+		Model:    "test",
+		MaxSteps: 10,
+		// Never given a budget by anyone.
+	}
+
+	first := NewState("run_a", "first")
+	first.ContextBudget = 5_000
+	if _, err := a.Run(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	if a.ContextBudget != 0 {
+		t.Errorf("Run wrote %d back onto the agent", a.ContextBudget)
+	}
+
+	second := NewState("run_b", "second")
+	if _, err := a.Run(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	if second.ContextBudget != 0 {
+		t.Errorf("run_b inherited run_a's budget of %d", second.ContextBudget)
 	}
 }

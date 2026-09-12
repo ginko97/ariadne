@@ -107,9 +107,12 @@ type Agent struct {
 	MaxCost  float64
 	Price    Price
 
-	// ContextBudget is the prompt-token ceiling this run aims to stay under.
+	// ContextBudget is the prompt-token ceiling a fresh run aims to stay under.
 	// 0 disables compaction, which is right for short jobs: a conversation that
 	// never approaches the window should never lose anything.
+	//
+	// Seeds State.ContextBudget and is not read after that, so a resumed run
+	// keeps the budget it started with. Run never writes this field.
 	ContextBudget int
 }
 
@@ -143,10 +146,14 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 	if s.BaseURL == "" && a.BaseURL != "" {
 		s.BaseURL = a.BaseURL
 	}
+	// Seeded onto the state and read from there afterwards, the same direction
+	// as Allow and RequireApproval. Deliberately not written back onto the
+	// agent: an Agent outlives a Run, so a budget copied from one checkpoint
+	// would still be set for the next run started from the same agent, and a
+	// job nobody gave a budget would silently begin dropping history. That is
+	// the shared-mutable-field bug this project has already paid for once.
 	if s.ContextBudget == 0 && a.ContextBudget > 0 {
 		s.ContextBudget = a.ContextBudget
-	} else if a.ContextBudget == 0 && s.ContextBudget > 0 {
-		a.ContextBudget = s.ContextBudget
 	}
 
 	a.emit(trace.Event{
@@ -181,13 +188,13 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		// branch above has already finished any half-executed batch, so every
 		// tool_use in the history has its result. Trimming anywhere else would
 		// have to reason about a batch in flight.
-		if a.ContextBudget > 0 && s.InputTokens > a.ContextBudget {
-			if n := compact(s, s.InputTokens, a.ContextBudget); n > 0 {
+		if s.ContextBudget > 0 && s.InputTokens > s.ContextBudget {
+			if n := compact(s, s.InputTokens, s.ContextBudget); n > 0 {
 				a.emit(trace.Event{
 					Kind: trace.KindCompact, Step: s.Steps,
 					InTokens: s.InputTokens, Messages: len(s.Messages),
 					Content: fmt.Sprintf("dropped %d messages (%d total) over budget %d",
-						n, s.Dropped, a.ContextBudget),
+						n, s.Dropped, s.ContextBudget),
 				})
 				// The prompt is now compacted. Reset InputTokens so that an
 				// interruption or failure before the next provider response does

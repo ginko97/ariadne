@@ -270,6 +270,11 @@ func backoff(attempt int, resp *http.Response, body []byte) retryWait {
 
 	// No instruction, so double from the initial delay. Capped, because this
 	// number is invented and an invented number should not stall a job.
+	// The shift is clamped as a guard, not a repair: maxTotalBackoff stops the
+	// sequence at attempt 7 even with MaxRetries set to 100, so 1<<attempt
+	// cannot reach an overflow today. It becomes reachable the moment that
+	// ceiling is raised, and an overflowed duration is negative — which would
+	// sleep for no time and hammer a server that just asked for room.
 	shift := attempt
 	if shift > 10 {
 		shift = 10
