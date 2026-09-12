@@ -191,6 +191,20 @@ evidence, and a "regression" of one task may be nothing at all.
 took 1.3s and 18.2s. The variance is provider-side and swamps any real
 difference, so nothing should be concluded from timing without many repeats.
 
+Rate-limit backoff made this strictly worse and then partly recoverable. The
+loop times the whole provider call, so a request retried after a 429 records the
+wait as model latency — a task can now look twenty seconds slower for a reason
+that has nothing to do with the task, the model, or the prompt. There is no way
+to see that in a duration alone, which is why a retry emits its own trace event
+carrying the wait:
+
+```
+jq 'select(.kind=="retry")' runs/*/trace.jsonl
+```
+
+Subtract those from the step and the number means something again. A sweep with
+any retry events in it should not be compared against one without.
+
 Cost, by contrast, is stable and reported by the gateway rather than estimated
 from a price table — it is the one number here that can be trusted from a single
 run.
