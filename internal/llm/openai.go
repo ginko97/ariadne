@@ -83,7 +83,7 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
 		return Response{}, fmt.Errorf("openai: encode request: %w", err)
 	}
 
-	base := o.BaseURL
+	base := strings.TrimRight(o.BaseURL, "/")
 	if base == "" {
 		base = defaultBaseURL
 	}

@@ -160,7 +160,7 @@ func fromWire(body []byte) (Response, error) {
 	if c.Message.Content != nil && *c.Message.Content != "" {
 		blocks = append(blocks, Block{Type: BlockText, Text: *c.Message.Content})
 	}
-	for _, tc := range c.Message.ToolCalls {
+	for i, tc := range c.Message.ToolCalls {
 		// Pass the arguments through unparsed. Weak models emit malformed JSON
 		// here; the right place for that to fail is the tool's Unmarshal, which
 		// becomes an IsError block the model can recover from.
@@ -168,9 +168,20 @@ func fromWire(body []byte) (Response, error) {
 		if len(args) == 0 {
 			args = json.RawMessage(`{}`)
 		}
+
+		// An id is mandatory downstream: it pairs the result back to the call,
+		// and it is the completion key resume reads out of the conversation.
+		// Two calls with an empty id would collapse into one and the second
+		// would never run — silently. Synthesise rather than fail: a missing id
+		// is the server's bug, and the run can still succeed with a local one.
+		id := tc.ID
+		if id == "" {
+			id = fmt.Sprintf("call_synth_%d", i)
+		}
+
 		blocks = append(blocks, Block{
 			Type: BlockToolUse,
-			ID:   tc.ID,
+			ID:   id,
 			Name: tc.Function.Name,
 			Args: args,
 		})

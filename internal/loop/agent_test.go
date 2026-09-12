@@ -318,3 +318,45 @@ func TestResumeRunsWholeBatchWhenNoneCompleted(t *testing.T) {
 		t.Fatalf("executed %v, want [call_z]", ran)
 	}
 }
+
+// A run that ends in an error still writes what the model said. Without this the
+// on-disk state reverts to the previous checkpoint and the evidence of what
+// caused the failure is gone — which is exactly what trace analysis wants.
+func TestCheckpointOnErrorPaths(t *testing.T) {
+	cases := []struct {
+		name string
+		resp llm.Response
+	}{
+		{"truncated", llm.Response{
+			Blocks: []llm.Block{{Type: llm.BlockText, Text: "half a th"}},
+			Stop:   llm.StopMaxToken,
+		}},
+		{"empty tool use", llm.Response{
+			Blocks: []llm.Block{{Type: llm.BlockText, Text: "thinking"}},
+			Stop:   llm.StopToolUse,
+		}},
+		{"unknown stop", llm.Response{
+			Blocks: []llm.Block{{Type: llm.BlockText, Text: "?"}},
+			Stop:   llm.StopReason("wat"),
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var saved int
+			a := &Agent{
+				Provider: &llm.Fake{Responses: []llm.Response{tc.resp}},
+				Model:    "test", MaxSteps: 10, Price: testPrice,
+				Checkpoint: func(s *State) error { saved = len(s.Messages); return nil },
+			}
+
+			if _, err := a.Run(context.Background(), NewState("run_err", "t")); err == nil {
+				t.Fatal("want an error")
+			}
+			// task + the assistant turn that caused the failure
+			if saved != 2 {
+				t.Errorf("checkpoint saw %d messages, want 2 — the failing turn was not written", saved)
+			}
+		})
+	}
+}

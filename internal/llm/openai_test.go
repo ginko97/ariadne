@@ -267,3 +267,40 @@ func TestCompleteSendsAndDecodes(t *testing.T) {
 		t.Errorf("body = %s", rt.Bodies[0])
 	}
 }
+
+// A server that omits tool-call ids must not produce two blocks with the same
+// empty id: resume keys its completion record on that id, so two empty ids
+// collapse into one and the second call would never run.
+func TestFromWireSynthesisesMissingCallIDs(t *testing.T) {
+	body := []byte(`{
+  "choices": [{
+    "index": 0,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {"type":"function","function":{"name":"calc","arguments":"{\"expr\":\"1+1\"}"}},
+        {"type":"function","function":{"name":"calc","arguments":"{\"expr\":\"2+2\"}"}}
+      ]
+    },
+    "finish_reason": "tool_calls"
+  }],
+  "usage": {"prompt_tokens":1,"completion_tokens":1}
+}`)
+
+	got, err := fromWire(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	calls := got.ToolCalls()
+	if len(calls) != 2 {
+		t.Fatalf("got %d calls, want 2", len(calls))
+	}
+	if calls[0].ID == "" || calls[1].ID == "" {
+		t.Fatalf("empty id survived: %+v", calls)
+	}
+	if calls[0].ID == calls[1].ID {
+		t.Errorf("ids collide: both %q", calls[0].ID)
+	}
+}

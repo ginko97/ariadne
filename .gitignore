@@ -1,7 +1,7 @@
 # --- runtime / build ---
 runs/
-ariadne
-ariadne.exe
+/ariadne
+/ariadne.exe
 .env
 
 # --- private: how I'm learning this, not what I built ---

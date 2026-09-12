@@ -41,9 +41,13 @@ type Agent struct {
 	Tools    []llm.ToolDef
 	RunTool  ToolRunner
 
-	// Checkpoint, if set, is called after every step and once more before Run
-	// returns. A failure fails the run: a run that cannot be checkpointed
-	// cannot be resumed, and continuing would be lying about durability.
+	// Checkpoint, if set, is called after every tool call — not every step —
+	// plus once when the calls are requested but not yet run, and once on every
+	// path that ends the run. Per call is what makes resume safe: re-asking the
+	// model would mint fresh call IDs and re-fire tools that already ran.
+	//
+	// A failure fails the run: a run that cannot be checkpointed cannot be
+	// resumed, and continuing would be lying about durability.
 	Checkpoint func(*State) error
 
 	MaxSteps int // 0 = unlimited (tests only; never in production)
@@ -85,7 +89,7 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		}
 
 		resp, err := a.Provider.Complete(ctx, llm.Request{
-			Model:    a.Model,
+			Model:    s.Model,
 			Messages: s.Messages,
 			Tools:    a.Tools,
 		})
@@ -112,15 +116,20 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 			}
 			return resp.Text(), nil
 		case llm.StopMaxToken:
-			return "", ErrTruncated
+			// Checkpoint before failing: the assistant turn that caused this is
+			// the evidence you want when reading the trace, and without a write
+			// the on-disk state silently reverts to the previous checkpoint.
+			return "", errors.Join(ErrTruncated, a.checkpoint(s))
 		case llm.StopToolUse:
 			// falls through to tool execution below
 		default:
-			return "", fmt.Errorf("loop: unknown stop reason %q", resp.Stop)
+			return "", errors.Join(
+				fmt.Errorf("loop: unknown stop reason %q", resp.Stop),
+				a.checkpoint(s))
 		}
 
 		if len(resp.ToolCalls()) == 0 {
-			return "", ErrEmptyToolUse
+			return "", errors.Join(ErrEmptyToolUse, a.checkpoint(s))
 		}
 		if a.RunTool == nil {
 			return "", ErrNoToolRunner
@@ -152,6 +161,10 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 	i := len(s.Messages) - 1
 
 	for _, c := range calls {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		// Two ways a tool reports failure, and they mean different things:
 		// res.IsError is "it ran and failed" (the model can react); a non-nil
 		// err is "it could not be reached at all".
