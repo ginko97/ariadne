@@ -49,6 +49,7 @@ produce the same symptom — a failing task that looks like a model problem.
 | **model fails multi-hop chains** | `ling-3.0-flash` | passes every single-step task, fails the only two-hop one |
 | **tool silently wrong** | `calc` twice | `^` is Go's XOR (`2^3 % 5` → `1`), and `String()` truncation |
 | **formatting mistaken for meaning** | markdown, commas, trailing zeros | `**36**`, `$1,157.625`, `$74.50` |
+| **ambiguous task text** | `hard-word-03` | passes or fails on how the model reads the question, not on what it can do |
 
 The second row is the one that would have done the most damage. `mistral-nemo`
 is the cheapest tool-capable model on the gateway, and it is cheap *because* it
@@ -115,6 +116,45 @@ It also caught only *one* task where two had failed for this reason before:
 `hard-chain-02` passed this time because the model happened not to write a
 thousands separator. Same code, same task, different formatting — the noise
 described below, appearing in a place where it changes the conclusion.
+
+---
+
+## A fourth harness defect, and a near miss
+
+Adding a system prompt dropped the sweep to 33/34, and the failing task took
+four steps where it had taken three — exactly the shape `StepRegressions` exists
+to catch. A change to what every request carries, followed immediately by a
+regression with a step-count increase, is about as clean a causal story as this
+suite can tell.
+
+The trace did not agree:
+
+```
+call   187.50/3    -> 62.5
+call   62.5*0.12   -> 7.5
+call   62.5+7.5    -> 70
+MODEL: Each person pays $70.00
+```
+
+The task read *"3 people split a bill of 187.50 evenly, then each adds a 12
+tip."* The expected answer of `74.5` assumes a flat 12; the model read 12%. Both
+readings are defensible, so the task was being decided by a coin flip — run
+three times against the same build, it answered `74.50` twice and `70.00` once.
+The system prompt was not the cause. It only changed which way that particular
+sweep landed.
+
+Rewording to "a flat tip of 12" restored 34/34.
+
+Two things carry over:
+
+- The count is now **four for four**. Every failure this suite has ever produced
+  has been a defect in the harness — a truncating tool, a strict scorer, an
+  ambiguous task — and none has yet been the model.
+- A suspicious change had just landed, a regression appeared in the same sweep,
+  and the step count corroborated it. Everything except the trace supported a
+  conclusion that was wrong. Summary lines are how you find out *that* something
+  moved; they are not how you find out *why*, and the difference decides whether
+  the next hour is spent reverting good work.
 
 ---
 

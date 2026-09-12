@@ -262,7 +262,7 @@
   },
   {
     "id": "hard-word-03",
-    "prompt": "Using the calc tool one step at a time: 3 people split a bill of 187.50 evenly, then each adds a 12 tip. What does each person pay in total?",
+    "prompt": "Using the calc tool one step at a time: 3 people split a bill of 187.50 evenly, then each adds a flat tip of 12. What does each person pay in total?",
     "expect": "74.5",
     "must_call": [
       "calc"

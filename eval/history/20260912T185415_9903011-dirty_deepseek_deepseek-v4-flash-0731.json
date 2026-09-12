@@ -1,0 +1,283 @@
+{
+  "model": "deepseek/deepseek-v4-flash-0731",
+  "commit": "9903011-dirty",
+  "when": "2026-09-12T18:54:15.9525998Z",
+  "results": [
+    {
+      "task_id": "pct-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00002824,
+      "answer": "15% of 240 is 36.",
+      "run_id": "run_20260912T185127_fcda40_pct-01"
+    },
+    {
+      "task_id": "div-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.000027280000000000003,
+      "answer": "7 divided by 2 is 3.5.",
+      "run_id": "run_20260912T185134_8a40d2_div-01"
+    },
+    {
+      "task_id": "mod-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00002772,
+      "answer": "The remainder when 10 is divided by 3 is **1**.",
+      "run_id": "run_20260912T185136_99ed8b_mod-01"
+    },
+    {
+      "task_id": "chain-01",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.000059336,
+      "answer": "15% of 240 is 36. 20% of 36 is 7.2.\n\n**Final answer: 7.2**",
+      "run_id": "run_20260912T185139_190f3f_chain-01"
+    },
+    {
+      "task_id": "parens-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00002916,
+      "answer": "The answer is 27.",
+      "run_id": "run_20260912T185153_baddcd_parens-01"
+    },
+    {
+      "task_id": "exact-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0000286,
+      "answer": "(1/3) × 3 = 1 exactly.",
+      "run_id": "run_20260912T185155_7878e1_exact-01"
+    },
+    {
+      "task_id": "pct-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0000288,
+      "answer": "35% of 880 is 308.",
+      "run_id": "run_20260912T185157_66b2e3_pct-02"
+    },
+    {
+      "task_id": "pct-03",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00003172,
+      "answer": "A 12% reduction means the price is multiplied by 88% (100% − 12%). The reduced price is **1100**.",
+      "run_id": "run_20260912T185158_ecf792_pct-03"
+    },
+    {
+      "task_id": "div-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00002816,
+      "answer": "22 divided by 8 is **2.75**.",
+      "run_id": "run_20260912T185200_d52892_div-02"
+    },
+    {
+      "task_id": "div-03",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.000037152,
+      "answer": "1 divided by 8 is **0.125**.",
+      "run_id": "run_20260912T185206_572403_div-03"
+    },
+    {
+      "task_id": "mod-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.000040472,
+      "answer": "100 ÷ 7 = 14 with remainder 2.\n\nThe remainder is **2**.",
+      "run_id": "run_20260912T185211_2a0e6c_mod-02"
+    },
+    {
+      "task_id": "prec-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.000040271999999999997,
+      "answer": "2 + 3 * 4 = **14** (multiplication is performed before addition: 3 * 4 = 12, then 2 + 12 = 14).",
+      "run_id": "run_20260912T185213_ee953a_prec-01"
+    },
+    {
+      "task_id": "prec-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0000302,
+      "answer": "(2 + 3) * (4 + 1) = **25**.",
+      "run_id": "run_20260912T185217_ad1ec4_prec-02"
+    },
+    {
+      "task_id": "neg-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00002684,
+      "answer": "The answer is **-25**.",
+      "run_id": "run_20260912T185225_b01ca5_neg-01"
+    },
+    {
+      "task_id": "big-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.000035351999999999996,
+      "answer": "37 * 24 = 888.",
+      "run_id": "run_20260912T185227_400036_big-01"
+    },
+    {
+      "task_id": "dec-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00002908,
+      "answer": "0.1 + 0.2 = 0.3",
+      "run_id": "run_20260912T185233_a1047b_dec-01"
+    },
+    {
+      "task_id": "chain-02",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.000053696,
+      "answer": "The final answer is 84.",
+      "run_id": "run_20260912T185234_55aeb8_chain-02"
+    },
+    {
+      "task_id": "chain-03",
+      "pass": true,
+      "steps": 4,
+      "cost_usd": 0.00007368,
+      "answer": "Final answer: 25.",
+      "run_id": "run_20260912T185242_7d5c8b_chain-03"
+    },
+    {
+      "task_id": "chain-04",
+      "pass": true,
+      "steps": 4,
+      "cost_usd": 0.00006244800000000001,
+      "answer": "The final answer is 16.",
+      "run_id": "run_20260912T185246_95b886_chain-04"
+    },
+    {
+      "task_id": "frac-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.000038072,
+      "answer": "(2/3) × 3 = **2**.",
+      "run_id": "run_20260912T185300_ca2d46_frac-01"
+    },
+    {
+      "task_id": "frac-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00002712,
+      "answer": "7/8 = 0.875.",
+      "run_id": "run_20260912T185302_f9a7c8_frac-02"
+    },
+    {
+      "task_id": "round-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.000034032,
+      "answer": "10/4 = 2.5",
+      "run_id": "run_20260912T185308_1a9b77_round-01"
+    },
+    {
+      "task_id": "zero-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00002688,
+      "answer": "0 * 12345 = 0.",
+      "run_id": "run_20260912T185310_4834ea_zero-01"
+    },
+    {
+      "task_id": "pct-04",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.000037232,
+      "answer": "200% of 45 is **90**.",
+      "run_id": "run_20260912T185312_462878_pct-04"
+    },
+    {
+      "task_id": "hard-chain-01",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.000050144,
+      "answer": "The final amount is **985.68** (37 items × 24 = 888, plus 11% tax = 985.68).",
+      "run_id": "run_20260912T185320_8577b8_hard-chain-01"
+    },
+    {
+      "task_id": "hard-chain-02",
+      "pass": true,
+      "steps": 4,
+      "cost_usd": 0.00008256000000000001,
+      "answer": "Starting with 1000 and adding 5% three times:\n\n1. 1000 + 5% = 1050\n2. 1050 + 5% = 1102.5\n3. 1102.5 + 5% = 1157.625\n\n**Final amount: 1157.625**",
+      "run_id": "run_20260912T185332_3f987d_hard-chain-02"
+    },
+    {
+      "task_id": "hard-chain-03",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.000059576,
+      "answer": "The sum of 17, 23, 41, and 19 is 100. Dividing by 4 (how many numbers there are) gives an average of **25**.",
+      "run_id": "run_20260912T185337_36a761_hard-chain-03"
+    },
+    {
+      "task_id": "hard-word-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00002984,
+      "answer": "The average speed is **70 km/h** (245 km ÷ 3.5 hours = 70 km/h).",
+      "run_id": "run_20260912T185340_26b48d_hard-word-01"
+    },
+    {
+      "task_id": "hard-word-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0000372,
+      "answer": "The rectangle's area is 14.5 × 8 = 116 m², and its perimeter is 2 × (14.5 + 8) = 45 m. So the area minus the perimeter is **71 m²** (116 − 45 = 71).",
+      "run_id": "run_20260912T185347_fc4f00_hard-word-02"
+    },
+    {
+      "task_id": "hard-word-03",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.000066888,
+      "answer": "Each person pays **$74.50** in total.\n\nBreakdown:\n- Bill share: $187.50 ÷ 3 = $62.50\n- Plus flat tip: $62.50 + $12.00 = $74.50",
+      "run_id": "run_20260912T185350_3d63fe_hard-word-03"
+    },
+    {
+      "task_id": "hard-order-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00003332,
+      "answer": "100 - 20 * 3 + 5 = **45**\n\nMultiplication is performed first: 20 × 3 = 60, then 100 − 60 + 5 = 45.",
+      "run_id": "run_20260912T185404_e6fd1c_hard-order-01"
+    },
+    {
+      "task_id": "hard-order-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00002964,
+      "answer": "The result of (100 - 20) * (3 + 5) is **640**.",
+      "run_id": "run_20260912T185406_b90480_hard-order-02"
+    },
+    {
+      "task_id": "hard-frac-01",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.000059216000000000004,
+      "answer": "5/8 = 0.625. Adding 3/8 (0.375) gives 0.625 + 0.375 = 1.\n\nExact answer: **1**",
+      "run_id": "run_20260912T185407_d958c3_hard-frac-01"
+    },
+    {
+      "task_id": "hard-pct-01",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.000057816,
+      "answer": "Final value: **450**\n\n480 reduced by 25% gives 360, then increased by 25% gives 450.",
+      "run_id": "run_20260912T185412_b87f69_hard-pct-01"
+    }
+  ],
+  "passed": 34,
+  "total": 34,
+  "pass_rate": 1,
+  "total_cost_usd": 0.001387744
+}
