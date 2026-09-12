@@ -20,11 +20,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"time"
 
 	"github.com/ginko97/ariadne/internal/dotenv"
+	"github.com/ginko97/ariadne/internal/eval"
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
 	"github.com/ginko97/ariadne/internal/tool"
@@ -57,6 +59,8 @@ func main() {
 		os.Exit(cmdRun(os.Args[2:]))
 	case "resume":
 		os.Exit(cmdResume(os.Args[2:]))
+	case "eval":
+		os.Exit(cmdEval(os.Args[2:]))
 	case "-h", "--help", "help":
 		usage()
 		os.Exit(exitOK)
@@ -73,6 +77,7 @@ func usage() {
 usage:
   ariadne run    [flags] <task>
   ariadne resume [flags] <run-id>
+  ariadne eval   [flags]                 score a task set, one row per model
 
 flags:
   -model      model id                  (env ARIADNE_MODEL)
@@ -115,7 +120,7 @@ func cmdRun(args []string) int {
 	defer stop()
 
 	store := &loop.Store{Dir: runsDir}
-	agent := newAgent(key, *model, *baseURL, *maxSteps, store)
+	agent := newAgentFor(key, *model, *baseURL, *maxSteps, store)
 
 	state := loop.NewState(newRunID(), task)
 	fmt.Fprintf(os.Stderr, "run %s  model=%s\n", state.RunID, *model)
@@ -164,7 +169,7 @@ func cmdResume(args []string) int {
 
 	// The checkpoint's model wins: a job that finishes on a different model
 	// than it started on is a different job.
-	agent := newAgent(key, state.Model, *baseURL, *maxSteps, store)
+	agent := newAgentFor(key, state.Model, *baseURL, *maxSteps, store)
 
 	fmt.Fprintf(os.Stderr, "resume %s  model=%s  from step %d (%d messages)\n",
 		state.RunID, state.Model, state.Steps, len(state.Messages))
@@ -172,7 +177,7 @@ func cmdResume(args []string) int {
 	return execute(ctx, agent, state)
 }
 
-func newAgent(key, model, baseURL string, maxSteps int, store *loop.Store) *loop.Agent {
+func newAgentFor(key, model, baseURL string, maxSteps int, store *loop.Store) *loop.Agent {
 	reg := tool.New(tool.Calc{})
 	return &loop.Agent{
 		Provider:   llm.NewOpenAI(key, llm.WithBaseURL(baseURL)),
@@ -257,4 +262,91 @@ func apiKey(baseURL string) (key, envName string) {
 		}
 	}
 	return "", "ARIADNE_API_KEY"
+}
+
+// cmdEval scores a task set against one or more models and prints a row each.
+//
+// Every model sees the same tasks, the same tools and the same scoring, which
+// is the only reason the numbers can be compared at all.
+func cmdEval(args []string) int {
+	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	models := fs.String("models", envOr("ARIADNE_MODEL", defaultModel), "comma-separated model ids")
+	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
+	tasksPath := fs.String("tasks", "testdata/tasks.json", "task set")
+	minPass := fs.Float64("min-pass-rate", 0, "exit non-zero if any model scores below this (0 = report only)")
+
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+
+	tasks, err := eval.LoadTasks(*tasksPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne eval: %v\n", err)
+		return exitUsage
+	}
+
+	key, envName := apiKey(*baseURL)
+	if key == "" {
+		fmt.Fprintf(os.Stderr, "ariadne eval: no api key for %s — set %s\n", *baseURL, envName)
+		return exitUsage
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	store := &loop.Store{Dir: runsDir}
+	newAgent := func(model string, maxSteps int) *loop.Agent {
+		return newAgentFor(key, model, *baseURL, maxSteps, store)
+	}
+	newRunID := func(model, taskID string) string {
+		return fmt.Sprintf("%s_%s", newRunID(), taskID)
+	}
+
+	commit := gitCommit()
+	// A model scoring badly is a measurement, not a failure of the command.
+	// Exit status reflects whether the sweep ran; --min-pass-rate is the gate.
+	belowGate := false
+
+	for i, model := range strings.Split(*models, ",") {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "eval %s over %d tasks...\n", model, len(tasks))
+
+		sc := eval.NewScorecard(model, commit,
+			eval.RunTasks(ctx, tasks, model, newAgent, newRunID))
+
+		if i > 0 {
+			fmt.Println()
+		}
+		sc.WriteTable(os.Stdout)
+		if *minPass > 0 && sc.PassRate < *minPass {
+			fmt.Fprintf(os.Stderr, "%s: pass rate %.2f below --min-pass-rate %.2f\n",
+				model, sc.PassRate, *minPass)
+			belowGate = true
+		}
+	}
+
+	// Cancelled mid-sweep is a failure: the numbers are incomplete.
+	if ctx.Err() != nil {
+		fmt.Fprintln(os.Stderr, "ariadne eval: cancelled; scorecards are incomplete")
+		return exitFail
+	}
+	if belowGate {
+		return exitFail
+	}
+	return exitOK
+}
+
+// gitCommit records which code produced a scorecard. Unknown is not an error:
+// an eval run outside a checkout is still a valid measurement, it just cannot
+// be placed in the history.
+func gitCommit() string {
+	out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return "unknown"
+	}
+	return strings.TrimSpace(string(out))
 }
