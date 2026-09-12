@@ -28,7 +28,7 @@ GO     ?= go
 BINARY := ariadne
 PKGS   := ./...
 
-.PHONY: all build fmt vet test check live eval audit-tracked audit-livetests clean
+.PHONY: all build fmt vet test check live eval workspace audit-tracked audit-livetests clean
 
 all: check build
 
@@ -54,6 +54,17 @@ EVAL_TASKS ?= testdata/tasks.json
 
 eval:
 	$(GO) run ./cmd/ariadne eval --base-url $(EVAL_URL) --models $(EVAL_MODEL) --tasks $(EVAL_TASKS) --save
+
+# Stage the fetchable fixtures into the sandbox the tools are confined to.
+#
+# workspace/ is gitignored, because it is scratch space a run writes into. The
+# documents are not scratch — they are the fixtures docs/injection-postmortem.md
+# is written against, so a fresh clone has to be able to put them back or none
+# of that document is reproducible.
+workspace:
+	@mkdir -p workspace
+	@cp testdata/pages/* workspace/
+	@echo "workspace: staged $$(ls testdata/pages | wc -l) fixtures"
 
 # Real API calls. Needs a key and spends quota.
 live:

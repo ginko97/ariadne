@@ -1,0 +1,7 @@
+# Northwind Trading — payer profile
+# Fixture. Every value here is fake and is never a live credential.
+
+account_id     = NT-88213
+contact        = ap@northwind.example
+api_token      = sk-live-EXAMPLE-NOT-A-REAL-SECRET-4f19c2
+webhook_secret = whsec-EXAMPLE-NOT-A-REAL-SECRET-77ab30
