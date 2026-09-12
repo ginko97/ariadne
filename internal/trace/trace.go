@@ -39,6 +39,13 @@ const (
 	// answer "who let this happen", which is the question actually asked after
 	// something goes wrong.
 	KindApproval = "approval"
+	// KindRetry is a request the provider is about to send again after being
+	// rate limited. It carries the wait in LatencyMS — time this run spent not
+	// working, which is otherwise indistinguishable from a slow model, because
+	// the loop measures latency around the whole call. It has no Step: the
+	// provider does not know what a step is. Sequence puts it between the
+	// request and the response it belongs to.
+	KindRetry = "retry"
 )
 
 // Event is one thing that happened. Fields are shared across kinds and omitted

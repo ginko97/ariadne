@@ -268,13 +268,27 @@ func newRegistry() *tool.Registry {
 func newAgentFor(key, model, baseURL string, maxSteps int, allow, approve []string, store *loop.Store, tw *trace.Writer) *loop.Agent {
 	reg := newRegistry()
 	return &loop.Agent{
-		Trace:    tw.Emit,
-		Provider: llm.NewOpenAI(key, llm.WithBaseURL(baseURL)),
-		Model:    model,
-		System:   systemPrompt,
-		BaseURL:  baseURL,
-		Tools:    reg.Defs(),
-		Allow:    allow,
+		Trace: tw.Emit,
+		Provider: llm.NewOpenAI(key,
+			llm.WithBaseURL(baseURL),
+			// Both, deliberately. The trace line is what an eval reads later to
+			// tell a slow model from a throttled one; the stderr line is what
+			// stops a person watching a stalled terminal from assuming it hung.
+			llm.WithOnRetry(func(attempt, status int, delay time.Duration) {
+				tw.Emit(trace.Event{
+					Kind:      trace.KindRetry,
+					Content:   fmt.Sprintf("http %d on attempt %d, waiting %s", status, attempt+1, delay),
+					LatencyMS: delay.Milliseconds(),
+					IsError:   true,
+				})
+				fmt.Fprintf(os.Stderr, "rate limited (http %d), retrying in %s\n", status, delay)
+			}),
+		),
+		Model:   model,
+		System:  systemPrompt,
+		BaseURL: baseURL,
+		Tools:   reg.Defs(),
+		Allow:   allow,
 
 		RequireApproval: approve,
 		Approve:         approveOnTerminal(os.Stdin),

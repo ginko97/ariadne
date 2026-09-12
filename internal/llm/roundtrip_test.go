@@ -245,3 +245,153 @@ func TestCompleteCancellationDuringBackoff(t *testing.T) {
 		t.Errorf("made %d requests, want 1", len(rt.Requests))
 	}
 }
+
+// A number the server named is an answer, not an estimate. Retrying at 30s
+// into a window the server said was 60s is a guaranteed second 429, so the
+// clamped version of the instruction is not a shorter wait — it is a wait that
+// fails. Refusing immediately turns ninety seconds of thrashing into an error
+// the caller can act on.
+func TestCompleteRefusesRetryAfterBeyondCeiling(t *testing.T) {
+	body := []byte(`{"error":{"message":"quota exhausted"}}`)
+	hdr := http.Header{"Retry-After": []string{"60"}}
+	rt := &RecordedTransport{
+		Responses: [][]byte{body, body, body, body},
+		Statuses:  []int{429, 429, 429, 429},
+		Headers:   []http.Header{hdr, hdr, hdr, hdr},
+	}
+
+	var slept []time.Duration
+	o := NewOpenAI("key",
+		WithHTTPClient(&http.Client{Transport: rt}),
+		WithBaseURL("https://example.test/v1"),
+		WithSleep(func(_ context.Context, d time.Duration) error {
+			slept = append(slept, d)
+			return nil
+		}),
+	)
+
+	_, err := o.Complete(context.Background(), Request{Model: "m"})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "1m0s") {
+		t.Errorf("error should name what the server asked for: %v", err)
+	}
+	if len(slept) != 0 {
+		t.Errorf("slept %v; an instruction we cannot follow is not a reason to wait", slept)
+	}
+	if len(rt.Requests) != 1 {
+		t.Errorf("made %d requests, want 1", len(rt.Requests))
+	}
+}
+
+// Per-attempt ceilings do not compose. Three legitimate 30s waits is a minute
+// and a half inside a single step, with nothing having asked for that.
+func TestCompleteStopsAtTotalBackoffCeiling(t *testing.T) {
+	body := []byte(`{"error":{"message":"slow down"}}`)
+	hdr := http.Header{"Retry-After": []string{"30"}}
+	rt := &RecordedTransport{
+		Responses: [][]byte{body, body, body, body, body, body},
+		Statuses:  []int{429, 429, 429, 429, 429, 429},
+		Headers:   []http.Header{hdr, hdr, hdr, hdr, hdr, hdr},
+	}
+
+	var total time.Duration
+	o := NewOpenAI("key",
+		WithHTTPClient(&http.Client{Transport: rt}),
+		WithBaseURL("https://example.test/v1"),
+		WithMaxRetries(10),
+		WithSleep(func(_ context.Context, d time.Duration) error {
+			total += d
+			return nil
+		}),
+	)
+
+	_, err := o.Complete(context.Background(), Request{Model: "m"})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if total > maxTotalBackoff {
+		t.Errorf("waited %s in total, past the %s ceiling", total, maxTotalBackoff)
+	}
+	if !strings.Contains(err.Error(), "gave up after") {
+		t.Errorf("error should say it gave up on a budget: %v", err)
+	}
+}
+
+// A retry is otherwise invisible: the loop times the whole Complete call, so
+// without this hook backoff is recorded as model latency and quietly pollutes
+// the one number evals read timings from.
+func TestCompleteReportsRetriesToTheCaller(t *testing.T) {
+	ok := []byte(`{"choices":[{"message":{"content":"hi"},"finish_reason":"stop"}]}`)
+	rt := &RecordedTransport{
+		Responses: [][]byte{[]byte(`{}`), []byte(`{}`), ok},
+		Statuses:  []int{429, 503, 200},
+	}
+
+	type call struct {
+		attempt, status int
+		delay           time.Duration
+	}
+	var seen []call
+
+	o := NewOpenAI("key",
+		WithHTTPClient(&http.Client{Transport: rt}),
+		WithBaseURL("https://example.test/v1"),
+		WithSleep(func(context.Context, time.Duration) error { return nil }),
+		WithOnRetry(func(attempt, status int, delay time.Duration) {
+			seen = append(seen, call{attempt, status, delay})
+		}),
+	)
+
+	resp, err := o.Complete(context.Background(), Request{Model: "m"})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if resp.Text() != "hi" {
+		t.Errorf("text = %q", resp.Text())
+	}
+
+	if len(seen) != 2 {
+		t.Fatalf("OnRetry fired %d times, want 2: %+v", len(seen), seen)
+	}
+	// The status matters: a 429 is a quota problem and a 503 is not, and the
+	// difference decides whether a slower sweep would have helped.
+	if seen[0].status != 429 || seen[1].status != 503 {
+		t.Errorf("statuses = %d, %d; want 429 then 503", seen[0].status, seen[1].status)
+	}
+	if seen[0].delay != defaultInitialBackoff || seen[1].delay != 2*defaultInitialBackoff {
+		t.Errorf("delays = %v, %v; want the doubling sequence", seen[0].delay, seen[1].delay)
+	}
+	if seen[0].attempt != 0 || seen[1].attempt != 1 {
+		t.Errorf("attempts = %d, %d; want 0 then 1", seen[0].attempt, seen[1].attempt)
+	}
+}
+
+// A status the server is not going to change its mind about must not be
+// retried: three more round trips delay a failure the caller can already act
+// on, and a 400 is not going to become a 200.
+func TestCompleteDoesNotRetryClientErrors(t *testing.T) {
+	for _, code := range []int{400, 401, 403, 404, 422, 500} {
+		body := []byte(`{"error":{"message":"nope"}}`)
+		rt := &RecordedTransport{
+			Responses: [][]byte{body, body, body, body},
+			Statuses:  []int{code, code, code, code},
+		}
+		slept := 0
+		o := NewOpenAI("key",
+			WithHTTPClient(&http.Client{Transport: rt}),
+			WithBaseURL("https://example.test/v1"),
+			WithSleep(func(context.Context, time.Duration) error { slept++; return nil }),
+		)
+		if _, err := o.Complete(context.Background(), Request{Model: "m"}); err == nil {
+			t.Errorf("%d: expected an error", code)
+		}
+		if len(rt.Requests) != 1 {
+			t.Errorf("%d: made %d requests, want 1", code, len(rt.Requests))
+		}
+		if slept != 0 {
+			t.Errorf("%d: slept %d times on a status that will not change", code, slept)
+		}
+	}
+}

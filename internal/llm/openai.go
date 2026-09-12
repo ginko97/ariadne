@@ -19,20 +19,44 @@ const (
 	defaultTimeout        = 120 * time.Second
 	defaultMaxRetries     = 3
 	defaultInitialBackoff = 500 * time.Millisecond
-	maxBackoffDelay       = 30 * time.Second
-	maxErrBodyLength      = 512
+	// maxBackoffDelay bounds a delay we invented. It is deliberately not
+	// applied to a delay the server named: retrying at 30s into a window the
+	// server said was 60s guarantees a second 429, so clamping an explicit
+	// instruction spends the wait and fails anyway — worse than either
+	// honouring it or refusing outright. See backoff.
+	maxBackoffDelay = 30 * time.Second
+	// maxTotalBackoff bounds the whole retry sequence. Per-attempt ceilings do
+	// not compose: three legitimate 30s waits is a minute and a half inside one
+	// step, with nothing on the command line having asked for that.
+	maxTotalBackoff  = 90 * time.Second
+	maxErrBodyLength = 512
 )
 
 // OpenAI speaks the OpenAI chat-completions protocol. That protocol is a de
 // facto standard, so the same type reaches OpenRouter, Gemini's compatibility
 // endpoint, Groq, Together and a local Ollama — only BaseURL changes.
 type OpenAI struct {
-	APIKey     string
-	BaseURL    string
-	Extra      http.Header // e.g. OpenRouter's HTTP-Referer / X-Title
-	HTTP       *http.Client
+	APIKey  string
+	BaseURL string
+	Extra   http.Header // e.g. OpenRouter's HTTP-Referer / X-Title
+	HTTP    *http.Client
+	// MaxRetries is how many times a rate-limited request is tried again.
+	// NewOpenAI sets it; the zero value means no retries, so a struct literal
+	// gets the old behaviour rather than a surprise.
 	MaxRetries int
-	Sleep      func(ctx context.Context, d time.Duration) error
+	// Sleep is the wait between attempts, injectable so tests do not sleep.
+	Sleep func(ctx context.Context, d time.Duration) error
+	// OnRetry, if set, is called before each wait.
+	//
+	// A retry is otherwise invisible: the caller sees one Complete that took a
+	// long time, with nothing to say whether the model was slow or the gateway
+	// was refusing. The loop measures latency around this call, so without a
+	// hook the backoff would be recorded as model latency and quietly pollute
+	// the one thing evals read timings from.
+	//
+	// A callback rather than a trace import: internal/llm does not know what a
+	// run is, and should not learn in order to say "waiting 20s".
+	OnRetry func(attempt, status int, delay time.Duration)
 }
 
 // Compile-time proof. Fails at build time rather than at a call site elsewhere.
@@ -78,6 +102,10 @@ func WithMaxRetries(n int) OpenAIOption {
 
 func WithSleep(fn func(context.Context, time.Duration) error) OpenAIOption {
 	return func(o *OpenAI) { o.Sleep = fn }
+}
+
+func WithOnRetry(fn func(attempt, status int, delay time.Duration)) OpenAIOption {
+	return func(o *OpenAI) { o.OnRetry = fn }
 }
 
 func NewOpenAI(apiKey string, opts ...OpenAIOption) *OpenAI {
@@ -136,6 +164,8 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
 		maxRetries = 0
 	}
 
+	var spentBackoff time.Duration
+
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return Response{}, err
@@ -164,8 +194,9 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
 			return Response{}, fmt.Errorf("openai: request failed: %w", err)
 		}
 
+		// ReadAll consumes to EOF, which is the drain: the connection goes back
+		// to the pool reusable without a separate io.Copy.
 		body, readErr := io.ReadAll(resp.Body)
-		io.Copy(io.Discard, resp.Body) // drain, so the connection returns to the pool usable
 		resp.Body.Close()
 
 		if readErr != nil {
@@ -173,10 +204,32 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
 		}
 
 		if isRetryableStatus(resp.StatusCode) && attempt < maxRetries {
-			delay := calculateBackoff(attempt, resp, body)
-			if sleepErr := o.sleep(ctx, delay); sleepErr != nil {
+			wait := backoff(attempt, resp, body)
+
+			// An instruction we cannot follow is not a reason to guess. Retrying
+			// early into a window the server named is a guaranteed second 429,
+			// so say what it asked for and stop — an error in a second beats the
+			// same error after a minute and a half.
+			if wait.explicit && wait.delay > maxBackoffDelay {
+				return Response{}, fmt.Errorf(
+					"openai: %s: server asked to wait %s, beyond the %s this client will hold a request: %s",
+					resp.Status, wait.delay.Round(time.Second), maxBackoffDelay,
+					truncate(body, maxErrBodyLength))
+			}
+			if spentBackoff+wait.delay > maxTotalBackoff {
+				return Response{}, fmt.Errorf(
+					"openai: %s: gave up after %s of backoff over %d attempts (ceiling %s): %s",
+					resp.Status, spentBackoff.Round(time.Second), attempt+1, maxTotalBackoff,
+					truncate(body, maxErrBodyLength))
+			}
+
+			if o.OnRetry != nil {
+				o.OnRetry(attempt, resp.StatusCode, wait.delay)
+			}
+			if sleepErr := o.sleep(ctx, wait.delay); sleepErr != nil {
 				return Response{}, sleepErr
 			}
+			spentBackoff += wait.delay
 			continue
 		}
 
@@ -188,26 +241,40 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
 	}
 }
 
-func calculateBackoff(attempt int, resp *http.Response, body []byte) time.Duration {
+// retryWait is how long to wait, and whether the server said so or we guessed.
+//
+// The distinction decides what a ceiling means. Our own guess is an estimate
+// and clamping it loses nothing. A number the server named is the answer to
+// "when will this work", and a clamped version of it is not a smaller wait —
+// it is a wait that fails.
+type retryWait struct {
+	delay    time.Duration
+	explicit bool
+}
+
+// backoff reads the server's instruction if there is one, and otherwise doubles.
+//
+// Two places carry it. Retry-After is the HTTP standard; Gemini instead returns
+// google.rpc.RetryInfo inside the error body, which is where the 20s in
+// testdata/rate_limit_429.json lives. Header first: it is the one a gateway in
+// front of the model is able to set.
+func backoff(attempt int, resp *http.Response, body []byte) retryWait {
 	if resp != nil {
 		if d, ok := parseRetryAfter(resp.Header.Get("Retry-After")); ok {
-			if d > maxBackoffDelay {
-				return maxBackoffDelay
-			}
-			return d
+			return retryWait{delay: d, explicit: true}
 		}
 	}
 	if d, ok := parseRetryDelayFromBody(body); ok {
-		if d > maxBackoffDelay {
-			return maxBackoffDelay
-		}
-		return d
+		return retryWait{delay: d, explicit: true}
 	}
+
+	// No instruction, so double from the initial delay. Capped, because this
+	// number is invented and an invented number should not stall a job.
 	delay := defaultInitialBackoff * (1 << attempt)
 	if delay > maxBackoffDelay {
 		delay = maxBackoffDelay
 	}
-	return delay
+	return retryWait{delay: delay}
 }
 
 func parseRetryAfter(header string) (time.Duration, bool) {
