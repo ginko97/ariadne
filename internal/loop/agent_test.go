@@ -210,9 +210,10 @@ func TestCheckpointCalledEveryStep(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// step 1 writes after the tool result (3 messages), then StopEnd writes the
-	// finished conversation (4 messages).
-	want := []int{3, 4}
+	// Per call, not per step: after the assistant turn requests a tool (2
+	// messages, nothing executed), after the result lands (3), and after the
+	// final answer (4). The first of those is what makes resume safe.
+	want := []int{2, 3, 4}
 	if len(seen) != len(want) {
 		t.Fatalf("checkpoint called %d times with %v, want %d", len(seen), seen, len(want))
 	}
@@ -237,5 +238,83 @@ func TestCheckpointFailureFailsRun(t *testing.T) {
 	_, err := a.Run(context.Background(), NewState("run_cp2", "t"))
 	if !errors.Is(err, boom) {
 		t.Fatalf("got %v, want the checkpoint error", err)
+	}
+}
+
+// The claim: a resumed run finishes a half-executed batch without re-firing the
+// calls that already completed, and without asking the model again — which
+// would mint fresh call IDs and defeat any idempotency key.
+func TestResumeFinishesBatchWithoutRefiring(t *testing.T) {
+	// A checkpoint as a crash would leave it: two calls requested, one done.
+	s := NewState("run_resume", "two things")
+	s.Model = "test"
+	s.Steps = 1
+	s.Messages = append(s.Messages,
+		llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{
+			{Type: llm.BlockToolUse, ID: "call_a", Name: "calc", Args: json.RawMessage(`{"expr":"1+1"}`)},
+			{Type: llm.BlockToolUse, ID: "call_b", Name: "calc", Args: json.RawMessage(`{"expr":"2+2"}`)},
+		}},
+		llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{
+			{Type: llm.BlockToolResult, CallID: "call_a", Content: "2"},
+		}},
+	)
+
+	// Only one provider response is scripted: if the loop asks the model before
+	// finishing the batch, Fake runs dry and the test fails loudly.
+	fake := &llm.Fake{Responses: []llm.Response{endResponse("done", 1, 1)}}
+
+	var ran []string
+	a := &Agent{
+		Provider: fake, Model: "test", MaxSteps: 10, Price: testPrice,
+		RunTool: func(_ context.Context, c llm.ToolCall) (llm.ToolResult, error) {
+			ran = append(ran, c.ID)
+			return llm.ToolResult{Content: "4"}, nil
+		},
+	}
+
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// call_a already had its side effect. Running it again is the bug.
+	if len(ran) != 1 || ran[0] != "call_b" {
+		t.Fatalf("executed %v, want only [call_b]", ran)
+	}
+
+	// The finished batch reached the provider as one message with both results,
+	// each keyed to its original id.
+	sent := fake.Calls[0].Messages
+	results := sent[len(sent)-1].Blocks
+	if len(results) != 2 || results[0].CallID != "call_a" || results[1].CallID != "call_b" {
+		t.Errorf("results message = %+v, want both original call ids", results)
+	}
+}
+
+// A crash after the calls were requested but before any ran: all of them are
+// pending, none have been executed, and the model is still not re-asked.
+func TestResumeRunsWholeBatchWhenNoneCompleted(t *testing.T) {
+	s := NewState("run_resume2", "one thing")
+	s.Model = "test"
+	s.Steps = 1
+	s.Messages = append(s.Messages, llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{
+		{Type: llm.BlockToolUse, ID: "call_z", Name: "calc", Args: json.RawMessage(`{"expr":"3+3"}`)},
+	}})
+
+	fake := &llm.Fake{Responses: []llm.Response{endResponse("done", 1, 1)}}
+
+	var ran []string
+	a := &Agent{
+		Provider: fake, Model: "test", MaxSteps: 10, Price: testPrice,
+		RunTool: func(_ context.Context, c llm.ToolCall) (llm.ToolResult, error) {
+			ran = append(ran, c.ID)
+			return llm.ToolResult{Content: "6"}, nil
+		},
+	}
+
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(ran) != 1 || ran[0] != "call_z" {
+		t.Fatalf("executed %v, want [call_z]", ran)
 	}
 }

@@ -36,3 +36,66 @@ func NewState(runID, task string) *State {
 		}},
 	}
 }
+
+// pendingToolCalls returns tool calls from the final assistant turn that do not
+// yet have a result.
+//
+// This is what makes resume safe. Asking the model again would produce fresh,
+// provider-assigned call IDs, so a tool that already ran would run a second time
+// under a different key — an idempotency key only helps when the retry carries
+// the same key. Finishing the batch from the conversation itself keeps the
+// original IDs and never re-fires a completed call.
+func (s *State) pendingToolCalls() []llm.ToolCall {
+	if len(s.Messages) == 0 {
+		return nil
+	}
+	last := s.Messages[len(s.Messages)-1]
+
+	var assistant llm.Message
+	done := map[string]bool{}
+
+	switch {
+	case last.Role == llm.RoleAssistant:
+		// Crashed between requesting the calls and opening the results message.
+		assistant = last
+	case isToolResults(last) && len(s.Messages) >= 2:
+		// Crashed part-way through the batch.
+		assistant = s.Messages[len(s.Messages)-2]
+		for _, b := range last.Blocks {
+			if b.Type == llm.BlockToolResult {
+				done[b.CallID] = true
+			}
+		}
+	default:
+		return nil
+	}
+
+	if assistant.Role != llm.RoleAssistant {
+		return nil
+	}
+
+	var pending []llm.ToolCall
+	for _, b := range assistant.Blocks {
+		if b.Type != llm.BlockToolUse || done[b.ID] {
+			continue
+		}
+		pending = append(pending, llm.ToolCall{ID: b.ID, Name: b.Name, Args: b.Args})
+	}
+	return pending
+}
+
+// isToolResults reports whether m is a results message: a user turn carrying
+// only tool_result blocks. A user turn with no blocks counts — that is the
+// moment between opening a batch and the first result landing. The initial task
+// message does not, because it carries text.
+func isToolResults(m llm.Message) bool {
+	if m.Role != llm.RoleUser {
+		return false
+	}
+	for _, b := range m.Blocks {
+		if b.Type != llm.BlockToolResult {
+			return false
+		}
+	}
+	return true
+}
