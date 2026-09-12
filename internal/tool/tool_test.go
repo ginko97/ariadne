@@ -120,3 +120,42 @@ func TestRegistryUnknownTool(t *testing.T) {
 		t.Fatalf("got %v, want ErrUnknownTool", err)
 	}
 }
+
+// Go's bitwise operators mean something no one asking a calculator wants, and
+// they produce a number rather than an error. "2^3 % 5" returned 1 instead of 3
+// — silently, because floatify (which would have made ^ a type error) is
+// skipped whenever % is present.
+func TestCalcRefusesBitwiseOperators(t *testing.T) {
+	for _, expr := range []string{"2^3", "2^3 % 5", "10 % 3 + 2^3", "8 >> 1", "6 & 3", "6 | 3"} {
+		args, _ := json.Marshal(calcArgs{Expr: expr})
+		res, err := (Calc{}).Call(context.Background(), "c1", args)
+		if err != nil {
+			t.Errorf("%q: want an IsError result, got a returned error: %v", expr, err)
+			continue
+		}
+		if !res.IsError {
+			t.Errorf("%q evaluated to %q instead of being refused", expr, res.Content)
+			continue
+		}
+		// The message has to tell the model what to write instead, or it will
+		// just try the same thing again.
+		if !strings.Contains(res.Content, "2*2*2") {
+			t.Errorf("%q: message does not suggest an alternative: %s", expr, res.Content)
+		}
+	}
+}
+
+// Arithmetic that happens to be fine must still work.
+func TestCalcStillAllowsOrdinaryArithmetic(t *testing.T) {
+	for _, tc := range []struct{ expr, want string }{
+		{"7 % 4", "3"},
+		{"10 % 3", "1"},
+		{"(2+3)*4", "20"},
+	} {
+		args, _ := json.Marshal(calcArgs{Expr: tc.expr})
+		res, _ := (Calc{}).Call(context.Background(), "c1", args)
+		if res.IsError || res.Content != tc.want {
+			t.Errorf("%q = %q (isError=%v), want %q", tc.expr, res.Content, res.IsError, tc.want)
+		}
+	}
+}

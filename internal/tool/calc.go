@@ -70,6 +70,17 @@ func (Calc) Call(_ context.Context, _ string, args json.RawMessage) (llm.ToolRes
 	if in.Expr == "" {
 		return fail("calc: expr is required")
 	}
+	if op := bitwiseOp(in.Expr); op != "" {
+		// Go's grammar gives these a meaning no one asking a calculator wants:
+		// ^ is XOR, not exponentiation, and it binds like +. So "2^3 % 5" would
+		// quietly return 1 instead of 3. floatify usually rescues this by making
+		// the operands floats, where ^ is undefined — but it is skipped whenever
+		// % is present, which is exactly when someone is doing modular
+		// arithmetic and most likely to want a power. Refuse instead, and say
+		// what to write.
+		return fail("calc: %q is not supported — ^ is bitwise XOR here, not a power. "+
+			"Expand it, e.g. 2*2*2 instead of 2^3", op)
+	}
 
 	tv, err := types.Eval(token.NewFileSet(), nil, token.NoPos, floatify(in.Expr))
 	if err != nil {
@@ -125,4 +136,17 @@ func floatify(expr string) string {
 		return expr
 	}
 	return buf.String()
+}
+
+// bitwiseOp reports the first Go bitwise operator in expr, or "".
+//
+// None of these mean in arithmetic what they mean in Go, and all of them would
+// otherwise produce a number rather than an error.
+func bitwiseOp(expr string) string {
+	for _, op := range []string{"<<", ">>", "&^", "^", "&", "|"} {
+		if strings.Contains(expr, op) {
+			return op
+		}
+	}
+	return ""
 }

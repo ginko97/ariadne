@@ -214,5 +214,95 @@
       "calc"
     ],
     "max_steps": 5
+  },
+  {
+    "id": "hard-chain-01",
+    "prompt": "Using the calc tool one step at a time: a shop sells 37 items at 24 each, then adds 11% tax to the total. What is the final amount?",
+    "expect": "985.68",
+    "must_call": [
+      "calc"
+    ],
+    "max_steps": 6
+  },
+  {
+    "id": "hard-chain-02",
+    "prompt": "Using the calc tool one step at a time: start with 1000, add 5%, then add 5% to that result, then add 5% again. State the final amount.",
+    "expect": "1157.625",
+    "must_call": [
+      "calc"
+    ],
+    "max_steps": 8
+  },
+  {
+    "id": "hard-chain-03",
+    "prompt": "Using the calc tool one step at a time: compute the average of 17, 23, 41 and 19 by first summing them and then dividing by how many there are. State the average.",
+    "expect": "25",
+    "must_call": [
+      "calc"
+    ],
+    "max_steps": 8
+  },
+  {
+    "id": "hard-word-01",
+    "prompt": "A train travels 245 km in 3.5 hours. Using the calc tool, what is its average speed in km per hour?",
+    "expect": "70",
+    "must_call": [
+      "calc"
+    ],
+    "max_steps": 6
+  },
+  {
+    "id": "hard-word-02",
+    "prompt": "Using the calc tool: a rectangle is 14.5 m by 8 m. What is its area minus its perimeter?",
+    "expect": "71",
+    "must_call": [
+      "calc"
+    ],
+    "max_steps": 8
+  },
+  {
+    "id": "hard-word-03",
+    "prompt": "Using the calc tool one step at a time: 3 people split a bill of 187.50 evenly, then each adds a 12 tip. What does each person pay in total?",
+    "expect": "74.5",
+    "must_call": [
+      "calc"
+    ],
+    "max_steps": 8
+  },
+  {
+    "id": "hard-order-01",
+    "prompt": "Using the calc tool, what is 100 - 20 * 3 + 5? Mind the order of operations.",
+    "expect": "45",
+    "must_call": [
+      "calc"
+    ],
+    "max_steps": 5
+  },
+  {
+    "id": "hard-order-02",
+    "prompt": "Using the calc tool, what is (100 - 20) * (3 + 5)?",
+    "expect": "640",
+    "must_call": [
+      "calc"
+    ],
+    "max_steps": 5
+  },
+  {
+    "id": "hard-frac-01",
+    "prompt": "Using the calc tool one step at a time: compute 5/8, then add 3/8 to it. State the exact answer.",
+    "expect": "1",
+    "must_call": [
+      "calc"
+    ],
+    "max_steps": 6
+  },
+  {
+    "id": "hard-pct-01",
+    "prompt": "Using the calc tool one step at a time: 480 is reduced by 25%, and the result is then increased by 25%. State the final value.",
+    "expect": "450",
+    "must_call": [
+      "calc"
+    ],
+    "max_steps": 8
   }
 ]
