@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -187,21 +189,99 @@ func TestSandboxWithSymlinkedRoot(t *testing.T) {
 	}
 }
 
-// Drive prefixes or absolute paths on Windows must not escape the sandbox root.
+// Drive prefixes and UNC paths must not escape the sandbox root. Asserted
+// through the tool rather than against an internal helper, so the test still
+// means something when the confinement mechanism is replaced.
 func TestSandboxWindowsDriveEscape(t *testing.T) {
 	dir := t.TempDir()
-	s := sandbox{root: dir}
 	for _, p := range []string{
 		`C:\windows\system32\calc.exe`,
 		`D:\secret.txt`,
 		`\\server\share\file.txt`,
+		`C:/windows/system32/drivers/etc/hosts`,
 	} {
-		resolved, err := s.resolve(p)
-		if err == nil {
-			rel, relErr := filepath.Rel(dir, resolved)
-			if relErr != nil || strings.HasPrefix(rel, "..") {
-				t.Errorf("resolve(%q) = %q, which escapes %q", p, resolved, dir)
-			}
+		if _, isErr := call(t, NewWriteFile(dir), writeArgs{Path: p, Content: "x"}); !isErr {
+			t.Errorf("write_file %q was not refused", p)
 		}
+		if _, isErr := call(t, NewFetch(dir), fetchArgs{Path: p}); !isErr {
+			t.Errorf("fetch %q was not refused", p)
+		}
+	}
+}
+
+// junction makes a Windows directory junction. It needs no privileges, unlike
+// os.Symlink — which is why the two symlink tests above skip on an ordinary
+// Windows account and this one does not. The escape they were written to catch
+// was reachable here the whole time.
+func junction(t *testing.T, link, target string) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		t.Skip("junctions are a Windows reparse point")
+	}
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+		t.Skipf("mklink /J unavailable: %v: %s", err, out)
+	}
+}
+
+// A junction inside the sandbox pointing outside it must not be a way out.
+//
+// This is the case lexical resolution could not see: EvalSymlinks returns a
+// junction unchanged with a nil error, and fails on a path leading through one,
+// so a prefix check on the unresolved path passed while the OS followed the
+// link. Both tools escaped — fetch read the file and write_file planted one.
+func TestSandboxRejectsJunctionEscape(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("classified"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	junction(t, filepath.Join(dir, "bridge"), outside)
+
+	got, isErr := call(t, NewFetch(dir), fetchArgs{Path: "bridge/secret.txt"})
+	if strings.Contains(got, "classified") {
+		t.Errorf("fetch crossed a junction out of the sandbox: %q", got)
+	}
+	if !isErr {
+		t.Errorf("fetch through a junction was not refused: %q", got)
+	}
+
+	if _, isErr := call(t, NewWriteFile(dir), writeArgs{Path: "bridge/planted.txt", Content: "pwned"}); !isErr {
+		t.Error("write_file through a junction was not refused")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "planted.txt")); err == nil {
+		t.Error("write_file crossed a junction and planted a file outside the sandbox")
+	}
+}
+
+// The mirror: a sandbox root that is itself a junction must still work. This is
+// what the old prefix check got wrong in the other direction — it compared a
+// resolved path against an unresolved root and refused every legitimate path.
+func TestSandboxWithJunctionedRoot(t *testing.T) {
+	realRoot := t.TempDir()
+	linkRoot := filepath.Join(t.TempDir(), "root_link")
+	junction(t, linkRoot, realRoot)
+
+	got, isErr := call(t, NewWriteFile(linkRoot), writeArgs{Path: "notes/hello.txt", Content: "ok"})
+	if isErr {
+		t.Fatalf("legitimate write through a junctioned root was refused: %s", got)
+	}
+	gotF, isErrF := call(t, NewFetch(linkRoot), fetchArgs{Path: "notes/hello.txt"})
+	if isErrF || gotF != "ok" {
+		t.Fatalf("fetch through a junctioned root failed: %q isErr=%v", gotF, isErrF)
+	}
+}
+
+// The sandbox root need not exist before the first write. A job should not fail
+// because nothing has created the directory yet.
+func TestWriteFileCreatesMissingRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "workspace")
+
+	got, isErr := call(t, NewWriteFile(root), writeArgs{Path: "a/b/c.txt", Content: "deep"})
+	if isErr {
+		t.Fatalf("write into a missing root failed: %s", got)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "a", "b", "c.txt"))
+	if err != nil || string(data) != "deep" {
+		t.Errorf("file = %q, err = %v", data, err)
 	}
 }

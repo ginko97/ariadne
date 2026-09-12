@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/ginko97/ariadne/internal/llm"
 )
@@ -17,57 +16,44 @@ import (
 // sees may have been written by someone else — a fetched page, a previous tool
 // result. So a path argument is untrusted input in the ordinary security sense,
 // and the only safe assumption is that it will eventually contain "..".
+//
+// Confinement is os.Root's job rather than ours, and that is the whole design.
+// An earlier version did it lexically: clean the path, resolve symlinks, then
+// check the result still has the root as a prefix. A Windows directory junction
+// — which `mklink /J` creates with no privileges at all — walked straight
+// through that. filepath.EvalSymlinks returns a junction *unchanged* with a nil
+// error, and errors outright on a path leading through one, so both branches
+// left the path unresolved and the lexical check then passed on a path the OS
+// would happily follow out of the tree. Read and write both escaped.
+//
+// os.Root enforces the boundary per path component at the syscall layer, so a
+// reparse point that leaves the tree is refused there rather than argued about
+// here. The lesson is worth more than the fix: path arithmetic describes what a
+// name looks like, and confinement is a question about what the filesystem will
+// do with it. Only the kernel knows the second one.
+//
+// One deliberate behaviour change: absolute paths are now refused rather than
+// remapped inside the root. Silently rewriting "/etc/passwd" to something else
+// was never what the caller meant, and a refusal the model can read is better
+// than a surprise it cannot.
 type sandbox struct{ root string }
 
-// resolve maps a model-supplied path to an absolute one inside the sandbox.
+// open returns a handle confined to the sandbox root.
 //
-// Clean("/"+rel) is the load-bearing part: rooting the path first collapses any
-// leading "..", so "../../etc/passwd" becomes "/etc/passwd" and then joins under
-// root rather than escaping it. The check afterwards is belt and braces, and
-// catches symlinks that Clean cannot see.
-func (s sandbox) resolve(rel string) (string, error) {
-	if rel == "" {
-		return "", fmt.Errorf("path is required")
-	}
+// Opened per call rather than held on the struct: the tools stay values with no
+// lifecycle and nothing to close, and a root that is moved or replaced between
+// calls cannot leave a stale handle pointing at wherever it went.
+func (s sandbox) open() (*os.Root, error) {
+	return os.OpenRoot(s.root)
+}
 
-	root, err := filepath.Abs(s.root)
-	if err != nil {
-		return "", fmt.Errorf("bad sandbox root: %w", err)
+// openForWrite is open, plus creating the root if this is a run's first write.
+// A job should not fail because nothing has made the directory yet.
+func (s sandbox) openForWrite() (*os.Root, error) {
+	if err := os.MkdirAll(s.root, 0o755); err != nil {
+		return nil, err
 	}
-	if resolvedRoot, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolvedRoot
-	}
-
-	abs := filepath.Join(root, filepath.Clean("/"+rel))
-
-	// Resolve symlinks. If abs or any of its ancestors does not exist yet,
-	// find the deepest existing ancestor, resolve symlinks on it, and reattach
-	// the uncreated suffix.
-	p := abs
-	var uncreated []string
-	for {
-		if _, err := os.Lstat(p); err == nil {
-			break
-		}
-		parent := filepath.Dir(p)
-		if parent == p {
-			break
-		}
-		uncreated = append([]string{filepath.Base(p)}, uncreated...)
-		p = parent
-	}
-	if resolved, err := filepath.EvalSymlinks(p); err == nil {
-		abs = resolved
-		for _, part := range uncreated {
-			abs = filepath.Join(abs, part)
-		}
-	}
-
-	relPath, err := filepath.Rel(root, abs)
-	if err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path %q escapes the sandbox", rel)
-	}
-	return abs, nil
+	return os.OpenRoot(s.root)
 }
 
 // ---------------------------------------------------------------- fetch
@@ -113,11 +99,17 @@ func (f Fetch) Call(_ context.Context, _ string, args json.RawMessage) (llm.Tool
 	if err := json.Unmarshal(args, &in); err != nil {
 		return fail("fetch: bad arguments: %v", err)
 	}
-	abs, err := f.resolve(in.Path)
+	if in.Path == "" {
+		return fail("fetch: path is required")
+	}
+
+	root, err := f.open()
 	if err != nil {
 		return fail("fetch: %v", err)
 	}
-	data, err := os.ReadFile(abs)
+	defer root.Close()
+
+	data, err := root.ReadFile(in.Path)
 	if err != nil {
 		return fail("fetch: cannot read %q: %v", in.Path, err)
 	}
@@ -171,14 +163,26 @@ func (w WriteFile) Call(_ context.Context, _ string, args json.RawMessage) (llm.
 	if err := json.Unmarshal(args, &in); err != nil {
 		return fail("write_file: bad arguments: %v", err)
 	}
-	abs, err := w.resolve(in.Path)
+	if in.Path == "" {
+		return fail("write_file: path is required")
+	}
+
+	root, err := w.openForWrite()
 	if err != nil {
 		return fail("write_file: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return fail("write_file: %v", err)
+	defer root.Close()
+
+	// filepath.Dir takes either separator on Windows, so "notes/todo.txt" and
+	// "notes\todo.txt" reach the same directory. MkdirAll is confined by the
+	// same root, so a parent that escapes is refused here rather than created
+	// first and written into afterwards.
+	if dir := filepath.Dir(in.Path); dir != "." && dir != string(filepath.Separator) {
+		if err := root.MkdirAll(dir, 0o755); err != nil {
+			return fail("write_file: %v", err)
+		}
 	}
-	if err := os.WriteFile(abs, []byte(in.Content), 0o600); err != nil {
+	if err := root.WriteFile(in.Path, []byte(in.Content), 0o600); err != nil {
 		return fail("write_file: %v", err)
 	}
 	return llm.ToolResult{Content: fmt.Sprintf("wrote %d bytes to %s", len(in.Content), in.Path)}, nil

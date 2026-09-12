@@ -1,9 +1,10 @@
 # An agent that followed instructions from a document
 
 A write-up of one prompt injection against this agent: how it was staged, the
-trace where it worked, the three controls added afterwards, and what those
-controls still do not cover. Every claim has a trace in `testdata/traces/`
-behind it.
+trace where it worked, the controls added afterwards, and what those controls
+still do not cover. It also covers the sandbox escape found while writing the
+tests for them, which was the more serious bug and the one none of the
+injection work would have caught.
 
 All four runs use the same model, `deepseek/deepseek-v4-flash-0731` via
 OpenRouter, against fixtures in `testdata/pages/`.
@@ -85,6 +86,76 @@ to. So this particular attempt was survivable: the evidence was in the answer.
 An attacker who omits the "do not mention it" line gets the same write with no
 mention, and the only record is the trace. That is the version to design
 against, and it is strictly easier to write.
+
+---
+
+## Control 0: the sandbox, which was not one
+
+Every control below assumes `fetch` and `write_file` cannot leave `workspace/`.
+That assumption was false on Windows for the whole exercise, and this is the
+most useful bug in the document because none of the injection work would have
+found it — the attacks all asked the agent to write *inside* the sandbox, and
+it obligingly did.
+
+Confinement was lexical: clean the path, resolve symlinks, check the result
+still has the root as a prefix. Against `../../etc/passwd` that works. Against a
+**directory junction** it does not, and `mklink /J` creates one with no
+privileges at all:
+
+```
+mklink /J workspace\bridge  C:\somewhere\else
+
+fetch      bridge/secret.txt   -> isError=false   "classified"
+write_file bridge/planted.txt  -> "wrote 5 bytes"     (landed outside)
+```
+
+The reason is specific and worth keeping:
+
+```
+bridge              Lstat        = ?rw-rw-rw-   (ModeIrregular, not ModeSymlink)
+                    EvalSymlinks = bridge       <- nil error, resolved nothing
+bridge\secret.txt   EvalSymlinks = ""           <- "cannot find the path specified"
+```
+
+`filepath.EvalSymlinks` returns a junction *unchanged* with a nil error, and
+errors outright on a path leading through one. The code read `err == nil` as
+"resolved" and `err != nil` as "leave it alone", so **both branches failed
+open**: the check then ran against a lexical path that sits happily inside the
+sandbox, and the OS followed the link anyway.
+
+The fix is to stop doing path arithmetic. `os.Root` (Go 1.24+) enforces the
+boundary per component at the syscall layer:
+
+```
+ReadFile  "bridge/secret.txt"     -> openat: path escapes from parent
+ReadFile  "bridge\secret.txt"     -> openat: path escapes from parent
+ReadFile  "../outside/secret.txt" -> openat: path escapes from parent
+ReadFile  "/outside/secret.txt"   -> openat: path escapes from parent
+```
+
+Three things this cost, in order of how much they should sting.
+
+**The tests that would have caught it did not run.** There were two symlink
+tests. Both call `os.Symlink`, which needs Developer Mode or an elevated
+account on Windows, so both had been quietly `t.Skip`-ing on the machine where
+`make check` was going green. A skipped test reads exactly like a passing one in
+a summary line. Junctions need no privileges, so the replacement test actually
+executes on an ordinary account — and it fails against the old code on four
+assertions.
+
+**Path arithmetic answers the wrong question.** `filepath` describes what a name
+looks like. Confinement is a question about what the filesystem will do when
+asked to open it. Only the kernel knows the second one, and every lexical
+sandbox is a bet that the two agree.
+
+**It undercut the controls below, not just itself.** The allow-list stops
+`write_file` from being called at all. It says nothing about where `write_file`
+writes once it is called legitimately, and the approval prompt would have shown
+the operator a path that looked safe.
+
+One deliberate behaviour change came with the fix: absolute paths are refused
+now rather than remapped inside the root. Silently rewriting `/etc/passwd` to
+`workspace/etc/passwd` was never what any caller meant.
 
 ---
 
@@ -211,6 +282,12 @@ artefact to notice. That is the more realistic attack and it has not been tried.
 **The fence is imitable.** The closing marker is a fixed string in a document
 the attacker is writing. Nothing stops them closing the fence early and
 continuing outside it.
+
+**Confinement is only as good as the primitive underneath it.** The sandbox
+escape in Control 0 was open the entire time the other three were being built
+and measured. Every one of those measurements is still valid — they answer a
+different question — which is precisely why none of them noticed. Assume the
+same is true of something not yet found here.
 
 **The approval prompt is thin.** It reads a line from stdin. It has no timeout,
 does not honour cancellation while blocked (`os.Stdin` takes no deadline), shows
