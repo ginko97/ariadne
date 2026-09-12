@@ -270,7 +270,11 @@ func backoff(attempt int, resp *http.Response, body []byte) retryWait {
 
 	// No instruction, so double from the initial delay. Capped, because this
 	// number is invented and an invented number should not stall a job.
-	delay := defaultInitialBackoff * (1 << attempt)
+	shift := attempt
+	if shift > 10 {
+		shift = 10
+	}
+	delay := defaultInitialBackoff * (1 << shift)
 	if delay > maxBackoffDelay {
 		delay = maxBackoffDelay
 	}

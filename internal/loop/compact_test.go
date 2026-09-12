@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -306,5 +307,81 @@ func TestInputTokensSurvivesForResume(t *testing.T) {
 	}
 	if s.InputTokens != 4321 {
 		t.Errorf("State.InputTokens = %d, want the provider's count", s.InputTokens)
+	}
+}
+
+// If an error or interruption happens immediately after compaction (e.g.
+// network failure on Complete), resume must not compact a second time against
+// the already compacted conversation.
+func TestResumeAfterCompactionDoesNotDoubleCompact(t *testing.T) {
+	fakeFail := &llm.Fake{Errs: []error{errors.New("network down")}}
+	checkpointed := false
+	var savedState *State
+	a := &Agent{
+		Provider:      fakeFail,
+		Model:         "test",
+		MaxSteps:      10,
+		ContextBudget: 8_000,
+		Checkpoint: func(st *State) error {
+			checkpointed = true
+			data, _ := json.Marshal(st)
+			var cp State
+			_ = json.Unmarshal(data, &cp)
+			savedState = &cp
+			return nil
+		},
+	}
+
+	s := conversation("long job", 12)
+	s.InputTokens = 80_000
+
+	// First run compacts, checkpoints, and then Complete fails with network error.
+	_, err := a.Run(context.Background(), s)
+	if err == nil {
+		t.Fatal("expected run to fail")
+	}
+	if !checkpointed || savedState == nil {
+		t.Fatal("expected checkpoint to occur after compaction")
+	}
+	if savedState.Dropped == 0 {
+		t.Fatal("expected compaction to have dropped messages")
+	}
+
+	droppedFirst := savedState.Dropped
+	messagesFirst := len(savedState.Messages)
+
+	// Resume run with a working provider.
+	fakeOK := &llm.Fake{Responses: []llm.Response{
+		endResponse("recovered", 2000, 10),
+	}}
+	a.Provider = fakeOK
+
+	_, err = a.Run(context.Background(), savedState)
+	if err != nil {
+		t.Fatalf("resumed run failed: %v", err)
+	}
+
+	if savedState.Dropped != droppedFirst {
+		t.Errorf("resumed run double-compacted: dropped %d, was %d",
+			savedState.Dropped, droppedFirst)
+	}
+	if len(savedState.Messages) != messagesFirst+1 {
+		t.Errorf("expected %d messages, got %d", messagesFirst+1, len(savedState.Messages))
+	}
+}
+
+func TestStateContextBudgetInheritedOnResume(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{endResponse("done", 100, 10)}}
+	// Agent has no ContextBudget set (simulating `ariadne resume` without flag),
+	// but State has ContextBudget = 5000.
+	a := &Agent{Provider: fake, Model: "test", MaxSteps: 10}
+	s := NewState("run_test", "hi")
+	s.ContextBudget = 5000
+
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if a.ContextBudget != 5000 {
+		t.Errorf("Agent.ContextBudget = %d, want 5000 from State", a.ContextBudget)
 	}
 }

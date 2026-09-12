@@ -37,6 +37,10 @@ type State struct {
 	Messages        []llm.Message `json:"messages"`
 	Steps           int           `json:"steps"`
 	Cost            float64       `json:"cost_usd"`
+	// ContextBudget is the prompt-token ceiling this run aims to stay under.
+	// Saved on State so a resumed run inherits the budget rather than silently
+	// disabling compaction.
+	ContextBudget int `json:"context_budget,omitempty"`
 	// InputTokens is the prompt size the provider reported for the last
 	// request. Recorded rather than recomputed because compaction is driven by
 	// it, and a resumed run has to make the same decision the original would

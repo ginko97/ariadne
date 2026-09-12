@@ -2,6 +2,7 @@ package eval
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ginko97/ariadne/internal/loop"
 )
@@ -45,6 +46,11 @@ func RunTasks(ctx context.Context, tasks []Task, model string, newAgent AgentFac
 		runID := newRunID(model, t.ID)
 		agent := newAgent(model, runID, maxSteps)
 		state := loop.NewState(runID, t.Prompt)
+
+		if agent == nil {
+			results = append(results, Score(t, state, "", errors.New("eval: agent factory returned nil")))
+			continue
+		}
 
 		answer, err := agent.Run(ctx, state)
 		results = append(results, Score(t, state, answer, err))

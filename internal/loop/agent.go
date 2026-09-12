@@ -143,6 +143,11 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 	if s.BaseURL == "" && a.BaseURL != "" {
 		s.BaseURL = a.BaseURL
 	}
+	if s.ContextBudget == 0 && a.ContextBudget > 0 {
+		s.ContextBudget = a.ContextBudget
+	} else if a.ContextBudget == 0 && s.ContextBudget > 0 {
+		a.ContextBudget = s.ContextBudget
+	}
 
 	a.emit(trace.Event{
 		Kind: trace.KindRunStart, Model: s.Model, Step: s.Steps,
@@ -184,6 +189,12 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 					Content: fmt.Sprintf("dropped %d messages (%d total) over budget %d",
 						n, s.Dropped, a.ContextBudget),
 				})
+				// The prompt is now compacted. Reset InputTokens so that an
+				// interruption or failure before the next provider response does
+				// not falsely re-trigger compaction on resume against the already
+				// trimmed conversation. The next successful response will record
+				// the provider's fresh count.
+				s.InputTokens = 0
 				// The compacted conversation is what the run continues from, so
 				// it is what has to be on disk. The dropped messages are not
 				// lost: the trace holds every message that ever existed, which

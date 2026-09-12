@@ -395,3 +395,16 @@ func TestCompleteDoesNotRetryClientErrors(t *testing.T) {
 		}
 	}
 }
+
+// Large retry attempts (e.g. 64+) must not cause integer overflow in backoff calculation.
+func TestBackoffAttemptOverflowSafety(t *testing.T) {
+	for _, attempt := range []int{0, 1, 5, 10, 30, 62, 63, 64, 100} {
+		w := backoff(attempt, nil, nil)
+		if w.delay < 0 {
+			t.Errorf("attempt %d: negative delay %v", attempt, w.delay)
+		}
+		if w.delay > maxBackoffDelay {
+			t.Errorf("attempt %d: delay %v exceeds ceiling %v", attempt, w.delay, maxBackoffDelay)
+		}
+	}
+}

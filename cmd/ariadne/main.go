@@ -154,6 +154,7 @@ func cmdRun(args []string) int {
 
 	agent := newAgentFor(key, *model, *baseURL, *maxSteps, *budget, splitList(*allow), splitList(*approve), store, tw)
 	state.BaseURL = *baseURL
+	state.ContextBudget = *budget
 	fmt.Fprintf(os.Stderr, "run %s  model=%s\n", state.RunID, *model)
 
 	return execute(ctx, agent, state)
@@ -225,7 +226,11 @@ func cmdResume(args []string) int {
 	// The checkpoint's model wins: a job that finishes on a different model
 	// than it started on is a different job. The checkpoint's endpoint wins
 	// unless explicitly overridden on the command line.
-	agent := newAgentFor(key, state.Model, endpoint, *maxSteps, *budget, splitList(*allow), splitList(*approve), store, tw)
+	budgetVal := *budget
+	if budgetVal == 0 && state.ContextBudget > 0 {
+		budgetVal = state.ContextBudget
+	}
+	agent := newAgentFor(key, state.Model, endpoint, *maxSteps, budgetVal, splitList(*allow), splitList(*approve), store, tw)
 
 	fmt.Fprintf(os.Stderr, "resume %s  model=%s  from step %d (%d messages)\n",
 		state.RunID, state.Model, state.Steps, len(state.Messages))
