@@ -13,6 +13,7 @@ PROGRESS.md
 # directory is excluded, so the negation below only works this way.
 docs/*
 !docs/eval-findings.md
+!docs/injection-postmortem.md
 *.pdf
 
 # README.md is ignored while it is a stub. Un-ignore it when the real one
