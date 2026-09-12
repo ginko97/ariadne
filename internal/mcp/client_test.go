@@ -95,7 +95,8 @@ func TestRemoteToolThroughRegistry(t *testing.T) {
 }
 
 // A tool that runs and reports failure must come back as IsError, not as a
-// returned error — the distinction the stage-4b freeze introduced.
+// returned error: "it ran and failed" is recoverable, "it could not be reached"
+// is not.
 func TestRemoteToolIsErrorSurvives(t *testing.T) {
 	s := dial(t)
 

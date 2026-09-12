@@ -123,7 +123,7 @@ func TestScoreRejectsSubstringFalsePass(t *testing.T) {
 	}
 }
 
-// A failed run is a failed task, but the reason has to survive — the week 8
+// A failed run is a failed task, but the reason has to survive — the failure
 // taxonomy is built by reading these.
 func TestScoreCarriesRunError(t *testing.T) {
 	s := stateWithCall(5, 0.002, "calc")

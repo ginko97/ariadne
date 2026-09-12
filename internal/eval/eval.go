@@ -70,8 +70,8 @@ func Score(t Task, s *loop.State, answer string, runErr error) Result {
 	}
 
 	// A run that failed is a failed task, but the reason matters: a step limit
-	// is a different problem from a provider outage, and the taxonomy in week 8
-	// is built by reading these strings.
+	// is a different problem from a provider outage, and the failure taxonomy is
+	// built by reading these strings.
 	if runErr != nil {
 		r.Reason = "run failed: " + runErr.Error()
 		return r

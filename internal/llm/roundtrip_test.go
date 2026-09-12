@@ -56,8 +56,8 @@ func TestRecordedTransportExhausted(t *testing.T) {
 	if _, err := c.Get("https://example.test/"); !errors.Is(err, ErrTransportExhausted) {
 		t.Fatalf("second call: got %v, want ErrTransportExhausted", err)
 	}
-	// The failed call is still recorded — week 10's backoff test needs to see
-	// that a request was attempted, not just that it failed.
+	// The failed call is still recorded: a backoff test needs to see that a
+	// request was attempted, not just that it failed.
 	if len(rt.Requests) != 2 {
 		t.Errorf("recorded %d requests, want 2", len(rt.Requests))
 	}

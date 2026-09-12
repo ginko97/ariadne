@@ -17,12 +17,9 @@ var ErrUnknownTool = errors.New("tool: unknown tool")
 
 // Tool is one thing the model can ask for.
 //
-// STAGE 3 — PROVISIONAL. At the stage-4b freeze this widens to
-//
-//	Call(ctx context.Context, callID string, args json.RawMessage) (Result, error)
-//
-// because a string cannot carry is_error, MCP content blocks, or an idempotency
-// key. Do not build Module 1 (checkpoint/resume) on the current shape.
+// Call returns an llm.ToolResult rather than a string because a string cannot
+// carry is_error, MCP content blocks, or an idempotency key — and the loop's
+// resume path depends on all three.
 type Tool interface {
 	Name() string
 	Description() string

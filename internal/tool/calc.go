@@ -17,9 +17,9 @@ import (
 
 // Calc evaluates an arithmetic expression.
 //
-// It is the right first tool because it has no side effects: nothing to make
-// idempotent in week 5, nothing to gate behind approval in week 9. Save those
-// problems for a tool that actually writes something.
+// It has no side effects, so there is nothing to make idempotent on replay and
+// nothing to gate behind approval. Those problems belong to a tool that actually
+// writes something.
 //
 // Implementation note: go/types.Eval type-checks a constant expression against
 // an empty scope. No package is loaded, so identifiers do not resolve and no

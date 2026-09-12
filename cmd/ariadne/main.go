@@ -1,7 +1,7 @@
 // Command ariadne runs an agent.
 //
 // A run is a job, not a chat session: it has an id, a step ceiling, a cost
-// ceiling, and — from week 5 — a checkpoint it can be resumed from.
+// ceiling, and a checkpoint it can be resumed from.
 //
 //	ariadne run "What is 15% of 240?"
 //
@@ -114,8 +114,8 @@ func cmdRun(args []string) int {
 	}
 
 	// Ctrl-C cancels the run rather than killing the process outright, so the
-	// loop's guards see a cancelled context and can stop cleanly. In week 5 this
-	// is also what gives the checkpoint a chance to be the last thing written.
+	// loop's guards see a cancelled context and can stop cleanly — which is also
+	// what gives the checkpoint a chance to be the last thing written.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 

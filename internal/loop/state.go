@@ -4,7 +4,7 @@ import "github.com/ginko97/ariadne/internal/llm"
 
 // State is everything about one run.
 //
-// In week 5 this struct is what gets written to disk after every step, and what
+// This struct is what gets written to disk after every tool call, and what
 // `ariadne resume` loads back. That is why it holds no interfaces, no channels,
 // and no funcs — every field must survive a JSON round-trip unchanged.
 //
@@ -15,7 +15,7 @@ type State struct {
 	Task  string `json:"task"`
 	// Model is recorded on the first step and is authoritative on resume: a job
 	// that finished on a different model than it started on is a different job,
-	// and week 7's evals need to know which model produced a trace.
+	// and evals need to know which model produced a trace.
 	Model string `json:"model,omitempty"`
 	// BaseURL is recorded so resume reaches the same provider endpoint rather
 	// than silently defaulting to Gemini and failing with an incompatible model.

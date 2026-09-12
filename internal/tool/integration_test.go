@@ -10,8 +10,8 @@ import (
 	"github.com/ginko97/ariadne/internal/tool"
 )
 
-// The week 2 deliverable end to end: a real tool, dispatched through the
-// registry, driven by the loop, against scripted model responses.
+// End to end: a real tool, dispatched through the registry, driven by the loop,
+// against scripted model responses.
 //
 // Lives in tool_test (external test package) so it exercises the same public
 // surface a caller would, and so loop never has to import tool.

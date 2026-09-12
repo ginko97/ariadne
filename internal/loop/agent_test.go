@@ -32,7 +32,7 @@ func endResponse(text string, in, out int) llm.Response {
 	}
 }
 
-// The week 1-2 deliverable: a full two-step tool-using run, no network, no API key.
+// A full two-step tool-using run, with no network and no API key.
 func TestRunTwoStep(t *testing.T) {
 	fake := &llm.Fake{Responses: []llm.Response{
 		toolUseResponse("call_a1", "calc", `{"expr":"240*0.15"}`, 52, 18),

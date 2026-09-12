@@ -110,12 +110,12 @@ func (r *remoteTool) Call(ctx context.Context, callID string, args json.RawMessa
 	})
 	if err != nil {
 		// Transport or protocol failure: the tool could not be reached at all,
-		// which is what a returned error means under the stage-4b contract.
+		// which is what a returned error means in the Tool contract.
 		return llm.ToolResult{}, fmt.Errorf("mcp: call %q: %w", r.name, err)
 	}
 
 	// IsError means the tool ran and reported failure — recoverable, the model
-	// sees it. This is the distinction the freeze added ToolResult.IsError for.
+	// sees it. That is what ToolResult.IsError exists to express.
 	return llm.ToolResult{
 		Content: flattenText(res.Content),
 		IsError: res.IsError,
@@ -127,8 +127,7 @@ func (r *remoteTool) Call(ctx context.Context, callID string, args json.RawMessa
 // CallToolResult.Content is []Content — TextContent, ImageContent, AudioContent,
 // ResourceLink, EmbeddedResource. llm.ToolResult.Content is a string, because
 // Block.Content is a string on the wire regardless. Non-text results are lost
-// here; that limitation was accepted at the stage-4b freeze rather than
-// discovered later.
+// here; that is a deliberate limitation of the Tool contract, not an oversight.
 func flattenText(content []mcpsdk.Content) string {
 	var parts []string
 	for _, c := range content {

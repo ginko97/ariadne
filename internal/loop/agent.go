@@ -66,8 +66,8 @@ type Agent struct {
 
 // Run drives the agent loop until the model stops, a limit trips, or ctx is cancelled.
 //
-// It mutates s as it goes, so a caller holding s can checkpoint it after any step
-// (week 5) and can inspect Steps and Cost after an error.
+// It mutates s as it goes, so a caller holding s can checkpoint it at any point
+// and can inspect Steps and Cost after an error.
 func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 	// Record the model and endpoint once. A resumed state already carries them,
 	// and the caller is expected to have built the provider from them.
@@ -159,8 +159,8 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 
 // runCalls executes a batch, appending each result and checkpointing as it goes.
 //
-// Serial on purpose. Parallel tools land in week 10; a concurrent batch needs a
-// different completion record than "append in order".
+// Serial on purpose. Concurrent batches need a different completion record than
+// "append in order", so that is a separate change.
 func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) error {
 	if a.RunTool == nil {
 		return ErrNoToolRunner
