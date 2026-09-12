@@ -159,3 +159,24 @@ func TestCalcStillAllowsOrdinaryArithmetic(t *testing.T) {
 		}
 	}
 }
+
+// constant.Value.String returns six significant figures, so 1102.5*1.05 came
+// back as 1157.62 when the exact value is 1157.625 — a wrong number with no
+// error. The digits are in the rational; only the default formatter drops them.
+func TestCalcDoesNotTruncate(t *testing.T) {
+	for _, tc := range []struct{ expr, want string }{
+		{"1102.5 * 1.05", "1157.625"},
+		{"1000*1.05*1.05*1.05", "1157.625"},
+		{"187.50 / 3", "62.5"},
+		{"0.1 + 0.2", "0.3"},
+		{"1/3*3", "1"},
+		{"98765 * 4321", "426763565"},
+		{"2/3", "0.666666666667"}, // non-terminating: honest, not short
+	} {
+		args, _ := json.Marshal(calcArgs{Expr: tc.expr})
+		res, _ := (Calc{}).Call(context.Background(), "c1", args)
+		if res.IsError || res.Content != tc.want {
+			t.Errorf("%q = %q (isError=%v), want %q", tc.expr, res.Content, res.IsError, tc.want)
+		}
+	}
+}

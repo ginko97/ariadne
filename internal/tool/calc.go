@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/parser"
 	"go/printer"
 	"go/token"
 	"go/types"
+	"math/big"
+	"strconv"
 	"strings"
 
 	"github.com/ginko97/ariadne/internal/llm"
@@ -89,7 +92,7 @@ func (Calc) Call(_ context.Context, _ string, args json.RawMessage) (llm.ToolRes
 	if tv.Value == nil {
 		return fail("calc: %q is not a constant expression", in.Expr)
 	}
-	return llm.ToolResult{Content: tv.Value.String()}, nil
+	return llm.ToolResult{Content: render(tv.Value)}, nil
 }
 
 type calcArgs struct {
@@ -149,4 +152,41 @@ func bitwiseOp(expr string) string {
 		}
 	}
 	return ""
+}
+
+// render turns a constant into a decimal string without losing digits.
+//
+// constant.Value.String returns a "short, human-readable form" — six
+// significant figures — so 1102.5*1.05 came back as 1157.62 when the exact
+// value is 1157.625. The tool reported a wrong number with no error, which is
+// the failure mode this whole package is careful about everywhere else.
+//
+// go/constant holds exact rationals, so the digits are there; only the default
+// formatter throws them away. Integers print exactly. Rationals print to 12
+// decimal places with trailing zeros trimmed, which is exact for anything that
+// terminates and honest about anything that does not.
+func render(v constant.Value) string {
+	switch x := constant.Val(v).(type) {
+	case int64:
+		return strconv.FormatInt(x, 10)
+	case *big.Int:
+		return x.String()
+	case *big.Rat:
+		if x.IsInt() {
+			return x.Num().String()
+		}
+		return trimTrailingZeros(x.FloatString(12))
+	case *big.Float:
+		return trimTrailingZeros(x.Text('f', 12))
+	default:
+		return v.String()
+	}
+}
+
+func trimTrailingZeros(s string) string {
+	if !strings.Contains(s, ".") {
+		return s
+	}
+	s = strings.TrimRight(s, "0")
+	return strings.TrimSuffix(s, ".")
 }

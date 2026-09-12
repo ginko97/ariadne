@@ -240,3 +240,34 @@ func TestLoadTasksMissingFile(t *testing.T) {
 		t.Fatalf("got %v, want a not-exist error", err)
 	}
 }
+
+// Every case here was a correct answer scored as a failure in a real sweep.
+func TestNormaliseHandlesNumberFormatting(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"$1,157.625", "$1157.625"},          // thousands separator
+		{"$74.50", "$74.5"},                  // trailing zero
+		{"3.000", "3"},                       // all-zero fraction
+		{"**36**", "36"},                     // markdown
+		{"1,234,567", "1234567"},             // several separators
+		{"for 1, 2 and 3", "for 1, 2 and 3"}, // comma as punctuation stays
+		{"version 1.10", "version 1.1"},      // known cost: 1.10 is a number here
+		{"12. next", "12. next"},             // a full stop is not a decimal point
+	} {
+		if got := Normalise(tc.in); got != tc.want {
+			t.Errorf("Normalise(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// The two real failures that motivated the change.
+func TestScoreAcceptsRealWorldNumberFormats(t *testing.T) {
+	for _, tc := range []struct{ expect, answer string }{
+		{"1157.625", "The final amount is **$1,157.625**, or approximately $1,157.63."},
+		{"74.5", "Each person pays **$74.50** in total."},
+	} {
+		task := Task{ID: "t", Expect: tc.expect, MustCall: []string{"calc"}}
+		if got := Score(task, stateWithCall(3, 0, "calc"), tc.answer, nil); !got.Pass {
+			t.Errorf("expect %q vs answer %q scored as a failure: %s", tc.expect, tc.answer, got.Reason)
+		}
+	}
+}

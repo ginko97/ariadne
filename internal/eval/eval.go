@@ -178,17 +178,82 @@ func missingCalls(want []string, s *loop.State) []string {
 
 // Normalise strips the differences that are formatting rather than meaning.
 //
-// Models disagree about presentation of the same fact: deepseek and ling answer
-// "15% of 240 is **36**" where gemini answers "15% of 240 is 36." Exact matching
-// would score that as wrong and send you looking for a bug in the agent.
+// Models disagree about presentation of the same fact. All three of these came
+// from real runs marked as failures while being correct:
 //
-// Known gap: thousands separators and trailing zeros are not handled, so "1,000"
-// and "1000" still differ. Decide that when a task needs it rather than guessing
-// at a rule now.
+//	"15% of 240 is **36**"   markdown emphasis
+//	"$1,157.625"             thousands separators
+//	"$74.50"                 a trailing zero on a decimal
+//
+// The last two are why digits are handled and not just punctuation: 74.50 and
+// 74.5 are the same number, and a matcher that disagrees sends you hunting for
+// a bug in the agent that is not there.
 func Normalise(s string) string {
 	s = strings.ToLower(s)
-	s = strings.NewReplacer("*", "", "_", "", "`", "", " ", " ").Replace(s)
+	s = strings.NewReplacer("*", "", "_", "", "`", "").Replace(s)
+	s = stripDigitGroupSeparators(s)
+	s = trimDecimalZeros(s)
 	return strings.Join(strings.Fields(s), " ")
+}
+
+// stripDigitGroupSeparators removes a comma sitting between two digits, so
+// "1,157.625" becomes "1157.625". A comma anywhere else is punctuation and
+// stays — "for 1, 2 and 3" must not become "for 12 and 3".
+func stripDigitGroupSeparators(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == ',' && i > 0 && i+1 < len(s) && isDigit(s[i-1]) && isDigit(s[i+1]) {
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+// trimDecimalZeros rewrites "74.50" as "74.5" and "3.000" as "3", leaving
+// anything that is not a decimal number alone.
+//
+// Known cost: "version 1.10" becomes "version 1.1". Version strings are not
+// what this scorer compares, and the alternative is failing correct numeric
+// answers, which is the worse of the two.
+func trimDecimalZeros(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if !isDigit(s[i]) || (i > 0 && (isDigit(s[i-1]) || s[i-1] == '.')) {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+
+		j := i
+		for j < len(s) && isDigit(s[j]) {
+			j++
+		}
+		if j >= len(s) || s[j] != '.' {
+			b.WriteString(s[i:j])
+			i = j
+			continue
+		}
+
+		k := j + 1
+		for k < len(s) && isDigit(s[k]) {
+			k++
+		}
+		if k == j+1 { // "12." with no fraction is a sentence, not a decimal
+			b.WriteString(s[i:j])
+			i = j
+			continue
+		}
+
+		frac := strings.TrimRight(s[j+1:k], "0")
+		b.WriteString(s[i:j])
+		if frac != "" {
+			b.WriteByte('.')
+			b.WriteString(frac)
+		}
+		i = k
+	}
+	return b.String()
 }
 
 // NewScorecard aggregates results. Total cost comes from the runs themselves,
