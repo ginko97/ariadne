@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/ginko97/ariadne/internal/llm"
+	"github.com/ginko97/ariadne/internal/trace"
 )
 
 // Sentinel errors, so tests and callers use errors.Is instead of matching strings.
@@ -59,6 +61,11 @@ type Agent struct {
 	// resumed, and continuing would be lying about durability.
 	Checkpoint func(*State) error
 
+	// Trace, if set, receives one event per thing that happens. Unlike
+	// Checkpoint it cannot fail the run: tracing is observability, and losing a
+	// line is not worth discarding work that is otherwise fine.
+	Trace func(trace.Event)
+
 	MaxSteps int // 0 = unlimited (tests only; never in production)
 	MaxCost  float64
 	Price    Price
@@ -78,10 +85,15 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		s.BaseURL = a.BaseURL
 	}
 
+	a.emit(trace.Event{
+		Kind: trace.KindRunStart, Model: s.Model, Step: s.Steps,
+		Messages: len(s.Messages), Text: s.Task,
+	})
+
 	for {
 		// --- guards: top of every iteration, before any work ---
 		if err := ctx.Err(); err != nil {
-			return "", err
+			return "", a.endRun(s, err)
 		}
 
 		// Finish a half-executed batch before asking the model anything. On a
@@ -89,29 +101,47 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		// re-asking would mint new call IDs and re-fire tools that already ran.
 		if pending := s.pendingToolCalls(); len(pending) > 0 {
 			if err := a.runCalls(ctx, s, pending); err != nil {
-				return "", err
+				return "", a.endRun(s, err)
 			}
 			continue
 		}
 		if a.MaxSteps > 0 && s.Steps >= a.MaxSteps {
-			return "", fmt.Errorf("%w: %d steps", ErrStepLimit, s.Steps)
+			return "", a.endRun(s, fmt.Errorf("%w: %d steps", ErrStepLimit, s.Steps))
 		}
 		if a.MaxCost > 0 && s.Cost >= a.MaxCost {
-			return "", fmt.Errorf("%w: $%.4f spent", ErrCostLimit, s.Cost)
+			return "", a.endRun(s, fmt.Errorf("%w: $%.4f spent", ErrCostLimit, s.Cost))
 		}
 
+		a.emit(trace.Event{
+			Kind: trace.KindRequest, Step: s.Steps + 1,
+			Model: s.Model, Messages: len(s.Messages),
+		})
+
+		started := time.Now()
 		resp, err := a.Provider.Complete(ctx, llm.Request{
 			Model:    s.Model,
 			Messages: s.Messages,
 			Tools:    a.Tools,
 		})
+		latency := time.Since(started).Milliseconds()
 		if err != nil {
-			return "", err
+			a.emit(trace.Event{
+				Kind: trace.KindResponse, Step: s.Steps + 1,
+				LatencyMS: latency, Error: err.Error(),
+			})
+			return "", a.endRun(s, err)
 		}
 
 		// Charged whether or not the turn was useful.
 		s.Steps++
 		s.Cost += a.Price.Cost(resp.Usage)
+
+		a.emit(trace.Event{
+			Kind: trace.KindResponse, Step: s.Steps,
+			Stop: string(resp.Stop), LatencyMS: latency,
+			InTokens: resp.Usage.InputTokens, OutTokens: resp.Usage.OutputTokens,
+			Cost: a.Price.Cost(resp.Usage), Text: resp.Text(),
+		})
 
 		// Whatever the model said is now part of the conversation, in every branch.
 		s.Messages = append(s.Messages, llm.Message{
@@ -124,24 +154,25 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 			// The assistant turn is already appended, so this write captures the
 			// finished conversation. Without it, resume would replay the last step.
 			if err := a.checkpoint(s); err != nil {
-				return "", err
+				return "", a.endRun(s, err)
 			}
+			a.endRun(s, nil)
 			return resp.Text(), nil
 		case llm.StopMaxToken:
 			// Checkpoint before failing: the assistant turn that caused this is
 			// the evidence you want when reading the trace, and without a write
 			// the on-disk state silently reverts to the previous checkpoint.
-			return "", errors.Join(ErrTruncated, a.checkpoint(s))
+			return "", a.endRun(s, errors.Join(ErrTruncated, a.checkpoint(s)))
 		case llm.StopToolUse:
 			// falls through to tool execution below
 		default:
-			return "", errors.Join(
+			return "", a.endRun(s, errors.Join(
 				fmt.Errorf("loop: unknown stop reason %q", resp.Stop),
-				a.checkpoint(s))
+				a.checkpoint(s)))
 		}
 
 		if len(resp.ToolCalls()) == 0 {
-			return "", errors.Join(ErrEmptyToolUse, a.checkpoint(s))
+			return "", a.endRun(s, errors.Join(ErrEmptyToolUse, a.checkpoint(s)))
 		}
 		if a.RunTool == nil {
 			return "", ErrNoToolRunner
@@ -180,6 +211,12 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 		// Two ways a tool reports failure, and they mean different things:
 		// res.IsError is "it ran and failed" (the model can react); a non-nil
 		// err is "it could not be reached at all".
+		a.emit(trace.Event{
+			Kind: trace.KindToolCall, Step: s.Steps,
+			CallID: c.ID, Tool: c.Name, Args: c.Args,
+		})
+
+		toolStarted := time.Now()
 		res, err := a.RunTool(ctx, c)
 		b := llm.Block{
 			Type:    llm.BlockToolResult,
@@ -197,6 +234,12 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 			b.Content = err.Error()
 			b.IsError = true
 		}
+		a.emit(trace.Event{
+			Kind: trace.KindToolResult, Step: s.Steps,
+			CallID: c.ID, Tool: c.Name, Content: b.Content, IsError: b.IsError,
+			LatencyMS: time.Since(toolStarted).Milliseconds(),
+		})
+
 		s.Messages[i].Blocks = append(s.Messages[i].Blocks, b)
 
 		// Per call, not per step. This is the write that stops a resumed run
@@ -216,4 +259,24 @@ func (a *Agent) checkpoint(s *State) error {
 		return fmt.Errorf("loop: checkpoint failed at step %d: %w", s.Steps, err)
 	}
 	return nil
+}
+
+func (a *Agent) emit(e trace.Event) {
+	if a.Trace != nil {
+		a.Trace(e)
+	}
+}
+
+// endRun emits the closing event and returns err unchanged, so call sites read
+// as `return "", a.endRun(s, err)` and cannot forget to record how a run ended.
+func (a *Agent) endRun(s *State, err error) error {
+	e := trace.Event{
+		Kind: trace.KindRunEnd, Step: s.Steps,
+		Messages: len(s.Messages), Cost: s.Cost,
+	}
+	if err != nil {
+		e.Error = err.Error()
+	}
+	a.emit(e)
+	return err
 }

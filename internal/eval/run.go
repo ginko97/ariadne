@@ -11,7 +11,13 @@ import (
 // The indirection keeps this package free of providers, tools and keys: eval
 // knows how to score a run, not how to construct one. cmd/ariadne supplies the
 // wiring, and a test supplies a Fake.
-type AgentFactory func(model string, maxSteps int) *loop.Agent
+//
+// runID is passed in rather than read from somewhere afterwards, because
+// anything the factory opens per run — a trace file, say — has to be named for
+// the run it belongs to. An earlier version let the factory read a shared
+// variable set by newRunID, and since the runner builds the agent before the
+// state, every trace was written into the previous task's directory.
+type AgentFactory func(model, runID string, maxSteps int) *loop.Agent
 
 // NewRunID names one task's run. Injected so tests are deterministic and so the
 // caller controls the id scheme that becomes a directory under runs/.
@@ -36,8 +42,9 @@ func RunTasks(ctx context.Context, tasks []Task, model string, newAgent AgentFac
 			maxSteps = 10
 		}
 
-		agent := newAgent(model, maxSteps)
-		state := loop.NewState(newRunID(model, t.ID), t.Prompt)
+		runID := newRunID(model, t.ID)
+		agent := newAgent(model, runID, maxSteps)
+		state := loop.NewState(runID, t.Prompt)
 
 		answer, err := agent.Run(ctx, state)
 		results = append(results, Score(t, state, answer, err))

@@ -28,7 +28,7 @@ GO     ?= go
 BINARY := ariadne
 PKGS   := ./...
 
-.PHONY: all build fmt vet test check live audit-tracked audit-livetests clean
+.PHONY: all build fmt vet test check live eval audit-tracked audit-livetests clean
 
 all: check build
 
@@ -44,6 +44,16 @@ vet:
 
 test:
 	$(GO) test $(PKGS)
+
+# The pinned eval baseline. Kept here rather than typed at a prompt so a pass
+# rate cannot drift because somebody used a different model, and so the history
+# in eval/history is comparable with itself.
+EVAL_MODEL ?= deepseek/deepseek-v4-flash-0731
+EVAL_URL   ?= https://openrouter.ai/api/v1
+EVAL_TASKS ?= testdata/tasks.json
+
+eval:
+	$(GO) run ./cmd/ariadne eval --base-url $(EVAL_URL) --models $(EVAL_MODEL) --tasks $(EVAL_TASKS) --save
 
 # Real API calls. Needs a key and spends quota.
 live:

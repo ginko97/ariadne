@@ -13,7 +13,7 @@ import (
 // scripted builds an AgentFactory whose provider replays canned responses —
 // the whole eval loop, end to end, with no network and no key.
 func scripted(responses ...llm.Response) AgentFactory {
-	return func(model string, maxSteps int) *loop.Agent {
+	return func(model, runID string, maxSteps int) *loop.Agent {
 		return &loop.Agent{
 			Provider: &llm.Fake{Responses: responses},
 			Model:    model,
@@ -81,7 +81,7 @@ func TestRunTasksContinuesAfterFailure(t *testing.T) {
 		{ID: "b", Prompt: "p", Expect: "36", MaxSteps: 5},
 	}
 
-	exhausted := func(model string, maxSteps int) *loop.Agent {
+	exhausted := func(model, runID string, maxSteps int) *loop.Agent {
 		return &loop.Agent{
 			Provider: &llm.Fake{}, // no responses at all
 			Model:    model, MaxSteps: maxSteps,

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ginko97/ariadne/internal/llm"
+	"github.com/ginko97/ariadne/internal/trace"
 )
 
 // testPrice makes one step of the fixtures below cost exactly $0.001, so cost
@@ -424,5 +426,92 @@ func TestPriceUsesReportedCost(t *testing.T) {
 	fallback := p.Cost(llm.Usage{InputTokens: 1_000_000, OutputTokens: 0})
 	if fallback != 1000 {
 		t.Errorf("got %v, want 1000 from the table when cost is unreported", fallback)
+	}
+}
+
+// A trace has to describe the whole run, in order, with the facts that error
+// analysis needs: which tool, which arguments, what came back, what it cost.
+func TestTraceRecordsWholeRun(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("call_a1", "calc", `{"expr":"240*0.15"}`, 52, 18),
+		endResponse("15% of 240 is 36.", 94, 11),
+	}}
+
+	var events []trace.Event
+	a := &Agent{
+		Provider: fake, Model: "test/model", MaxSteps: 10, Price: testPrice,
+		RunTool: func(context.Context, llm.ToolCall) (llm.ToolResult, error) {
+			return llm.ToolResult{Content: "36"}, nil
+		},
+		Trace: func(e trace.Event) { events = append(events, e) },
+	}
+
+	if _, err := a.Run(context.Background(), NewState("run_tr", "what is 15% of 240?")); err != nil {
+		t.Fatal(err)
+	}
+
+	var kinds []string
+	for _, e := range events {
+		kinds = append(kinds, e.Kind)
+	}
+	want := []string{
+		trace.KindRunStart,
+		trace.KindRequest, trace.KindResponse,
+		trace.KindToolCall, trace.KindToolResult,
+		trace.KindRequest, trace.KindResponse,
+		trace.KindRunEnd,
+	}
+	if len(kinds) != len(want) {
+		t.Fatalf("kinds = %v\nwant  %v", kinds, want)
+	}
+	for i := range want {
+		if kinds[i] != want[i] {
+			t.Fatalf("event %d = %q, want %q\nfull: %v", i, kinds[i], want[i], kinds)
+		}
+	}
+
+	// The tool call carries what it was asked to do, not just that it happened.
+	call := events[3]
+	if call.Tool != "calc" || call.CallID != "call_a1" || string(call.Args) != `{"expr":"240*0.15"}` {
+		t.Errorf("tool_call lost detail: %+v", call)
+	}
+	if events[4].Content != "36" {
+		t.Errorf("tool_result content = %q", events[4].Content)
+	}
+	if events[2].InTokens != 52 || events[2].Cost <= 0 {
+		t.Errorf("response lost usage: %+v", events[2])
+	}
+	if last := events[len(events)-1]; last.Error != "" || last.Cost <= 0 {
+		t.Errorf("run_end should record success and total cost: %+v", last)
+	}
+}
+
+// A failed run still has to say how it ended, or the failure is invisible to
+// analysis — which is when you most want the trace.
+func TestTraceRecordsFailure(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "calc", `{}`, 10, 10),
+		toolUseResponse("c2", "calc", `{}`, 10, 10),
+	}}
+
+	var events []trace.Event
+	a := &Agent{
+		Provider: fake, Model: "test", MaxSteps: 1, Price: testPrice,
+		RunTool: func(context.Context, llm.ToolCall) (llm.ToolResult, error) {
+			return llm.ToolResult{Content: "ok"}, nil
+		},
+		Trace: func(e trace.Event) { events = append(events, e) },
+	}
+
+	if _, err := a.Run(context.Background(), NewState("run_fail", "t")); err == nil {
+		t.Fatal("want an error")
+	}
+
+	last := events[len(events)-1]
+	if last.Kind != trace.KindRunEnd {
+		t.Fatalf("last event = %q, want run_end", last.Kind)
+	}
+	if !strings.Contains(last.Error, "step limit") {
+		t.Errorf("run_end lost the cause: %q", last.Error)
 	}
 }

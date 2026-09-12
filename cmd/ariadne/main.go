@@ -30,12 +30,14 @@ import (
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
 	"github.com/ginko97/ariadne/internal/tool"
+	"github.com/ginko97/ariadne/internal/trace"
 )
 
 const (
 	defaultModel   = "gemini-2.5-flash"
 	defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
 	runsDir        = "runs"
+	historyDir     = "eval/history"
 )
 
 // Exit codes: 0 the run succeeded, 1 it failed, 2 the command line was wrong.
@@ -120,9 +122,16 @@ func cmdRun(args []string) int {
 	defer stop()
 
 	store := &loop.Store{Dir: runsDir}
-	agent := newAgentFor(key, *model, *baseURL, *maxSteps, store)
-
 	state := loop.NewState(newRunID(), task)
+
+	tw, err := trace.NewFileWriter(runsDir, state.RunID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne run: %v\n", err)
+		return exitFail
+	}
+	defer closeTrace(tw)
+
+	agent := newAgentFor(key, *model, *baseURL, *maxSteps, store, tw)
 	state.BaseURL = *baseURL
 	fmt.Fprintf(os.Stderr, "run %s  model=%s\n", state.RunID, *model)
 
@@ -177,10 +186,17 @@ func cmdResume(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	tw, err := trace.NewFileWriter(runsDir, state.RunID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
+		return exitFail
+	}
+	defer closeTrace(tw)
+
 	// The checkpoint's model wins: a job that finishes on a different model
 	// than it started on is a different job. The checkpoint's endpoint wins
 	// unless explicitly overridden on the command line.
-	agent := newAgentFor(key, state.Model, endpoint, *maxSteps, store)
+	agent := newAgentFor(key, state.Model, endpoint, *maxSteps, store, tw)
 
 	fmt.Fprintf(os.Stderr, "resume %s  model=%s  from step %d (%d messages)\n",
 		state.RunID, state.Model, state.Steps, len(state.Messages))
@@ -188,9 +204,10 @@ func cmdResume(args []string) int {
 	return execute(ctx, agent, state)
 }
 
-func newAgentFor(key, model, baseURL string, maxSteps int, store *loop.Store) *loop.Agent {
+func newAgentFor(key, model, baseURL string, maxSteps int, store *loop.Store, tw *trace.Writer) *loop.Agent {
 	reg := tool.New(tool.Calc{})
 	return &loop.Agent{
+		Trace:      tw.Emit,
 		Provider:   llm.NewOpenAI(key, llm.WithBaseURL(baseURL)),
 		Model:      model,
 		BaseURL:    baseURL,
@@ -287,6 +304,7 @@ func cmdEval(args []string) int {
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	tasksPath := fs.String("tasks", "testdata/tasks.json", "task set")
 	minPass := fs.Float64("min-pass-rate", 0, "exit non-zero if any model scores below this (0 = report only)")
+	save := fs.Bool("save", false, "write each scorecard to "+historyDir+" and report regressions")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -308,11 +326,28 @@ func cmdEval(args []string) int {
 	defer stop()
 
 	store := &loop.Store{Dir: runsDir}
-	newAgent := func(model string, maxSteps int) *loop.Agent {
-		return newAgentFor(key, model, *baseURL, maxSteps, store)
-	}
+
+	// One trace file per task run, opened as the agent is built. Closed when the
+	// sweep ends rather than per task: a handful of open files is cheaper than
+	// threading a close through the runner.
+	var traces []*trace.Writer
+	defer func() {
+		for _, tw := range traces {
+			closeTrace(tw)
+		}
+	}()
+
 	newRunID := func(model, taskID string) string {
 		return fmt.Sprintf("%s_%s", newRunID(), taskID)
+	}
+	newAgent := func(model, runID string, maxSteps int) *loop.Agent {
+		tw, err := trace.NewFileWriter(runsDir, runID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ariadne eval: trace: %v\n", err)
+			tw = nil
+		}
+		traces = append(traces, tw)
+		return newAgentFor(key, model, *baseURL, maxSteps, store, tw)
 	}
 
 	commit := gitCommit()
@@ -334,6 +369,27 @@ func cmdEval(args []string) int {
 			fmt.Println()
 		}
 		sc.WriteTable(os.Stdout)
+
+		if *save {
+			history, err := eval.LoadHistory(historyDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "ariadne eval: %v\n", err)
+				return exitFail
+			}
+			if before, ok := eval.Previous(history, model); ok {
+				if regressed := eval.Regressions(before, sc); len(regressed) > 0 {
+					fmt.Fprintf(os.Stderr, "REGRESSED since %s: %s\n",
+						before.Commit, strings.Join(regressed, ", "))
+				}
+			}
+			path, err := sc.Save(historyDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "ariadne eval: %v\n", err)
+				return exitFail
+			}
+			fmt.Fprintf(os.Stderr, "saved %s\n", path)
+		}
+
 		if *minPass > 0 && sc.PassRate < *minPass {
 			fmt.Fprintf(os.Stderr, "%s: pass rate %.2f below --min-pass-rate %.2f\n",
 				model, sc.PassRate, *minPass)
@@ -366,4 +422,13 @@ func gitCommit() string {
 		commit += "-dirty"
 	}
 	return commit
+}
+
+// closeTrace reports a broken trace without failing anything: a run that
+// finished is still a run, but a trace that silently stopped recording would
+// otherwise look like a run that never did those things.
+func closeTrace(tw *trace.Writer) {
+	if err := tw.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: trace incomplete: %v\n", err)
+	}
 }
