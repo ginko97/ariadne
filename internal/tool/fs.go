@@ -34,17 +34,37 @@ func (s sandbox) resolve(rel string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("bad sandbox root: %w", err)
 	}
+	if resolvedRoot, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolvedRoot
+	}
 
 	abs := filepath.Join(root, filepath.Clean("/"+rel))
 
-	// EvalSymlinks on a path that does not exist yet fails, so only resolve the
-	// parent, which must exist for a write and does exist for a read.
-	if resolved, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
-		abs = filepath.Join(resolved, filepath.Base(abs))
+	// Resolve symlinks. If abs or any of its ancestors does not exist yet,
+	// find the deepest existing ancestor, resolve symlinks on it, and reattach
+	// the uncreated suffix.
+	p := abs
+	var uncreated []string
+	for {
+		if _, err := os.Lstat(p); err == nil {
+			break
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			break
+		}
+		uncreated = append([]string{filepath.Base(p)}, uncreated...)
+		p = parent
+	}
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		abs = resolved
+		for _, part := range uncreated {
+			abs = filepath.Join(abs, part)
+		}
 	}
 
-	rootWithSep := root + string(filepath.Separator)
-	if abs != root && !strings.HasPrefix(abs, rootWithSep) {
+	relPath, err := filepath.Rel(root, abs)
+	if err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("path %q escapes the sandbox", rel)
 	}
 	return abs, nil

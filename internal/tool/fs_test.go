@@ -134,3 +134,74 @@ func TestToolsRejectEmptyPath(t *testing.T) {
 		t.Error("write_file accepted an empty path")
 	}
 }
+
+// A symlink inside the sandbox pointing outside must not become a bridge out.
+func TestSandboxRejectsSymlinkEscapes(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("classified"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(dir, "link_to_secret")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks not supported on this platform: %v", err)
+	}
+
+	got, isErr := call(t, NewFetch(dir), fetchArgs{Path: "link_to_secret"})
+	if strings.Contains(got, "classified") {
+		t.Errorf("fetch via symlink escaped the sandbox: %q", got)
+	}
+	if !isErr {
+		t.Errorf("fetch via symlink was not refused: %q", got)
+	}
+
+	gotWrite, isErrWrite := call(t, NewWriteFile(dir), writeArgs{Path: "link_to_secret", Content: "pwned"})
+	if !isErrWrite {
+		t.Errorf("write_file via symlink was not refused: %q", gotWrite)
+	}
+	data, _ := os.ReadFile(outside)
+	if string(data) == "pwned" {
+		t.Errorf("write_file via symlink overwrote outside file")
+	}
+}
+
+// If the sandbox root itself is a symlink, resolving paths inside it must still work.
+func TestSandboxWithSymlinkedRoot(t *testing.T) {
+	realRoot := t.TempDir()
+	symRoot := filepath.Join(t.TempDir(), "symlink_root")
+	if err := os.Symlink(realRoot, symRoot); err != nil {
+		t.Skipf("symlinks not supported on this platform: %v", err)
+	}
+
+	w := NewWriteFile(symRoot)
+	gotWrite, isErrWrite := call(t, w, writeArgs{Path: "hello.txt", Content: "symlinked-root-ok"})
+	if isErrWrite {
+		t.Fatalf("write failed with symlinked root: %s", gotWrite)
+	}
+
+	f := NewFetch(symRoot)
+	gotFetch, isErrFetch := call(t, f, fetchArgs{Path: "hello.txt"})
+	if isErrFetch || gotFetch != "symlinked-root-ok" {
+		t.Fatalf("fetch failed with symlinked root: got %q, isErr=%v", gotFetch, isErrFetch)
+	}
+}
+
+// Drive prefixes or absolute paths on Windows must not escape the sandbox root.
+func TestSandboxWindowsDriveEscape(t *testing.T) {
+	dir := t.TempDir()
+	s := sandbox{root: dir}
+	for _, p := range []string{
+		`C:\windows\system32\calc.exe`,
+		`D:\secret.txt`,
+		`\\server\share\file.txt`,
+	} {
+		resolved, err := s.resolve(p)
+		if err == nil {
+			rel, relErr := filepath.Rel(dir, resolved)
+			if relErr != nil || strings.HasPrefix(rel, "..") {
+				t.Errorf("resolve(%q) = %q, which escapes %q", p, resolved, dir)
+			}
+		}
+	}
+}

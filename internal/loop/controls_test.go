@@ -273,6 +273,40 @@ func TestResumeCannotWidenTheAllowList(t *testing.T) {
 	}
 }
 
+// A resuming command can narrow an existing grant to a subset.
+func TestResumeCanNarrowTheAllowList(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "write_file", `{}`, 10, 10),
+		endResponse("refused", 10, 10),
+	}}
+
+	ran := false
+	a := &Agent{
+		Provider: fake,
+		Model:    "test",
+		MaxSteps: 10,
+		Allow:    []string{"calc"}, // resuming command narrows from [calc, write_file] to [calc]
+		Tools:    []llm.ToolDef{{Name: "calc"}, {Name: "write_file"}},
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			ran = true
+			return llm.ToolResult{Content: "ok"}, nil
+		},
+	}
+
+	s := NewState("run_test", "task")
+	s.Allow = []string{"calc", "write_file"} // what checkpoint recorded
+
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if ran {
+		t.Fatal("resumed call ran write_file after allow-list was narrowed")
+	}
+	if len(s.Allow) != 1 || s.Allow[0] != "calc" {
+		t.Errorf("State.Allow = %v, want narrowed [calc]", s.Allow)
+	}
+}
+
 // A refusal has to be checkpointed like any other result, or resume would see
 // the call as still pending and offer it a second time.
 func TestDeniedCallIsCheckpointed(t *testing.T) {
@@ -517,5 +551,49 @@ func TestResumeCannotDropTheApprovalGate(t *testing.T) {
 	}
 	if ran {
 		t.Fatal("resume dropped the approval gate")
+	}
+}
+
+// A resuming command can add a tool to the approval gate.
+func TestResumeCanAddApprovalGate(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "write_file", `{}`, 10, 10),
+		endResponse("refused", 10, 10),
+	}}
+
+	ran := false
+	asked := false
+	a := &Agent{
+		Provider:        fake,
+		Model:           "test",
+		MaxSteps:        10,
+		RequireApproval: []string{"write_file"}, // resuming command adds write_file
+		Tools:           []llm.ToolDef{{Name: "calc"}, {Name: "write_file"}},
+		Approve: func(_ context.Context, call llm.ToolCall) (bool, error) {
+			if call.Name == "write_file" {
+				asked = true
+			}
+			return false, nil // deny
+		},
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			ran = true
+			return llm.ToolResult{Content: "ok"}, nil
+		},
+	}
+
+	s := NewState("run_test", "task")
+	s.RequireApproval = []string{"calc"} // checkpoint had calc gated
+
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !asked {
+		t.Fatal("added approval gate was not consulted for write_file")
+	}
+	if ran {
+		t.Fatal("denied call ran anyway")
+	}
+	if len(s.RequireApproval) != 2 || s.RequireApproval[0] != "calc" || s.RequireApproval[1] != "write_file" {
+		t.Errorf("State.RequireApproval = %v, want union [calc, write_file]", s.RequireApproval)
 	}
 }
