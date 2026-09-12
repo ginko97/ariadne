@@ -17,9 +17,10 @@ var ErrTransportExhausted = errors.New("llm: recorded transport exhausted")
 // sent. Swap it into an http.Client and the provider does real JSON encoding
 // and decoding against real bytes — with no network and no key.
 type RecordedTransport struct {
-	Responses [][]byte // response bodies, in order
-	Statuses  []int    // optional, index-aligned; 0 or absent means 200
-	Err       error    // if set, RoundTrip fails immediately (network-down test)
+	Responses [][]byte      // response bodies, in order
+	Statuses  []int         // optional, index-aligned; 0 or absent means 200
+	Headers   []http.Header // optional, index-aligned headers
+	Err       error         // if set, RoundTrip fails immediately (network-down test)
 
 	Requests []*http.Request // what the provider sent
 	Bodies   [][]byte        // ...and the bodies, already read
@@ -58,10 +59,17 @@ func (t *RecordedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		status = t.Statuses[i]
 	}
 
+	hdr := http.Header{"Content-Type": []string{"application/json"}}
+	if i < len(t.Headers) && t.Headers[i] != nil {
+		for k, vs := range t.Headers[i] {
+			hdr[k] = vs
+		}
+	}
+
 	return &http.Response{
 		StatusCode: status,
 		Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Header:     hdr,
 		Body:       io.NopCloser(bytes.NewReader(t.Responses[i])),
 		Request:    r,
 	}, nil
