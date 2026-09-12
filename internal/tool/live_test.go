@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ginko97/ariadne/internal/dotenv"
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
-	"github.com/ginko97/ariadne/internal/testenv"
 	"github.com/ginko97/ariadne/internal/tool"
 )
 
 func TestLiveAgentRun(t *testing.T) {
-	_ = testenv.Load()
+	_ = dotenv.Load()
 
 	key := os.Getenv("GEMINI_API_KEY")
 	if key == "" {
