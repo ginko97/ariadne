@@ -51,6 +51,11 @@ func units(msgs []llm.Message) []span {
 			i += 2
 			continue
 		}
+		if msgs[i].Role == llm.RoleAssistant && i+1 < len(msgs) && msgs[i+1].Role == llm.RoleUser && !isToolResults(msgs[i+1]) {
+			out = append(out, span{i, i + 2})
+			i += 2
+			continue
+		}
 		out = append(out, span{i, i + 1})
 		i++
 	}

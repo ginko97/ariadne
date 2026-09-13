@@ -114,6 +114,27 @@ func TestToWireNullContentForToolOnlyTurn(t *testing.T) {
 	}
 }
 
+func TestToWireCoalescesConsecutiveUserMessages(t *testing.T) {
+	req := Request{
+		Model: "m",
+		Messages: []Message{
+			{Role: RoleUser, Blocks: []Block{{Type: BlockText, Text: "part 1"}}},
+			{Role: RoleUser, Blocks: []Block{{Type: BlockText, Text: "part 2"}}},
+		},
+	}
+
+	w, err := toWire(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(w.Messages) != 1 {
+		t.Fatalf("len(w.Messages) = %d, want 1 coalesced message", len(w.Messages))
+	}
+	if w.Messages[0].Content == nil || *w.Messages[0].Content != "part 1\n\npart 2" {
+		t.Errorf("content = %v, want part 1\\n\\npart 2", w.Messages[0].Content)
+	}
+}
+
 func TestFromWireToolCall(t *testing.T) {
 	body := []byte(`{
   "id": "gen-123",

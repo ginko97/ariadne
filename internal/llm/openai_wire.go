@@ -177,6 +177,16 @@ func toWire(req Request) (oaRequest, error) {
 			joined := strings.Join(text, "\n")
 			msg.Content = &joined // nil when there are only tool calls → "content": null
 		}
+		if len(out.Messages) > 0 && out.Messages[len(out.Messages)-1].Role == string(m.Role) && m.Role == RoleUser && len(calls) == 0 && len(out.Messages[len(out.Messages)-1].ToolCalls) == 0 {
+			last := &out.Messages[len(out.Messages)-1]
+			if last.Content == nil || *last.Content == "" {
+				last.Content = msg.Content
+			} else if msg.Content != nil && *msg.Content != "" {
+				combined := *last.Content + "\n\n" + *msg.Content
+				last.Content = &combined
+			}
+			continue
+		}
 		out.Messages = append(out.Messages, msg)
 	}
 

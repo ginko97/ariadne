@@ -177,3 +177,77 @@ func TestChatTurnIsCheckpointed(t *testing.T) {
 		t.Error("a chat turn was not checkpointed")
 	}
 }
+
+func TestSetModelAndSwitchingAcrossTurns(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		endResponse("from model a", 10, 10),
+		endResponse("from model b", 10, 10),
+	}}
+	a1 := &Agent{Provider: fake, Model: "model-a", MaxSteps: 10}
+	s := NewState("run_test", "hello")
+
+	if _, err := a1.ChatTurn(context.Background(), s, "first"); err != nil {
+		t.Fatal(err)
+	}
+	if s.Model != "model-a" {
+		t.Errorf("s.Model = %q, want model-a", s.Model)
+	}
+
+	// Model switch for turn 2.
+	a2 := &Agent{Provider: fake, Model: "model-b", MaxSteps: 10}
+	if _, err := a2.ChatTurn(context.Background(), s, "second"); err != nil {
+		t.Fatal(err)
+	}
+	if s.Model != "model-b" {
+		t.Errorf("s.Model = %q, want model-b", s.Model)
+	}
+	if fake.Calls[1].Model != "model-b" {
+		t.Errorf("fake.Calls[1].Model = %q, want model-b", fake.Calls[1].Model)
+	}
+
+	// Model switch refused mid-batch.
+	s.Messages = append(s.Messages, llm.Message{
+		Role: llm.RoleAssistant,
+		Blocks: []llm.Block{
+			{Type: llm.BlockToolUse, ID: "call_mid", Name: "calc", Args: json.RawMessage(`{}`)},
+		},
+	})
+	if err := s.SetModel("model-c"); !errors.Is(err, ErrTurnInFlight) {
+		t.Errorf("SetModel mid-batch err = %v, want ErrTurnInFlight", err)
+	}
+}
+
+func TestAddUserMessageUpdatesTask(t *testing.T) {
+	s := NewState("run_test", "initial prompt")
+	if s.Task != "initial prompt" {
+		t.Errorf("s.Task = %q, want initial prompt", s.Task)
+	}
+
+	if err := s.AddUserMessage("second prompt"); err != nil {
+		t.Fatal(err)
+	}
+	if s.Task != "second prompt" {
+		t.Errorf("s.Task = %q, want second prompt", s.Task)
+	}
+}
+
+type mockApprover struct {
+	called bool
+	allow  bool
+}
+
+func (m *mockApprover) Approve(_ context.Context, _ llm.ToolCall) (bool, error) {
+	m.called = true
+	return m.allow, nil
+}
+
+func TestApproverInterface(t *testing.T) {
+	app := &mockApprover{allow: true}
+	a := &Agent{}
+	a.SetApprover(app)
+
+	ok, err := a.askApproval(context.Background(), llm.ToolCall{Name: "calc"})
+	if err != nil || !ok || !app.called {
+		t.Errorf("ok=%v err=%v called=%v, want ok=true err=nil called=true", ok, err, app.called)
+	}
+}

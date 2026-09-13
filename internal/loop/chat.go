@@ -36,6 +36,20 @@ var ErrTurnInFlight = errors.New("loop: cannot add a message while tool calls ar
 //
 // The caller finishes the batch first by calling Run, which is what it would do
 // anyway.
+// SetModel changes the model for subsequent turns. Refused while a tool batch
+// is unfinished to protect crash recovery replay fidelity.
+func (s *State) SetModel(model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return fmt.Errorf("loop: model cannot be empty")
+	}
+	if pending := s.pendingToolCalls(); len(pending) > 0 {
+		return fmt.Errorf("%w: cannot switch model while tool calls are pending", ErrTurnInFlight)
+	}
+	s.Model = model
+	return nil
+}
+
 func (s *State) AddUserMessage(text string) error {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -45,6 +59,7 @@ func (s *State) AddUserMessage(text string) error {
 		return fmt.Errorf("%w: %d unfinished", ErrTurnInFlight, len(pending))
 	}
 
+	s.Task = text
 	s.Messages = append(s.Messages, llm.Message{
 		Role:   llm.RoleUser,
 		Blocks: []llm.Block{{Type: llm.BlockText, Text: text}},
@@ -63,6 +78,11 @@ func (s *State) AddUserMessage(text string) error {
 // Checkpointing is unchanged and per tool call, so closing the terminal
 // mid-answer loses nothing and `resume` picks the turn up where it stopped.
 func (a *Agent) ChatTurn(ctx context.Context, s *State, text string) (string, error) {
+	if a.Model != "" && s.Model != "" && a.Model != s.Model {
+		if err := s.SetModel(a.Model); err != nil {
+			return "", err
+		}
+	}
 	if err := s.AddUserMessage(text); err != nil {
 		return "", err
 	}

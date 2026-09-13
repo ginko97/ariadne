@@ -516,3 +516,35 @@ func TestEstimateDoesNotGrowAfterCompaction(t *testing.T) {
 		t.Errorf("estimate rose to %d after compaction shrank the conversation", got)
 	}
 }
+
+// In multi-turn chat, compaction must drop turn pairs and preserve role
+// alternation so consecutive user roles never reach the provider.
+func TestMultiTurnCompactionPreservesRoleAlternation(t *testing.T) {
+	s := NewState("run_test", "turn 1: hello")
+	s.Messages = append(s.Messages,
+		llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: strings.Repeat("answer 1 ", 30)}}},
+		llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "turn 2: calculate 2+2"}}},
+		llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: strings.Repeat("answer 2 ", 30)}}},
+		llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "turn 3: calculate 3+3"}}},
+		llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "answer 3"}}},
+	)
+
+	initialLen := len(s.Messages)
+	n := compact(s, 2000, 500)
+	if n == 0 {
+		t.Fatal("expected compaction to drop messages")
+	}
+	if len(s.Messages) >= initialLen {
+		t.Fatalf("messages did not shrink: got %d", len(s.Messages))
+	}
+
+	// Verify strict role alternation across all remaining messages:
+	// User -> Assistant -> User -> Assistant...
+	for i := 1; i < len(s.Messages); i++ {
+		if s.Messages[i].Role == s.Messages[i-1].Role {
+			t.Errorf("consecutive messages at %d and %d share role %s", i-1, i, s.Messages[i].Role)
+		}
+	}
+
+	assertWellFormed(t, s.Messages)
+}
