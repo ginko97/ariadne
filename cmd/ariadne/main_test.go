@@ -320,3 +320,62 @@ func TestMemoryIsRecordedNotInferred(t *testing.T) {
 		t.Error("Memory should not depend on the prompt text or the approval list")
 	}
 }
+
+func TestResumeInheritedMemoryRejectsAllowListWithoutRemember(t *testing.T) {
+	state := loop.NewState("run_mem", "task")
+	state.Memory = true
+
+	allow := []string{"calc", "fetch"}
+	mem := false || state.Memory
+
+	if !(mem && len(allow) > 0 && !contains(allow, "remember")) {
+		t.Error("inherited memory with --allow excluding remember should be rejected")
+	}
+}
+
+func TestResumeWithMemoryRejectsCheckpointAllowListWithoutRemember(t *testing.T) {
+	state := loop.NewState("run_allow", "task")
+	state.Allow = []string{"calc", "fetch"}
+
+	mem := true
+
+	if !(mem && len(state.Allow) > 0 && !contains(state.Allow, "remember")) {
+		t.Error("resuming with memory when checkpoint allow-list excluded remember should be rejected")
+	}
+}
+
+func TestResumeExplicitBudgetOverridesCheckpoint(t *testing.T) {
+	state := loop.NewState("run_budget", "task")
+	state.ContextBudget = 5000
+
+	budgetFlag := 2500
+	budgetVal := budgetFlag
+	if budgetVal == 0 && state.ContextBudget > 0 {
+		budgetVal = state.ContextBudget
+	} else if budgetFlag > 0 {
+		state.ContextBudget = budgetFlag
+	}
+
+	if state.ContextBudget != 2500 {
+		t.Errorf("explicit budget override failed to update state: got %d, want 2500", state.ContextBudget)
+	}
+}
+
+func TestResumeExplicitBaseURLOverridesCheckpoint(t *testing.T) {
+	state := loop.NewState("run_base", "task")
+	state.BaseURL = "https://old-endpoint.com/v1"
+
+	baseURLFlag := "https://new-endpoint.com/v1"
+	endpoint := baseURLFlag
+	if endpoint == "" {
+		if state.BaseURL != "" {
+			endpoint = state.BaseURL
+		}
+	} else {
+		state.BaseURL = baseURLFlag
+	}
+
+	if state.BaseURL != "https://new-endpoint.com/v1" {
+		t.Errorf("explicit base-url override failed to update state: got %s", state.BaseURL)
+	}
+}

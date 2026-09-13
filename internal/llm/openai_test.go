@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestToWire(t *testing.T) {
@@ -402,5 +403,18 @@ func TestOpenAIStringRedaction(t *testing.T) {
 	wrapper := struct{ Provider OpenAI }{Provider: *o}
 	if got := fmt.Sprintf("%+v", wrapper); strings.Contains(got, secretKey) {
 		t.Errorf("embedded OpenAI leaked secret key: %s", got)
+	}
+}
+
+func TestWithTimeoutPreservesHTTPClientTransport(t *testing.T) {
+	rt := &RecordedTransport{}
+	client := &http.Client{Transport: rt}
+	o := NewOpenAI("key", WithHTTPClient(client), WithTimeout(45*time.Second))
+
+	if o.HTTP == nil || o.HTTP.Transport != rt {
+		t.Errorf("WithTimeout wiped out custom Transport: %+v", o.HTTP)
+	}
+	if o.HTTP.Timeout != 45*time.Second {
+		t.Errorf("Timeout = %v, want 45s", o.HTTP.Timeout)
 	}
 }

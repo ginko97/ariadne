@@ -269,9 +269,14 @@ func cmdResume(args []string) int {
 	// widening with a friendlier face, so it is an error instead. Silently
 	// leaving it out is worse than either: the tool would be offered and then
 	// refused at the loop, leaving the read side on with a dead write side.
-	if *remember && len(splitList(*allow)) > 0 && !contains(splitList(*allow), "remember") {
+	if mem && len(splitList(*allow)) > 0 && !contains(splitList(*allow), "remember") {
 		fmt.Fprintln(os.Stderr,
-			"ariadne resume: -remember with -allow needs remember in the list")
+			"ariadne resume: memory with -allow needs remember in the list")
+		return exitUsage
+	}
+	if mem && len(state.Allow) > 0 && !contains(state.Allow, "remember") {
+		fmt.Fprintln(os.Stderr,
+			"ariadne resume: checkpoint allow-list cannot be widened to include remember")
 		return exitUsage
 	}
 
@@ -282,6 +287,8 @@ func cmdResume(args []string) int {
 		} else {
 			endpoint = envOr("ARIADNE_BASE_URL", defaultBaseURL)
 		}
+	} else {
+		state.BaseURL = *baseURL
 	}
 
 	key, envName := apiKey(endpoint)
@@ -306,6 +313,8 @@ func cmdResume(args []string) int {
 	budgetVal := *budget
 	if budgetVal == 0 && state.ContextBudget > 0 {
 		budgetVal = state.ContextBudget
+	} else if *budget > 0 {
+		state.ContextBudget = *budget
 	}
 	// Memory turned on for a run that started without it. The checkpoint's
 	// system prompt wins on resume, so the notes have to be added to it here or

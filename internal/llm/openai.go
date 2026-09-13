@@ -106,7 +106,12 @@ func WithHTTPClient(c *http.Client) OpenAIOption {
 // WithTimeout bounds one HTTP request, the whole of it including reading the
 // body. 0 means no client-side limit, leaving only ctx.
 func WithTimeout(d time.Duration) OpenAIOption {
-	return func(o *OpenAI) { o.HTTP = &http.Client{Timeout: d} }
+	return func(o *OpenAI) {
+		if o.HTTP == nil {
+			o.HTTP = &http.Client{}
+		}
+		o.HTTP.Timeout = d
+	}
 }
 
 func WithMaxRetries(n int) OpenAIOption {

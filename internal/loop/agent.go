@@ -531,6 +531,11 @@ func (a *Agent) callTool(ctx context.Context, c llm.ToolCall) (llm.ToolResult, e
 	case o := <-done:
 		return o.res, o.err
 	case <-callCtx.Done():
+		select {
+		case o := <-done:
+			return o.res, o.err
+		default:
+		}
 		if ctx.Err() != nil {
 			// The whole run was cancelled, not just this call. That is the
 			// caller leaving, and it is a different thing from a slow tool.
