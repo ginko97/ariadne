@@ -16,14 +16,6 @@ docs/*
 !docs/injection-postmortem.md
 *.pdf
 
-# README.md is ignored while it is a stub.
-#
-# It is no longer a stub: positioning, the three headings, and the numbers are
-# in and every figure in it is captured output. The only part of the original
-# condition still outstanding is the asciinema at the top. Publishing is one
-# line — delete this block — and that is a deliberate decision to make, not a
-# thing to do by accident, because it is the first page anybody reads.
-README.md
 workspace/
 # MEMORY.md is what one machine's agent happens to have learned — runtime
 # state like runs/, not source. It also accumulates whatever a run was told
