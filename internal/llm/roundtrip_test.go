@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -408,3 +409,119 @@ func TestBackoffAttemptOverflowSafety(t *testing.T) {
 		}
 	}
 }
+
+// failingTransport fails the first n attempts the way a network blip does —
+// before the request reaches the server — then succeeds.
+type failingTransport struct {
+	failures int
+	attempts int
+	body     []byte
+}
+
+func (f *failingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	f.attempts++
+	if f.attempts <= f.failures {
+		return nil, errors.New("net/http: TLS handshake timeout")
+	}
+	return &http.Response{
+		StatusCode: 200,
+		Status:     "200 OK",
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(f.body)),
+		Request:    r,
+	}, nil
+}
+
+// A connection that never completed is the commonest transient failure there
+// is, and it used to consume none of the retries: MaxRetries was 3 and the
+// attempt count was 1. The retry logic only ever covered server-side rate
+// limiting, which is the rarer half. Dogfooding produced a real TLS handshake
+// timeout and the run died on the spot.
+func TestTransportFailureIsRetried(t *testing.T) {
+	ok := []byte(`{"choices":[{"message":{"content":"recovered"},"finish_reason":"stop"}]}`)
+	ft := &failingTransport{failures: 2, body: ok}
+
+	var retries []int
+	o := NewOpenAI("key",
+		WithHTTPClient(&http.Client{Transport: ft}),
+		WithBaseURL("https://example.test/v1"),
+		WithSleep(func(context.Context, time.Duration) error { return nil }),
+		WithOnRetry(func(attempt, status int, _ time.Duration) { retries = append(retries, status) }),
+	)
+
+	resp, err := o.Complete(context.Background(), Request{Model: "m"})
+	if err != nil {
+		t.Fatalf("two transient failures should not kill a run with 3 retries: %v", err)
+	}
+	if resp.Text() != "recovered" {
+		t.Errorf("text = %q", resp.Text())
+	}
+	if ft.attempts != 3 {
+		t.Errorf("attempts = %d, want 3", ft.attempts)
+	}
+	// Reported like any other retry, so a trace shows the wait. Status 0
+	// because there was no response to have a status.
+	if len(retries) != 2 || retries[0] != 0 {
+		t.Errorf("OnRetry saw %v, want two entries with status 0", retries)
+	}
+}
+
+// Retries are finite. A connection that never comes back must still end the run
+// rather than looping until the backoff budget runs out silently.
+func TestTransportFailureStopsAfterMaxRetries(t *testing.T) {
+	ft := &failingTransport{failures: 99}
+
+	o := NewOpenAI("key",
+		WithHTTPClient(&http.Client{Transport: ft}),
+		WithBaseURL("https://example.test/v1"),
+		WithMaxRetries(2),
+		WithSleep(func(context.Context, time.Duration) error { return nil }),
+	)
+
+	_, err := o.Complete(context.Background(), Request{Model: "m"})
+	if err == nil {
+		t.Fatal("expected the run to give up")
+	}
+	if !strings.Contains(err.Error(), "TLS handshake timeout") {
+		t.Errorf("the error should carry what actually failed: %v", err)
+	}
+	if ft.attempts != 3 {
+		t.Errorf("attempts = %d, want 3 (the first plus two retries)", ft.attempts)
+	}
+}
+
+// The body-read failure is deliberately not retried: the response was produced,
+// and dogfooding showed it recurring rather than passing — a prompt too large
+// for the timeout fails the same way every time.
+func TestBodyReadFailureIsNotRetried(t *testing.T) {
+	rt := &readFailTransport{}
+	o := NewOpenAI("key",
+		WithHTTPClient(&http.Client{Transport: rt}),
+		WithBaseURL("https://example.test/v1"),
+		WithSleep(func(context.Context, time.Duration) error { return nil }),
+	)
+
+	if _, err := o.Complete(context.Background(), Request{Model: "m"}); err == nil {
+		t.Fatal("expected an error")
+	}
+	if rt.attempts != 1 {
+		t.Errorf("attempts = %d; a read failure means the response was already produced", rt.attempts)
+	}
+}
+
+type readFailTransport struct{ attempts int }
+
+func (rt *readFailTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	rt.attempts++
+	return &http.Response{
+		StatusCode: 200,
+		Status:     "200 OK",
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(errReader{}),
+		Request:    r,
+	}, nil
+}
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, errors.New("connection reset mid-body") }

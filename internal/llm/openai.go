@@ -209,6 +209,39 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
 			if ctx.Err() != nil {
 				return Response{}, ctx.Err()
 			}
+			// A connection that never completed is the most common transient
+			// failure there is — a TLS handshake timeout, a reset, a DNS blip —
+			// and until dogfooding produced one it used none of the retries at
+			// all. MaxRetries was 3 and the attempt count was 1: the retry logic
+			// only ever covered server-side rate limiting, which is the rarer
+			// half.
+			//
+			// Safe to repeat because the model call is the one part of a run
+			// with no side effect of its own. Tools carry those, and they have
+			// their own completion record. The worst case is paying twice for a
+			// generation that may have happened on the other side of a dropped
+			// connection, which is money rather than correctness — and the
+			// alternative is a dead run.
+			//
+			// Deliberately not extended to the body-read failure below. That one
+			// means the response *was* produced, and dogfooding showed it
+			// recurring rather than passing: a prompt too large for the timeout
+			// fails the same way every time, so retrying just spends the wait
+			// three times before failing anyway. The fix there was a bigger
+			// timeout, not more attempts.
+			if attempt < maxRetries {
+				wait := backoff(attempt, nil, nil)
+				if spentBackoff+wait.delay <= maxTotalBackoff {
+					if o.OnRetry != nil {
+						o.OnRetry(attempt, 0, wait.delay)
+					}
+					if sleepErr := o.sleep(ctx, wait.delay); sleepErr != nil {
+						return Response{}, sleepErr
+					}
+					spentBackoff += wait.delay
+					continue
+				}
+			}
 			return Response{}, fmt.Errorf("openai: request failed: %w", err)
 		}
 
