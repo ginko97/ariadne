@@ -673,9 +673,12 @@ func printDelta(w io.Writer) func(llm.Chunk) {
 			}
 			fmt.Fprintf(w, "→ %s\n", d.Name)
 		}
-		if c.Stop != "" && open {
-			fmt.Fprintln(w)
-			open = false
+		if c.Stop != "" {
+			if open {
+				fmt.Fprintln(w)
+				open = false
+			}
+			clear(announced)
 		}
 	}
 }

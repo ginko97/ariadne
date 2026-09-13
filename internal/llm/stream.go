@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"iter"
 	"sort"
 )
@@ -129,8 +130,12 @@ func (a *accumulator) response() Response {
 		if args == "" {
 			args = "{}" // an empty string is not valid JSON; servers reject it
 		}
+		id := d.ID
+		if id == "" {
+			id = fmt.Sprintf("call_synth_%d", i)
+		}
 		blocks = append(blocks, Block{
-			Type: BlockToolUse, ID: d.ID, Name: d.Name, Args: json.RawMessage(args),
+			Type: BlockToolUse, ID: id, Name: d.Name, Args: json.RawMessage(args),
 		})
 	}
 
@@ -179,6 +184,9 @@ func (p Streaming) Complete(ctx context.Context, req Request) (Response, error) 
 	acc := newAccumulator()
 	for chunk, err := range seq {
 		if err != nil {
+			if ctx.Err() != nil {
+				return Response{}, ctx.Err()
+			}
 			return Response{}, err
 		}
 		if p.OnDelta != nil {

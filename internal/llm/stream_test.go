@@ -344,3 +344,45 @@ type failingStreamer struct{ err error }
 func (f failingStreamer) Stream(context.Context, Request) (iter.Seq2[Chunk, error], error) {
 	return nil, f.err
 }
+
+// A provider or proxy that omits tool call IDs must not leave them empty —
+// downstream resume pairs calls by ID, and empty IDs collapse into one.
+// Matches fromWire's behaviour.
+func TestAccumulatorSynthesizesMissingToolCallID(t *testing.T) {
+	acc := newAccumulator()
+	acc.add(Chunk{ToolCall: &ToolDelta{Index: 0, Name: "calc", Args: `{"expr":"1"}`}})
+	acc.add(Chunk{ToolCall: &ToolDelta{Index: 1, Name: "fetch", Args: `{"path":"a"}`}})
+
+	calls := acc.response().ToolCalls()
+	if len(calls) != 2 {
+		t.Fatalf("got %d calls, want 2", len(calls))
+	}
+	if calls[0].ID != "call_synth_0" {
+		t.Errorf("call 0 ID = %q, want call_synth_0", calls[0].ID)
+	}
+	if calls[1].ID != "call_synth_1" {
+		t.Errorf("call 1 ID = %q, want call_synth_1", calls[1].ID)
+	}
+}
+
+// When context is canceled during streaming, socket teardown yields generic
+// read errors (e.g. closed connection). Complete must prioritize ctx.Err() so
+// the caller recognizes the cancellation.
+func TestStreamingHonorsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	p := Streaming{S: cancelingStreamer{boom: errors.New("read tcp: use of closed network connection")}}
+	_, err := p.Complete(ctx, Request{Model: "m"})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("got error %v, want context.Canceled", err)
+	}
+}
+
+type cancelingStreamer struct{ boom error }
+
+func (c cancelingStreamer) Stream(context.Context, Request) (iter.Seq2[Chunk, error], error) {
+	return func(yield func(Chunk, error) bool) {
+		yield(Chunk{}, c.boom)
+	}, nil
+}

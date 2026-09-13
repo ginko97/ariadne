@@ -58,6 +58,30 @@ func TestPrintDeltaSeparatesParallelCalls(t *testing.T) {
 	}
 }
 
+// In a multi-step run, OpenAI-compatible endpoints restart tool indices from 0
+// on each turn. The announcement tracker must clear between turns, or tool 0
+// in step 2 is silently suppressed because step 1 already announced an index 0.
+func TestPrintDeltaResetsBetweenTurns(t *testing.T) {
+	var out strings.Builder
+	p := printDelta(&out)
+
+	// Turn 1: tool at index 0.
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c1", Name: "calc"}})
+	p(llm.Chunk{Stop: llm.StopToolUse})
+
+	// Turn 2: different tool, provider re-uses index 0.
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c2", Name: "fetch"}})
+	p(llm.Chunk{Stop: llm.StopToolUse})
+
+	got := out.String()
+	if !strings.Contains(got, "→ calc") {
+		t.Errorf("turn 1 tool was not announced: %s", got)
+	}
+	if !strings.Contains(got, "→ fetch") {
+		t.Errorf("turn 2 tool (at index 0) was suppressed: %s", got)
+	}
+}
+
 // splitList feeds --allow and --approve, where an empty flag has to mean
 // "unrestricted" rather than "restricted to nothing".
 func TestSplitList(t *testing.T) {

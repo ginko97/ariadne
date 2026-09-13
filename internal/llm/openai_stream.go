@@ -121,6 +121,10 @@ func (o *OpenAI) Stream(ctx context.Context, req Request) (iter.Seq2[Chunk, erro
 			}
 		}
 		if err := sc.Err(); err != nil {
+			if ctx.Err() != nil {
+				yield(Chunk{}, ctx.Err())
+				return
+			}
 			yield(Chunk{}, fmt.Errorf("openai: read stream: %w", err))
 		}
 	}, nil
