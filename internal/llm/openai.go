@@ -14,9 +14,16 @@ import (
 
 const (
 	defaultBaseURL = "https://api.openai.com/v1"
-	// LLM calls are slow. ctx carries the real deadline; this is the backstop
-	// for callers who pass context.Background().
-	defaultTimeout        = 120 * time.Second
+	// LLM calls are slow, and a large prompt is slower than the number here
+	// used to allow. Dogfooding found the failure: two documents in the history
+	// meant every request took longer than 120s, so the run failed, and the
+	// resume failed identically — checkpointed, resumable in principle, and
+	// permanently stuck in practice. A timeout that cannot be raised is a
+	// ceiling on how big a job can be.
+	//
+	// ctx still carries the real deadline; this is the backstop for callers who
+	// pass context.Background(), and WithTimeout is how a caller changes it.
+	defaultTimeout        = 300 * time.Second
 	defaultMaxRetries     = 3
 	defaultInitialBackoff = 500 * time.Millisecond
 	// maxBackoffDelay bounds a delay we invented. It is deliberately not
@@ -94,6 +101,12 @@ func WithHeader(k, v string) OpenAIOption {
 
 func WithHTTPClient(c *http.Client) OpenAIOption {
 	return func(o *OpenAI) { o.HTTP = c }
+}
+
+// WithTimeout bounds one HTTP request, the whole of it including reading the
+// body. 0 means no client-side limit, leaving only ctx.
+func WithTimeout(d time.Duration) OpenAIOption {
+	return func(o *OpenAI) { o.HTTP = &http.Client{Timeout: d} }
 }
 
 func WithMaxRetries(n int) OpenAIOption {

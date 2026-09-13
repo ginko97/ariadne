@@ -48,6 +48,9 @@ const (
 	// library caller decides for itself, a job gets a limit whether or not
 	// anybody remembered to ask for one.
 	defaultToolTimeout = 60 * time.Second
+	// One provider request. Generous because the cost of being wrong is a run
+	// that cannot be resumed, not a run that is slow.
+	defaultHTTPTimeout = 300 * time.Second
 )
 
 // Outside workspaceDir on purpose: if the notes lived where the tools are
@@ -109,6 +112,7 @@ flags:
   -stream         print tokens and tool calls as they arrive
   -remember       let the run read and append to MEMORY.md (off by default)
   -tool-timeout   abandon a tool call that runs longer than this (default 1m0s)
+  -http-timeout   bound one provider request, body included (default 5m0s)
 
 eval flags:
   -models         comma-separated model ids  (default: ARIADNE_MODEL)
@@ -142,6 +146,7 @@ func cmdRun(args []string) int {
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
 	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
 	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")
+	httpTimeout := fs.Duration("http-timeout", defaultHTTPTimeout, "bound one provider request, body included (0: only the context)")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -199,8 +204,8 @@ func cmdRun(args []string) int {
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: *model, BaseURL: *baseURL, RunID: state.RunID,
 		MaxSteps: *maxSteps, Budget: *budget, Stream: *stream, Memory: *remember,
-		ToolTimeout: *toolTimeout,
-		Allow:       splitList(*allow), Approve: splitList(*approve),
+		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
+		Allow: splitList(*allow), Approve: splitList(*approve),
 		Store: store, Trace: tw,
 	})
 	state.BaseURL = *baseURL
@@ -226,6 +231,7 @@ func cmdResume(args []string) int {
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
 	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
 	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")
+	httpTimeout := fs.Duration("http-timeout", defaultHTTPTimeout, "bound one provider request, body included (0: only the context)")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -313,8 +319,8 @@ func cmdResume(args []string) int {
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: state.Model, BaseURL: endpoint, RunID: state.RunID,
 		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem,
-		ToolTimeout: *toolTimeout,
-		Allow:       splitList(*allow), Approve: splitList(*approve),
+		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
+		Allow: splitList(*allow), Approve: splitList(*approve),
 		Store: store, Trace: tw,
 	})
 
@@ -381,6 +387,7 @@ type agentOpts struct {
 	MaxSteps    int
 	Budget      int
 	ToolTimeout time.Duration
+	HTTPTimeout time.Duration
 	Stream      bool
 	// Memory switches on both halves at once — the remember tool and the notes
 	// prepended to the prompt. Splitting them would allow a run that writes
@@ -418,6 +425,10 @@ func newAgentFor(o agentOpts) *loop.Agent {
 	reg := newRegistry(rememberFor)
 	client := llm.NewOpenAI(o.Key,
 		llm.WithBaseURL(o.BaseURL),
+		// One request, including reading the body. A big enough conversation
+		// takes longer than the old default and made runs permanently
+		// unresumable; see the note on defaultTimeout.
+		llm.WithTimeout(o.HTTPTimeout),
 		// Both, deliberately. The trace line is what an eval reads later to
 		// tell a slow model from a throttled one; the stderr line is what
 		// stops a person watching a stalled terminal from assuming it hung.
@@ -643,7 +654,7 @@ func cmdEval(args []string) int {
 		// something from task 3 is no longer measuring 34 independent tasks.
 		return newAgentFor(agentOpts{
 			Key: key, Model: model, BaseURL: *baseURL, RunID: runID,
-			MaxSteps: maxSteps, Budget: *budget, ToolTimeout: defaultToolTimeout,
+			MaxSteps: maxSteps, Budget: *budget, ToolTimeout: defaultToolTimeout, HTTPTimeout: defaultHTTPTimeout,
 			Store: store, Trace: tw,
 		})
 	}

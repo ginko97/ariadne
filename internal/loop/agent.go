@@ -197,11 +197,11 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		// branch above has already finished any half-executed batch, so every
 		// tool_use in the history has its result. Trimming anywhere else would
 		// have to reason about a batch in flight.
-		if s.ContextBudget > 0 && s.InputTokens > s.ContextBudget {
-			if n := compact(s, s.InputTokens, s.ContextBudget); n > 0 {
+		if est := estimatedTokens(s); s.ContextBudget > 0 && est > s.ContextBudget {
+			if n := compact(s, est, s.ContextBudget); n > 0 {
 				a.emit(trace.Event{
 					Kind: trace.KindCompact, Step: s.Steps,
-					InTokens: s.InputTokens, Messages: len(s.Messages),
+					InTokens: est, Messages: len(s.Messages),
 					Content: fmt.Sprintf("dropped %d messages (%d total) over budget %d",
 						n, s.Dropped, s.ContextBudget),
 				})
@@ -249,6 +249,10 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		// next iteration compacts against, and recording it on the state is what
 		// makes a resumed run behave like one that never stopped.
 		s.InputTokens = resp.Usage.InputTokens
+		// Paired with the count: what the conversation measured when the
+		// provider priced it. Without the pair the count cannot be scaled, and
+		// growth since the last request is invisible.
+		s.InputChars = totalSize(s.Messages)
 
 		a.emit(trace.Event{
 			Kind: trace.KindResponse, Step: s.Steps,

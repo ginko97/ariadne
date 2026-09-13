@@ -260,8 +260,11 @@ func TestRunCompactsWhenTheProviderSaysThePromptIsTooBig(t *testing.T) {
 	for _, e := range events {
 		if e.Kind == trace.KindCompact {
 			compacts++
-			if e.InTokens != 80_000 {
-				t.Errorf("compact event records %d input tokens", e.InTokens)
+			// The estimate compaction acted on, not the raw reported count:
+			// the conversation grew after that response, and the event should
+			// say what the decision was made against.
+			if e.InTokens < 80_000 {
+				t.Errorf("compact event records %d input tokens, want at least the reported 80000", e.InTokens)
 			}
 		}
 	}
@@ -446,5 +449,70 @@ func TestBudgetDoesNotLeakBetweenRuns(t *testing.T) {
 	}
 	if second.ContextBudget != 0 {
 		t.Errorf("run_b inherited run_a's budget of %d", second.ContextBudget)
+	}
+}
+
+// The provider's count describes the prompt that was *sent*. Tool results land
+// after that, so by the time the next request is built the conversation can be
+// far larger — and compaction was reading the number from before the growth.
+//
+// Dogfooding produced the case: one step fetched two documents, the history
+// reached 33KB, the recorded count still said 655 tokens, and compaction did
+// nothing. The next request was then too large to complete, so the run was
+// checkpointed, resumable, and permanently stuck.
+func TestEstimateScalesWithConversationGrowth(t *testing.T) {
+	s := conversation("read both documents", 1)
+	s.InputTokens = 655
+	s.InputChars = totalSize(s.Messages)
+
+	// Unchanged conversation: the provider's number stands as measured.
+	if got := estimatedTokens(s); got != 655 {
+		t.Errorf("estimate = %d before any growth, want the measured 655", got)
+	}
+
+	// Now a step returns two large documents, as fetch would.
+	s.Messages = append(s.Messages,
+		llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{
+			{Type: llm.BlockToolUse, ID: "big", Name: "fetch", Args: json.RawMessage(`{}`)},
+		}},
+		llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{
+			{Type: llm.BlockToolResult, CallID: "big", Content: strings.Repeat("x", 33_000)},
+		}},
+	)
+
+	est := estimatedTokens(s)
+	if est <= 655 {
+		t.Fatalf("estimate = %d after 33KB arrived; growth is invisible", est)
+	}
+	if est < 5_000 {
+		t.Errorf("estimate = %d; 33KB of new content should scale it by more than that", est)
+	}
+	t.Logf("655 measured -> %d estimated after the documents landed", est)
+}
+
+// Without the pair there is nothing to scale against, so the measured number
+// stands. A run from before this field existed must keep working.
+func TestEstimateFallsBackWithoutTheCharPair(t *testing.T) {
+	s := conversation("x", 3)
+	s.InputTokens = 900
+	s.InputChars = 0 // an older checkpoint
+
+	if got := estimatedTokens(s); got != 900 {
+		t.Errorf("estimate = %d, want the measured 900 when there is nothing to scale by", got)
+	}
+}
+
+// Compaction shrinks the conversation, so the next estimate must not scale
+// upward off a stale pair and immediately compact again.
+func TestEstimateDoesNotGrowAfterCompaction(t *testing.T) {
+	s := conversation("x", 12)
+	s.InputTokens = 40_000
+	s.InputChars = totalSize(s.Messages)
+
+	if n := compact(s, estimatedTokens(s), 20_000); n == 0 {
+		t.Fatal("nothing was dropped")
+	}
+	if got := estimatedTokens(s); got > s.InputTokens {
+		t.Errorf("estimate rose to %d after compaction shrank the conversation", got)
 	}
 }

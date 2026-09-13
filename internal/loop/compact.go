@@ -87,6 +87,32 @@ func totalSize(msgs []llm.Message) int {
 	return n
 }
 
+// estimatedTokens is what the next prompt will cost, as best anything here can
+// say before sending it.
+//
+// The provider's count is still the only measurement — but it measures the
+// prompt that was sent, and tool results have landed since. So it is scaled by
+// how much the conversation has grown since that measurement: characters used
+// as a *ratio against the same conversation*, which is the argument size()
+// already makes, rather than as an absolute token estimate, which would be the
+// tokenizer this project refuses to have.
+//
+// Without this, a single step that fetches two large documents can push a run
+// past the window while the recorded count still describes the prompt from
+// before the fetch. Compaction then does nothing, the next request is too big
+// to complete, and the run is checkpointed, resumable, and permanently stuck —
+// which is exactly what dogfooding produced.
+func estimatedTokens(s *State) int {
+	if s.InputChars <= 0 || s.InputTokens <= 0 {
+		return s.InputTokens
+	}
+	now := totalSize(s.Messages)
+	if now <= s.InputChars {
+		return s.InputTokens
+	}
+	return int(float64(s.InputTokens) * float64(now) / float64(s.InputChars))
+}
+
 // compact drops the oldest complete turns until the conversation should fit,
 // and returns how many messages went.
 //

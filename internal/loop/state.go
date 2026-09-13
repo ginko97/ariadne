@@ -55,6 +55,16 @@ type State struct {
 	// have — otherwise the first request after a resume is the one that blows
 	// the context window.
 	InputTokens int `json:"input_tokens,omitempty"`
+	// InputChars is how big the conversation was when InputTokens was measured.
+	//
+	// The pair is what makes the token count usable. InputTokens describes the
+	// prompt that was *sent*; by the time the next request is built, tools have
+	// returned and the conversation can be much larger. Dogfooding found the
+	// case that matters: a step that fetched two documents grew the history to
+	// 33KB while the recorded count still said 655 tokens, so compaction looked
+	// at a number from before the growth and did nothing — in the one situation
+	// where it was the only thing that could have helped.
+	InputChars int `json:"input_chars,omitempty"`
 	// Dropped counts messages compaction has removed over the life of the run.
 	// The conversation no longer says how long it was; this does, and the trace
 	// still holds every message that ever existed.
