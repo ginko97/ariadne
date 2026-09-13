@@ -18,15 +18,21 @@ func Load() error {
 	if err != nil {
 		return err
 	}
+	origDir := dir
+	found := false
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			found = true
 			break
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return nil // no go.mod above us; nothing to load
+			break
 		}
 		dir = parent
+	}
+	if !found {
+		dir = origDir
 	}
 
 	f, err := os.Open(filepath.Join(dir, ".env"))

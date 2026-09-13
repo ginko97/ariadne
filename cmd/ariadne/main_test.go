@@ -405,3 +405,43 @@ func TestCheckResumeGrants(t *testing.T) {
 		t.Errorf("a checkpoint list without remember should be refused: %v", err)
 	}
 }
+
+func TestResolveModel(t *testing.T) {
+	st := loop.NewState("run_1", "task")
+	st.Model = "model-checkpoint"
+
+	// Explicit flag overrides checkpoint
+	if got := resolveModel("model-flag", true, st); got != "model-flag" {
+		t.Errorf("explicit flag resolveModel = %q, want model-flag", got)
+	}
+	if st.Model != "model-flag" {
+		t.Errorf("st.Model = %q, want model-flag", st.Model)
+	}
+
+	// Non-explicit flag (default fallback) keeps checkpoint
+	st2 := loop.NewState("run_2", "task")
+	st2.Model = "model-checkpoint"
+	if got := resolveModel("default-model", false, st2); got != "model-checkpoint" {
+		t.Errorf("non-explicit flag resolveModel = %q, want model-checkpoint", got)
+	}
+	if st2.Model != "model-checkpoint" {
+		t.Errorf("st2.Model = %q, want model-checkpoint", st2.Model)
+	}
+}
+
+func TestPrintDeltaResetsOnUsageChunk(t *testing.T) {
+	var out strings.Builder
+	p := printDelta(&out)
+
+	// Turn 1 ends with usage but no Stop reason
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c1", Name: "calc"}})
+	p(llm.Chunk{Usage: llm.Usage{InputTokens: 10, OutputTokens: 5}})
+
+	// Turn 2 calls tool at index 0 again; it must be announced because usage reset the state
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c2", Name: "calc"}})
+
+	got := out.String()
+	if n := strings.Count(got, "calc"); n != 2 {
+		t.Errorf("expected calc to be announced twice across responses, got %d times in:\n%s", n, got)
+	}
+}

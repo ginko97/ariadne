@@ -47,3 +47,31 @@ func TestLoadParsesExportAndQuotes(t *testing.T) {
 		t.Errorf("TEST_DOTENV_C = %q, want 'single quoted'", got)
 	}
 }
+
+func TestLoadWithoutGoMod(t *testing.T) {
+	dir := t.TempDir()
+	content := "TEST_DOTENV_STANDALONE=works\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(cwd) }()
+
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	defer os.Unsetenv("TEST_DOTENV_STANDALONE")
+
+	if got := os.Getenv("TEST_DOTENV_STANDALONE"); got != "works" {
+		t.Errorf("TEST_DOTENV_STANDALONE = %q, want works", got)
+	}
+}

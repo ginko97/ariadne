@@ -37,25 +37,32 @@ const (
 // span is a half-open range of messages that has to be dropped together.
 type span struct{ lo, hi int }
 
+// isUserPrompt reports whether m is a message from the person rather than tool
+// results.
+func isUserPrompt(m llm.Message) bool {
+	return m.Role == llm.RoleUser && !isToolResults(m)
+}
+
 // headLen is how many messages at the front are not droppable.
 //
 // Always the task: an agent that forgets what it was asked is not compacted, it
-// is lobotomised. Sometimes the task *and* the reply to it, and that second
-// message is the whole difference between the two shapes this loop handles.
+// is lobotomised.
 //
-// A single-task run goes task, tool_use, results, tool_use, results. Message 1
-// is half of a pair whose other half is message 2, so protecting it while its
-// results stay droppable orphans the call — a provider 400, the failure this
-// whole file exists to avoid.
+// In a multi-turn conversation (more than one prompt from the person), it is
+// the opening exchange: the task and the entire first turn's response up to the
+// next prompt from the person. Protecting the opening exchange is what lets
+// every subsequent unit be a complete turn (question, any tool calls, answer)
+// that can be dropped without splitting tool pairs or orphaning answers.
 //
-// A conversation goes question, answer, question, answer. Message 1 is the
-// answer to the protected task, so it can never be paired with anything to its
-// right without splitting some later question from its answer. Protecting the
-// opening *exchange* rather than the opening *message* is what lets every unit
-// after it be a question with its own answer.
-//
-// The test is therefore whether message 1 requested tools, not what role it is.
+// In a single-task run, message 1 is protected only when it is a plain assistant
+// reply with no tool use. If it called tools, protecting it while its results stay
+// droppable would orphan the call.
 func headLen(msgs []llm.Message) int {
+	for i := 1; i < len(msgs); i++ {
+		if isUserPrompt(msgs[i]) {
+			return i
+		}
+	}
 	if len(msgs) >= 2 && msgs[1].Role == llm.RoleAssistant && !hasToolUse(msgs[1]) {
 		return 2
 	}
@@ -64,22 +71,27 @@ func headLen(msgs []llm.Message) int {
 
 // units groups a conversation into what can be dropped without corrupting it.
 //
-// The unit is a turn *pair*, never a message, and the pair is always two
-// adjacent messages of different roles. In a tool run that is a request and the
-// results it is waiting for: drop the results and the request is an unanswered
-// tool call, drop the request and the results have nothing to attach to. Both
-// are a provider 400, not a smaller conversation — the failure mode of a naive
-// sliding window here is not a worse answer, it is a run that stops working.
+// In a multi-turn conversation, starting after the head above, each unit is a
+// complete conversational turn: from a user prompt through all its tool calls
+// and results to the assistant's reply. Dropping that unit drops the question,
+// its tools and its answer together, leaving role alternation and tool pairings
+// intact.
 //
-// In a conversation, starting after the head above, the same rule pairs a
-// question with its answer. That is what keeps compaction from leaving an
-// answer to a question nobody can see: an earlier version paired each answer
-// with the *next* question, which preserved role alternation — the only thing
-// its test checked — while dropping "what is the deadline?" and keeping the
-// date on its own.
+// In a single-task run, the unit is a tool round trip: an assistant tool_use and
+// the user tool_result responding to it.
 func units(msgs []llm.Message) []span {
 	var out []span
-	for i := headLen(msgs); i < len(msgs); {
+	head := headLen(msgs)
+	for i := head; i < len(msgs); {
+		if isUserPrompt(msgs[i]) {
+			j := i + 1
+			for j < len(msgs) && !isUserPrompt(msgs[j]) {
+				j++
+			}
+			out = append(out, span{i, j})
+			i = j
+			continue
+		}
 		if i+1 < len(msgs) && msgs[i].Role != msgs[i+1].Role {
 			out = append(out, span{i, i + 2})
 			i += 2

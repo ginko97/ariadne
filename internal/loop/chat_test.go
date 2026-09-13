@@ -84,6 +84,36 @@ func TestAddUserMessageRefusesMidBatch(t *testing.T) {
 	}
 }
 
+// HasPendingToolCalls is what a REPL checks before deciding whether to flush
+// an interrupted batch or read the next line — cmdChat has no other way to
+// ask, since pendingToolCalls itself is unexported.
+func TestHasPendingToolCalls(t *testing.T) {
+	s := NewState("run_test", "do something")
+	if s.HasPendingToolCalls() {
+		t.Error("a fresh state reports a pending batch")
+	}
+
+	s.Messages = append(s.Messages, llm.Message{
+		Role: llm.RoleAssistant,
+		Blocks: []llm.Block{
+			{Type: llm.BlockToolUse, ID: "c1", Name: "calc", Args: json.RawMessage(`{}`)},
+		},
+	})
+	if !s.HasPendingToolCalls() {
+		t.Error("a tool_use with no result does not report as pending")
+	}
+
+	s.Messages = append(s.Messages, llm.Message{
+		Role: llm.RoleUser,
+		Blocks: []llm.Block{
+			{Type: llm.BlockToolResult, CallID: "c1", Content: "4"},
+		},
+	})
+	if s.HasPendingToolCalls() {
+		t.Error("a finished batch still reports as pending")
+	}
+}
+
 func TestAddUserMessageRejectsEmpty(t *testing.T) {
 	s := NewState("run_test", "task")
 	for _, text := range []string{"", "   ", "\n\t "} {

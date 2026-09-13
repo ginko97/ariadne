@@ -271,3 +271,17 @@ func TestScoreAcceptsRealWorldNumberFormats(t *testing.T) {
 		}
 	}
 }
+
+func TestTruncHandlesUnicodeRunes(t *testing.T) {
+	// 5 runes, 15 bytes in UTF-8
+	in := "こんにちは"
+	if got := trunc(in, 4); got != "こんに…" {
+		t.Errorf("trunc(%q, 4) = %q, want %q", in, got, "こんに…")
+	}
+	if got := trunc(in, 10); got != in {
+		t.Errorf("trunc(%q, 10) = %q, want %q", in, got, in)
+	}
+	if got := trunc(in, 1); got != "…" {
+		t.Errorf("trunc(%q, 1) = %q, want %q", in, got, "…")
+	}
+}

@@ -79,6 +79,8 @@ func main() {
 		os.Exit(cmdRun(os.Args[2:]))
 	case "resume":
 		os.Exit(cmdResume(os.Args[2:]))
+	case "chat":
+		os.Exit(cmdChat(os.Args[2:]))
 	case "eval":
 		os.Exit(cmdEval(os.Args[2:]))
 	case "traces":
@@ -99,6 +101,7 @@ func usage() {
 usage:
   ariadne run    [flags] <task>
   ariadne resume [flags] <run-id>
+  ariadne chat   [flags] [run-id]        talk; with no id, the first line typed is the task
   ariadne eval   [flags]                 score a task set, one row per model
   ariadne traces [flags] [text]          search the JSONL traces every run writes
 
@@ -113,6 +116,9 @@ flags:
   -remember       let the run read and append to MEMORY.md (off by default)
   -tool-timeout   abandon a tool call that runs longer than this (default 1m0s)
   -http-timeout   bound one provider request, body included (default 5m0s)
+
+chat flags: same as run/resume, plus while chatting:
+  /model <id>     switch model starting next turn
 
 eval flags:
   -models         comma-separated model ids  (default: ARIADNE_MODEL)
@@ -311,6 +317,224 @@ func cmdResume(args []string) int {
 		state.RunID, state.Model, state.Steps, len(state.Messages))
 
 	return execute(ctx, agent, state, *stream)
+}
+
+// cmdChat starts or continues a conversation: read a line, ChatTurn, print,
+// loop. With no run id it starts a new one, and the first line typed becomes
+// the task — NewState needs it up front, so that turn is a plain Run rather
+// than a ChatTurn, the same way cmdRun's first call is. With a run id it loads
+// the checkpoint, same as resume.
+//
+// Ctrl-C is scoped per turn: each call gets its own context, so cancelling an
+// answer drops back to the prompt instead of ending the chat. A turn cancelled
+// mid-tool-call leaves a batch pending, which is why the top of the loop
+// checks HasPendingToolCalls before reading anything — the flush cmdResume
+// does once, done here on every iteration because a REPL can be interrupted
+// more than once.
+func cmdChat(args []string) int {
+	fs := flag.NewFlagSet("chat", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	model := fs.String("model", envOr("ARIADNE_MODEL", defaultModel), "model id")
+	baseURL := fs.String("base-url", "", "OpenAI-compatible endpoint (fresh: default "+defaultBaseURL+"; resumed: checkpoint's unless overridden)")
+	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
+	allow := fs.String("allow", "", "comma-separated tools this run may call (resume can only narrow it)")
+	approve := fs.String("approve", "", "tools needing a yes on the terminal before each call (resume can only add)")
+	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
+	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
+	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
+	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")
+	httpTimeout := fs.Duration("http-timeout", defaultHTTPTimeout, "bound one provider request, body included (0: only the context)")
+
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if len(fs.Args()) > 1 {
+		fmt.Fprintf(os.Stderr, "ariadne chat: unexpected arguments %v (flags must come before the run id)\n", fs.Args()[1:])
+		return exitUsage
+	}
+
+	store := &loop.Store{Dir: runsDir}
+	resuming := len(fs.Args()) == 1
+
+	var state *loop.State
+	if resuming {
+		s, err := store.Load(fs.Args()[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
+			return exitFail
+		}
+		state = s
+	}
+
+	mem := *remember
+	if resuming {
+		mem = mem || state.Memory
+	}
+	rememberFor := ""
+	if mem {
+		rememberFor = "validate"
+	}
+	if err := checkNames(newRegistry(rememberFor).Defs(), splitList(*allow), splitList(*approve)); err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
+		return exitUsage
+	}
+	if resuming {
+		if err := checkResumeGrants(mem, splitList(*allow), state); err != nil {
+			fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
+			return exitUsage
+		}
+	} else if *remember && len(splitList(*allow)) > 0 && !contains(splitList(*allow), "remember") {
+		fmt.Fprintln(os.Stderr, "ariadne chat: -remember with -allow needs remember in the list")
+		return exitUsage
+	}
+
+	endpoint := *baseURL
+	if resuming {
+		endpoint = resolveEndpoint(*baseURL, state)
+	} else if endpoint == "" {
+		endpoint = envOr("ARIADNE_BASE_URL", defaultBaseURL)
+	}
+
+	key, envName := apiKey(endpoint)
+	if key == "" {
+		fmt.Fprintf(os.Stderr, "ariadne chat: no api key for %s — set %s in the environment or .env\n", endpoint, envName)
+		return exitUsage
+	}
+
+	modelExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "model" {
+			modelExplicit = true
+		}
+	})
+
+	runID := newRunID()
+	startModel := *model
+	if resuming {
+		runID = state.RunID
+		startModel = resolveModel(*model, modelExplicit, state)
+	}
+
+	tw, err := trace.NewFileWriter(runsDir, runID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
+		return exitFail
+	}
+	defer closeTrace(tw)
+
+	budgetVal := *budget
+	if resuming {
+		budgetVal = resolveBudget(*budget, state)
+		// Memory turned on for a run that started without it — same
+		// reconciliation cmdResume does, and for the same reason: the system
+		// prompt in the checkpoint wins on resume, so the notes have to be
+		// added to it here or the tool would be offered with nothing behind it.
+		if mem && !state.Memory {
+			state.System += memoryPrompt(true)
+			state.Memory = true
+		}
+	}
+
+	agent := newAgentFor(agentOpts{
+		Key: key, Model: startModel, BaseURL: endpoint, RunID: runID,
+		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem,
+		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
+		Allow: splitList(*allow), Approve: splitList(*approve),
+		Store: store, Trace: tw,
+	})
+
+	in := bufio.NewScanner(os.Stdin)
+
+	if resuming {
+		fmt.Fprintf(os.Stderr, "chat %s  model=%s  from step %d (%d messages)  (Ctrl-D to exit)\n",
+			state.RunID, state.Model, state.Steps, len(state.Messages))
+	} else {
+		fmt.Fprint(os.Stderr, "chat: type your message (Ctrl-D to exit)\n")
+	}
+
+	for {
+		if state != nil && state.HasPendingToolCalls() {
+			fmt.Fprintln(os.Stderr, "finishing an interrupted turn...")
+			if err := chatTurn(agent, state, *stream); err != nil {
+				fmt.Fprintf(os.Stderr, "! %v\n", err)
+			}
+			continue
+		}
+
+		fmt.Fprint(os.Stderr, "> ")
+		if !in.Scan() {
+			break // Ctrl-D
+		}
+		line := strings.TrimSpace(in.Text())
+		if line == "" {
+			continue
+		}
+		if rest, ok := strings.CutPrefix(line, "/model"); ok {
+			newModel := strings.TrimSpace(rest)
+			if newModel == "" {
+				current := agent.Model
+				if state != nil && state.Model != "" {
+					current = state.Model
+				}
+				fmt.Fprintf(os.Stderr, "current model: %s (usage: /model <model-name>)\n", current)
+				continue
+			}
+			agent.Model = newModel
+			if state != nil {
+				if err := state.SetModel(newModel); err != nil {
+					fmt.Fprintf(os.Stderr, "! %v\n", err)
+					continue
+				}
+			}
+			fmt.Fprintf(os.Stderr, "model set to %s, takes effect next turn\n", agent.Model)
+			continue
+		}
+
+		if state == nil {
+			state = loop.NewState(runID, line)
+			state.BaseURL = endpoint
+			state.ContextBudget = *budget
+			state.Memory = mem
+			fmt.Fprintf(os.Stderr, "chat %s  model=%s\n", state.RunID, agent.Model)
+			if err := chatTurn(agent, state, *stream); err != nil {
+				fmt.Fprintf(os.Stderr, "! %v\n", err)
+			}
+			continue
+		}
+
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		answer, err := agent.ChatTurn(ctx, state, line)
+		stop()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "! %v\n", err)
+			continue
+		}
+		printAnswer(answer, *stream)
+	}
+	return exitOK
+}
+
+// chatTurn runs the agent with no new message — the first turn of a fresh
+// chat, where NewState already carries the task, and flushing a batch a
+// cancelled turn left pending. Its own context, scoped to this call only, so
+// Ctrl-C here cancels this turn and nothing waiting after it.
+func chatTurn(agent *loop.Agent, state *loop.State, streamed bool) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	answer, err := agent.Run(ctx, state)
+	if err != nil {
+		return err
+	}
+	printAnswer(answer, streamed)
+	return nil
+}
+
+// printAnswer applies the same stdout contract execute does: redirected
+// output always gets the answer, a streamed terminal does not get it twice.
+func printAnswer(answer string, streamed bool) {
+	if !streamed || !isTerminal(os.Stdout) {
+		fmt.Println(answer)
+	}
 }
 
 // systemPrompt is the standing instruction every run starts under.
@@ -812,7 +1036,7 @@ func printDelta(w io.Writer) func(llm.Chunk) {
 			}
 			fmt.Fprintf(w, "→ %s\n", d.Name)
 		}
-		if c.Stop != "" {
+		if c.Stop != "" || c.Usage.InputTokens > 0 || c.Usage.OutputTokens > 0 {
 			if open {
 				fmt.Fprintln(w)
 				open = false
@@ -1109,4 +1333,17 @@ func resolveBudget(flag int, st *loop.State) int {
 		return flag
 	}
 	return st.ContextBudget
+}
+
+// resolveModel picks the model for a resumed chat, recording an explicit
+// CLI override if provided.
+func resolveModel(flag string, explicit bool, st *loop.State) string {
+	if explicit && flag != "" {
+		st.Model = flag
+		return flag
+	}
+	if st.Model != "" {
+		return st.Model
+	}
+	return flag
 }

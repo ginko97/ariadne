@@ -159,6 +159,16 @@ func (s *State) pendingToolCalls() []llm.ToolCall {
 	return pending
 }
 
+// HasPendingToolCalls reports whether a batch was left unfinished — a crash or
+// a cancelled turn. A single-shot command never needs this: Run finishes any
+// pending batch on its first call, unconditionally. A REPL calls Run more than
+// once, so it needs to ask first — adding a message on top of an unfinished
+// batch is two failures at once (see AddUserMessage), and finishing a batch
+// that was never interrupted would re-ask the model with nothing new to say.
+func (s *State) HasPendingToolCalls() bool {
+	return len(s.pendingToolCalls()) > 0
+}
+
 // isToolResults reports whether m is a results message: a user turn carrying
 // only tool_result blocks. A user turn with no blocks counts — that is the
 // moment between opening a batch and the first result landing. The initial task

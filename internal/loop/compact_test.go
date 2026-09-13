@@ -580,12 +580,15 @@ func assertAnswersKeepTheirQuestions(t *testing.T, msgs []llm.Message) {
 			continue
 		}
 		want := "q" + strings.TrimPrefix(label, "a")
-		if i == 0 || msgs[i-1].Blocks[0].Text != want {
-			prev := "nothing"
-			if i > 0 {
-				prev = msgs[i-1].Blocks[0].Text
+		var prompt string
+		for j := i - 1; j >= 0; j-- {
+			if isUserPrompt(msgs[j]) && len(msgs[j].Blocks) > 0 {
+				prompt = msgs[j].Blocks[0].Text
+				break
 			}
-			t.Errorf("answer %s at %d follows %q, want %q", label, i, shorten(prev, 20), want)
+		}
+		if prompt != want {
+			t.Errorf("answer %s at %d follows %q, want %q", label, i, prompt, want)
 		}
 	}
 }
@@ -656,4 +659,59 @@ func TestHeadNeverProtectsHalfOfAToolPair(t *testing.T) {
 	if got := headLen(chat(3).Messages); got != 2 {
 		t.Errorf("headLen on a conversation = %d, want 2", got)
 	}
+}
+
+// In multi-turn chat where a middle turn calls tools, compaction must never
+// separate tool_use from tool_result (which leaves an orphaned result and causes
+// HTTP 400), and must drop the question with its answer.
+func TestCompactMultiTurnWithToolsNeverOrphansToolResults(t *testing.T) {
+	s := NewState("run_test", "q1")
+	s.Messages = []llm.Message{
+		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "q1"}}},
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "a1 " + strings.Repeat("pad ", 20)}}},
+		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "q2"}}},
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{
+			{Type: llm.BlockToolUse, ID: "c1", Name: "calc", Args: json.RawMessage(`{"expr":"2+2"}`)},
+		}},
+		{Role: llm.RoleUser, Blocks: []llm.Block{
+			{Type: llm.BlockToolResult, CallID: "c1", Content: "4 " + strings.Repeat("pad ", 50)},
+		}},
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "a2 " + strings.Repeat("pad ", 20)}}},
+		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "q3"}}},
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "a3 " + strings.Repeat("pad ", 20)}}},
+	}
+
+	assertWellFormed(t, s.Messages)
+	if n := compact(s, 4000, 500); n == 0 {
+		t.Fatal("expected compaction to drop messages")
+	}
+	assertWellFormed(t, s.Messages)
+	assertAnswersKeepTheirQuestions(t, s.Messages)
+}
+
+// In multi-turn chat where turn 1 called tools, compaction must protect turn 1's
+// opening exchange and drop later turns completely, keeping questions with their answers.
+func TestCompactMultiTurnWithToolsInTurn1PreservesQuestions(t *testing.T) {
+	s := NewState("run_test", "q1")
+	s.Messages = []llm.Message{
+		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "q1"}}},
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{
+			{Type: llm.BlockToolUse, ID: "c0", Name: "calc", Args: json.RawMessage(`{"expr":"1+1"}`)},
+		}},
+		{Role: llm.RoleUser, Blocks: []llm.Block{
+			{Type: llm.BlockToolResult, CallID: "c0", Content: "2 " + strings.Repeat("pad ", 50)},
+		}},
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "a1 " + strings.Repeat("pad ", 20)}}},
+		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "q2"}}},
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "a2 " + strings.Repeat("pad ", 20)}}},
+		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "q3"}}},
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "a3 " + strings.Repeat("pad ", 20)}}},
+	}
+
+	assertWellFormed(t, s.Messages)
+	if n := compact(s, 4000, 500); n == 0 {
+		t.Fatal("expected compaction to drop messages")
+	}
+	assertWellFormed(t, s.Messages)
+	assertAnswersKeepTheirQuestions(t, s.Messages)
 }
