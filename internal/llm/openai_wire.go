@@ -191,7 +191,19 @@ func fromWire(body []byte) (Response, error) {
 
 	// First, because gateways return this envelope with HTTP 200.
 	if raw.Error != nil {
-		return Response{}, fmt.Errorf("openai: %s: %s", raw.Error.Type, raw.Error.Message)
+		// Type is optional and frequently absent — a gateway relaying an
+		// upstream refusal often sends only a message. Including it
+		// unconditionally produced "openai: : This model only supports single
+		// tool-calls at once!", where the empty field reads as a broken client
+		// and buries the one sentence that says what to do.
+		//
+		// This is also the only path that reports such a failure: a gateway can
+		// answer 200 OK with an error body, so the status check upstream passes
+		// and the decode is where it surfaces.
+		if raw.Error.Type != "" {
+			return Response{}, fmt.Errorf("openai: %s: %s", raw.Error.Type, raw.Error.Message)
+		}
+		return Response{}, fmt.Errorf("openai: %s", raw.Error.Message)
 	}
 	if len(raw.Choices) == 0 {
 		return Response{}, ErrNoChoices

@@ -165,3 +165,37 @@ func bodyWithArgs(arguments string) []byte {
 		`"tool_calls":[{"id":"call_1","type":"function","function":{"name":"calc",` +
 		`"arguments":` + string(quoted) + `}}]},"finish_reason":"tool_calls"}]}`)
 }
+
+// A gateway can answer 200 OK with an error body, so this decode is the only
+// place such a failure surfaces — and the message is all the caller gets.
+//
+// Found across vendors: llama-3.1-8b refuses parallel tool calls, and the
+// refusal arrived as "openai: : This model only supports single tool-calls at
+// once!". The empty field is an absent error type, and it reads as a broken
+// client rather than as a model saying something useful.
+func TestErrorBodyWithoutATypeReadsCleanly(t *testing.T) {
+	body := []byte(`{"error":{"message":"This model only supports single tool-calls at once!"}}`)
+
+	_, err := fromWire(body)
+	if err == nil {
+		t.Fatal("an error body must not decode as a response")
+	}
+	if strings.Contains(err.Error(), ": :") {
+		t.Errorf("empty error type left a gap in the message: %v", err)
+	}
+	if !strings.Contains(err.Error(), "single tool-calls") {
+		t.Errorf("the provider's message was lost: %v", err)
+	}
+
+	// With a type present it is still included, since it is worth having.
+	typed := []byte(`{"error":{"type":"invalid_request_error","message":"bad model"}}`)
+	err = fromWire2(typed)
+	if err == nil || !strings.Contains(err.Error(), "invalid_request_error") {
+		t.Errorf("a present error type should survive: %v", err)
+	}
+}
+
+func fromWire2(b []byte) error {
+	_, err := fromWire(b)
+	return err
+}
