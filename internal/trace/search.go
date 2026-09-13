@@ -60,7 +60,7 @@ func (q Query) matches(e Event) bool {
 	}
 	if q.Text != "" {
 		hay := strings.ToLower(strings.Join([]string{
-			e.Text, e.Content, e.Error, string(e.Args), e.Tool, e.Model, e.Stop,
+			e.Text, e.Content, e.Error, string(e.Args), e.Tool, e.Model, e.Stop, e.CallID,
 		}, "\x00"))
 		if !strings.Contains(hay, strings.ToLower(q.Text)) {
 			return false
@@ -215,7 +215,24 @@ func Summarise(dir string, q Query) (Stats, error) {
 	for _, r := range runs {
 		seen := false
 		starts, ends := 0, 0
+		runSteps := 0
+		runFailed := false
 		bad, err := scan(filepath.Join(dir, r, "trace.jsonl"), func(e Event) bool {
+			// Run-level lifecycle invariants hold across the whole file, regardless
+			// of what the event filter selects.
+			switch e.Kind {
+			case KindRunStart:
+				starts++
+			case KindRunEnd:
+				ends++
+				if e.Step > runSteps {
+					runSteps = e.Step
+				}
+				if e.Error != "" {
+					runFailed = true
+				}
+			}
+
 			if !q.matches(e) {
 				return true
 			}
@@ -226,8 +243,6 @@ func Summarise(dir string, q Query) (Stats, error) {
 				st.ByTool[e.Tool]++
 			}
 			switch e.Kind {
-			case KindRunStart:
-				starts++
 			case KindToolDenied:
 				st.Denied++
 			case KindRetry:
@@ -235,12 +250,6 @@ func Summarise(dir string, q Query) (Stats, error) {
 				st.RetryMS += e.LatencyMS
 			case KindResponse:
 				st.Cost += e.Cost
-			case KindRunEnd:
-				ends++
-				st.Steps += e.Step
-				if e.Error != "" {
-					st.Failed = append(st.Failed, r)
-				}
 			}
 			return true
 		})
@@ -248,13 +257,17 @@ func Summarise(dir string, q Query) (Stats, error) {
 			return st, err
 		}
 		st.Malformed += bad
-		// A resumed run appends to the same file, so several starts and ends
-		// are normal. What is not is more starts than ends.
-		if starts > ends {
-			st.Incomplete = append(st.Incomplete, r)
-		}
 		if seen {
 			st.Runs++
+			st.Steps += runSteps
+			// A resumed run appends to the same file, so several starts and ends
+			// are normal. What is not is more starts than ends.
+			if starts > ends {
+				st.Incomplete = append(st.Incomplete, r)
+			}
+			if runFailed {
+				st.Failed = append(st.Failed, r)
+			}
 		}
 	}
 	return st, nil

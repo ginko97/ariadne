@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ginko97/ariadne/internal/llm"
+	"github.com/ginko97/ariadne/internal/trace"
 )
 
 // The delta printer is the only user-visible part of streaming, and it has
@@ -122,5 +123,28 @@ func TestCheckNamesRejectsUnknownTool(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "wrtie_file") || !strings.Contains(err.Error(), "write_file") {
 		t.Errorf("error should name the typo and the alternatives: %v", err)
+	}
+}
+
+func TestDescribeRequestEvent(t *testing.T) {
+	e := trace.Event{
+		Kind:     trace.KindRequest,
+		Model:    "gemini-2.5-flash",
+		Messages: 4,
+	}
+	got := describe(e)
+	if !strings.Contains(got, "gemini-2.5-flash") || !strings.Contains(got, "msgs=4") {
+		t.Errorf("describe(KindRequest) = %q, want model and messages", got)
+	}
+}
+
+func TestCmdTracesFlagValidation(t *testing.T) {
+	// A misplaced flag after the search query must be rejected.
+	if code := cmdTraces([]string{"calc", "-limit", "4"}); code != exitUsage {
+		t.Errorf("exit code = %d, want exitUsage for misplaced flag", code)
+	}
+	// A search term preceded by -- (such as a negative number) must not be rejected as a misplaced flag.
+	if code := cmdTraces([]string{"--", "-5"}); code == exitUsage {
+		t.Errorf("exit code = %d, negative search text with -- should not be exitUsage", code)
 	}
 }

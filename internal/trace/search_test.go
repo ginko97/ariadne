@@ -267,3 +267,54 @@ func TestSearchMissingDirIsAnError(t *testing.T) {
 		t.Error("a missing runs directory should be reported, not silently empty")
 	}
 }
+
+// Filtering by an event kind (such as run_start) or tool must not falsely
+// mark completed runs as incomplete just because run_end was filtered out.
+func TestSummariseFilteredQueryDoesNotFalselyMarkIncomplete(t *testing.T) {
+	dir := t.TempDir()
+	writeTrace(t, dir, "run_20260101T000000_ok", evStart, evReq, evEndOK)
+
+	st, err := Summarise(dir, Query{Kinds: []string{"run_start"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Incomplete) != 0 {
+		t.Errorf("Incomplete = %v, want 0 (completed run was falsely marked incomplete)", st.Incomplete)
+	}
+	if st.Steps != 3 {
+		t.Errorf("Steps = %d, want 3", st.Steps)
+	}
+}
+
+// A resumed run emits multiple run_end events (one per segment).
+// Steps must be the run's cumulative steps, not the sum of each segment's steps.
+func TestSummariseResumedRunDoesNotInflateSteps(t *testing.T) {
+	dir := t.TempDir()
+	evEndSeg1 := `{"run_id":"r","seq":3,"kind":"run_end","step":2,"error":"context canceled"}`
+	evEndSeg2 := `{"run_id":"r","seq":6,"kind":"run_end","step":3}`
+	writeTrace(t, dir, "run_20260101T000000_resumed", evStart, evEndSeg1, evStart, evEndSeg2)
+
+	st, err := Summarise(dir, Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Steps != 3 {
+		t.Errorf("Steps = %d, want 3 (cumulative steps were double-counted across segments)", st.Steps)
+	}
+}
+
+// Free-text query must match CallID, so searching for a specific call finds
+// tool results and approvals.
+func TestSearchMatchesCallID(t *testing.T) {
+	dir := t.TempDir()
+	evCallWithID := `{"run_id":"r","seq":1,"kind":"tool_call","call_id":"call_xyz123","tool":"calc","args":{}}`
+	writeTrace(t, dir, "run_20260101T000000_aaa", evCallWithID)
+
+	got, err := Search(dir, Query{Text: "call_xyz123"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d matches, want 1 for call_id search", len(got))
+	}
+}

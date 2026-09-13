@@ -721,7 +721,13 @@ func cmdTraces(args []string) int {
 	// "no matching events" — which reads exactly like a genuine empty result.
 	// Caught here rather than left to be discovered.
 	for _, a := range fs.Args() {
-		if strings.HasPrefix(a, "-") && len(a) > 1 {
+		// Name only: "-limit", "--limit" and "-limit=4" are the same mistake, and
+		// the last form is the one that slipped through a first version of this.
+		// Looked up rather than pattern-matched, so a search for text that
+		// merely starts with a dash — "-1200", which is in the fixtures — is
+		// still a search and not an error.
+		name, _, _ := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(a, "--"), "-"), "=")
+		if strings.HasPrefix(a, "-") && fs.Lookup(name) != nil {
 			fmt.Fprintf(os.Stderr,
 				"ariadne traces: %q looks like a flag but came after the query; flags must come first\n", a)
 			return exitUsage
@@ -836,6 +842,8 @@ func shortID(id string) string {
 // would show mostly empty fields and bury the one that matters.
 func describe(e trace.Event) string {
 	switch e.Kind {
+	case trace.KindRequest:
+		return fmt.Sprintf("model=%-20s msgs=%d", e.Model, e.Messages)
 	case trace.KindToolCall:
 		return fmt.Sprintf("%-10s %s", e.Tool, clip(string(e.Args), 90))
 	case trace.KindToolResult, trace.KindToolDenied:
