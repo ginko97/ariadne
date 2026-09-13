@@ -204,12 +204,37 @@ func fromWire(body []byte) (Response, error) {
 		blocks = append(blocks, Block{Type: BlockText, Text: *c.Message.Content})
 	}
 	for i, tc := range c.Message.ToolCalls {
-		// Pass the arguments through unparsed. Weak models emit malformed JSON
-		// here; the right place for that to fail is the tool's Unmarshal, which
-		// becomes an IsError block the model can recover from.
+		// Arguments go through unparsed: weak models emit malformed JSON here,
+		// and the right place for that to fail is the tool's Unmarshal, which
+		// becomes an IsError block the model can recover from. Validating at
+		// this layer would turn a recoverable mistake into a dead run.
+		//
+		// Unparsed is not the same as unchecked, though, and that distinction
+		// cost a run. json.RawMessage must hold *valid* JSON or it cannot be
+		// marshalled — so a truncated argument string made the whole State
+		// unserialisable, the checkpoint write failed, and by this loop's own
+		// contract a run that cannot be checkpointed stops. Malformed arguments
+		// did not reach the tool at all; they killed the run one step earlier,
+		// unresumably, because the thing that failed was the write that makes
+		// resuming possible. Found by dogfooding, not by the fixture that was
+		// supposed to cover exactly this.
+		//
+		// So the damage is preserved in a form that survives a round trip: the
+		// original text as a JSON string. Unmarshalling that into any tool's
+		// argument struct still fails, which is the recoverable error the model
+		// needs, and the checkpoint still writes.
 		args := json.RawMessage(tc.Function.Arguments)
-		if len(args) == 0 {
+		switch {
+		case len(strings.TrimSpace(string(args))) == 0:
 			args = json.RawMessage(`{}`)
+		case !json.Valid(args):
+			quoted, err := json.Marshal(string(args))
+			if err != nil {
+				// Marshalling a string cannot fail; if it ever does, an empty
+				// object is still better than an unserialisable run.
+				quoted = []byte(`{}`)
+			}
+			args = quoted
 		}
 
 		// An id is mandatory downstream: it pairs the result back to the call,

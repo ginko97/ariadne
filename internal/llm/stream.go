@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"sort"
+	"strings"
 )
 
 // Streaming, and why the loop does not know about it.
@@ -126,9 +127,23 @@ func (a *accumulator) response() Response {
 
 	for _, i := range idx {
 		d := a.calls[i]
+		// The same guard fromWire needs, for the same reason. A stream that ends
+		// mid-argument leaves a fragment that is not valid JSON, and
+		// json.RawMessage must hold valid JSON or the whole State stops being
+		// serialisable — which means the checkpoint write fails and the run
+		// cannot be resumed. Preserving the fragment as a JSON string keeps the
+		// failure where it belongs: the tool's Unmarshal, as a recoverable
+		// error, rather than a dead run one step earlier.
 		args := d.Args
-		if args == "" {
+		switch {
+		case strings.TrimSpace(args) == "":
 			args = "{}" // an empty string is not valid JSON; servers reject it
+		case !json.Valid([]byte(args)):
+			if quoted, err := json.Marshal(args); err == nil {
+				args = string(quoted)
+			} else {
+				args = "{}"
+			}
 		}
 		id := d.ID
 		if id == "" {
