@@ -503,7 +503,9 @@ func execute(ctx context.Context, agent *loop.Agent, state *loop.State, streamed
 			state.RunID, state.Steps, elapsed, err)
 		switch {
 		case errors.Is(err, loop.ErrStepLimit):
-			fmt.Fprintf(os.Stderr, "hint: ariadne resume -max-steps 20 %s\n", state.RunID)
+			// The ceiling is per call, so a plain resume grants a fresh budget;
+			// raising it is for a single turn that genuinely needs more room.
+			fmt.Fprintf(os.Stderr, "hint: ariadne resume %s\n", state.RunID)
 		case errors.Is(err, context.Canceled):
 			fmt.Fprintf(os.Stderr, "cancelled; resume with: ariadne resume %s\n", state.RunID)
 		}

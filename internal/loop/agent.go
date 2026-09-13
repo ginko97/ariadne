@@ -103,7 +103,15 @@ type Agent struct {
 	// line is not worth discarding work that is otherwise fine.
 	Trace func(trace.Event)
 
-	MaxSteps int // 0 = unlimited (tests only; never in production)
+	// MaxSteps bounds the steps taken by *one call to Run*, not the lifetime of
+	// the conversation. 0 = unlimited (tests only; never in production).
+	//
+	// Per call because a conversation is many calls. Counting cumulatively meant
+	// turn two started with the budget already partly spent and turn five failed
+	// before saying anything — a limit meant to stop a runaway loop instead
+	// ended a working chat. Cost is still cumulative, and MaxCost is what bounds
+	// a conversation as a whole.
+	MaxSteps int
 	MaxCost  float64
 	Price    Price
 
@@ -130,6 +138,11 @@ type Agent struct {
 // It mutates s as it goes, so a caller holding s can checkpoint it at any point
 // and can inspect Steps and Cost after an error.
 func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
+	// Where this call started. The step ceiling is measured from here rather
+	// than from zero, so resuming or taking another turn gets its own budget
+	// instead of inheriting a spent one.
+	startSteps := s.Steps
+
 	// Record the model and endpoint once. A resumed state already carries them,
 	// and the caller is expected to have built the provider from them.
 	if s.Model == "" {
@@ -185,8 +198,9 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 			}
 			continue
 		}
-		if a.MaxSteps > 0 && s.Steps >= a.MaxSteps {
-			return "", a.endRun(s, fmt.Errorf("%w: %d steps", ErrStepLimit, s.Steps))
+		if a.MaxSteps > 0 && s.Steps-startSteps >= a.MaxSteps {
+			return "", a.endRun(s, fmt.Errorf("%w: %d steps this turn (%d total)",
+				ErrStepLimit, s.Steps-startSteps, s.Steps))
 		}
 		if a.MaxCost > 0 && s.Cost >= a.MaxCost {
 			return "", a.endRun(s, fmt.Errorf("%w: $%.4f spent", ErrCostLimit, s.Cost))
