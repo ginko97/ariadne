@@ -734,6 +734,16 @@ func closeTrace(tw *trace.Writer) {
 	}
 }
 
+// isTerminal reports whether f is a console rather than a pipe or a file.
+//
+// Two different decisions need it — whether there is anybody to ask for
+// approval, and whether a streamed answer has already been seen — so it is one
+// function rather than the same Stat dance written twice.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
 // approveOnTerminal asks the operator before a gated call runs.
 //
 // This is the one place the runtime blocks on a human, and it is why -approve
@@ -749,16 +759,6 @@ func closeTrace(tw *trace.Writer) {
 // Known limit: a Ctrl-C while the prompt is waiting is not seen until the read
 // returns, because os.Stdin has no deadline. The context is accepted so the
 // interface does not have to change when that is fixed.
-// isTerminal reports whether f is a console rather than a pipe or a file.
-//
-// Two different decisions need it — whether there is anybody to ask for
-// approval, and whether a streamed answer has already been seen — so it is one
-// function rather than the same Stat dance written twice.
-func isTerminal(f *os.File) bool {
-	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
-}
-
 func approveOnTerminal(in *os.File) func(context.Context, llm.ToolCall) (bool, error) {
 	reader := bufio.NewReader(in)
 	return func(_ context.Context, c llm.ToolCall) (bool, error) {

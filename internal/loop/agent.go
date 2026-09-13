@@ -48,18 +48,6 @@ func (p Price) Cost(u llm.Usage) float64 {
 // does not import internal/tool. That is why ToolResult lives in llm.
 type ToolRunner func(ctx context.Context, call llm.ToolCall) (llm.ToolResult, error)
 
-// Approver decides whether a tool call requiring approval is permitted to run.
-type Approver interface {
-	Approve(ctx context.Context, call llm.ToolCall) (bool, error)
-}
-
-// ApproverFunc adapts an ordinary function into an Approver.
-type ApproverFunc func(ctx context.Context, call llm.ToolCall) (bool, error)
-
-func (f ApproverFunc) Approve(ctx context.Context, call llm.ToolCall) (bool, error) {
-	return f(ctx, call)
-}
-
 type Agent struct {
 	Provider llm.Provider
 	Model    string
@@ -192,7 +180,7 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 
 	a.emit(trace.Event{
 		Kind: trace.KindRunStart, Model: s.Model, Step: s.Steps,
-		Messages: len(s.Messages), Text: s.Task,
+		Messages: len(s.Messages), Text: s.turnPrompt(),
 	})
 
 	for {
@@ -611,15 +599,6 @@ func (a *Agent) askApproval(ctx context.Context, c llm.ToolCall) (bool, error) {
 		return false, nil
 	}
 	return a.Approve(ctx, c)
-}
-
-// SetApprover wires an Approver interface to the agent's Approve hook.
-func (a *Agent) SetApprover(app Approver) {
-	if app == nil {
-		a.Approve = nil
-		return
-	}
-	a.Approve = app.Approve
 }
 
 func (a *Agent) checkpoint(s *State) error {

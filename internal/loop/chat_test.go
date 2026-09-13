@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ginko97/ariadne/internal/llm"
+	"github.com/ginko97/ariadne/internal/trace"
 )
 
 // The whole of multi-turn in one test: a conversation is a run you keep adding
@@ -217,37 +218,61 @@ func TestSetModelAndSwitchingAcrossTurns(t *testing.T) {
 	}
 }
 
-func TestAddUserMessageUpdatesTask(t *testing.T) {
-	s := NewState("run_test", "initial prompt")
-	if s.Task != "initial prompt" {
-		t.Errorf("s.Task = %q, want initial prompt", s.Task)
+// Task titles the conversation and run_start describes the turn. Keeping both
+// is the point: a conversation that opened with a migration plan and whose last
+// message was "thanks" must still be listed under the migration, while the trace
+// for that turn must still say what the turn was.
+func TestTaskStaysTheOpenerAndRunStartCarriesTheTurn(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		endResponse("a plan", 40, 5),
+		endResponse("you are welcome", 60, 4),
+	}}
+
+	var starts []string
+	a := &Agent{
+		Provider: fake, Model: "test/model", MaxSteps: 10,
+		Trace: func(e trace.Event) {
+			if e.Kind == trace.KindRunStart {
+				starts = append(starts, e.Text)
+			}
+		},
 	}
 
-	if err := s.AddUserMessage("second prompt"); err != nil {
+	s := NewState("run_task", "help me plan the Northwind migration")
+	if _, err := a.Run(context.Background(), s); err != nil {
 		t.Fatal(err)
 	}
-	if s.Task != "second prompt" {
-		t.Errorf("s.Task = %q, want second prompt", s.Task)
+	if _, err := a.ChatTurn(context.Background(), s, "thanks"); err != nil {
+		t.Fatal(err)
+	}
+
+	if s.Task != "help me plan the Northwind migration" {
+		t.Errorf("s.Task = %q, want the opening message", s.Task)
+	}
+	want := []string{"help me plan the Northwind migration", "thanks"}
+	if len(starts) != len(want) {
+		t.Fatalf("run_start texts = %v, want %v", starts, want)
+	}
+	for i := range want {
+		if starts[i] != want[i] {
+			t.Errorf("run_start[%d] = %q, want %q", i, starts[i], want[i])
+		}
 	}
 }
 
-type mockApprover struct {
-	called bool
-	allow  bool
-}
-
-func (m *mockApprover) Approve(_ context.Context, _ llm.ToolCall) (bool, error) {
-	m.called = true
-	return m.allow, nil
-}
-
-func TestApproverInterface(t *testing.T) {
-	app := &mockApprover{allow: true}
-	a := &Agent{}
-	a.SetApprover(app)
-
-	ok, err := a.askApproval(context.Background(), llm.ToolCall{Name: "calc"})
-	if err != nil || !ok || !app.called {
-		t.Errorf("ok=%v err=%v called=%v, want ok=true err=nil called=true", ok, err, app.called)
+// Resumed mid-batch the trailing message is tool results, so there is no turn
+// text to find and the opener is what run_start has left to report.
+func TestTurnPromptFallsBackToTaskMidBatch(t *testing.T) {
+	s := NewState("run_mid", "summarise the invoice")
+	s.Messages = append(s.Messages,
+		llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{
+			{Type: llm.BlockToolUse, ID: "call_1", Name: "calc", Args: json.RawMessage(`{}`)},
+		}},
+		llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{
+			{Type: llm.BlockToolResult, ID: "call_1", Text: "36"},
+		}},
+	)
+	if got := s.turnPrompt(); got != "summarise the invoice" {
+		t.Errorf("turnPrompt() = %q, want the opener", got)
 	}
 }

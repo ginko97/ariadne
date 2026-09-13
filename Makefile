@@ -8,8 +8,11 @@
 #                    `git add -A` skips ignored files with no warning
 #   audit-livetests  a live test with no build tag, making real API calls on every
 #                    `go test ./...` until it exhausted the free tier
+#   audit-docnames   a function inserted between a doc comment and the function
+#                    it documents, silently reattaching the prose to the wrong
+#                    declaration — five times, the fifth found by this target
 #
-# Neither is caught by go build, go vet, or a green test run.
+# None of the three is caught by go build, go vet, or a green test run.
 
 ifeq ($(OS),Windows_NT)
     # On Windows, GNU Make defaults to cmd.exe unless sh.exe is found.
@@ -28,7 +31,7 @@ GO     ?= go
 BINARY := ariadne
 PKGS   := ./...
 
-.PHONY: all build fmt vet test check live eval workspace audit-tracked audit-livetests clean
+.PHONY: all build fmt vet test check live eval workspace audit-tracked audit-livetests audit-docnames clean
 
 all: check build
 
@@ -70,7 +73,7 @@ workspace:
 live:
 	$(GO) test $(PKGS) -tags live -run TestLive -v -count=1
 
-check: fmt vet test audit-tracked audit-livetests
+check: fmt vet test audit-tracked audit-livetests audit-docnames
 	@echo 'check: ok'
 
 # Every .go file must be known to git.
@@ -91,6 +94,12 @@ audit-livetests:
 	  fi; \
 	done; \
 	[ $$leaked -eq 0 ] || { echo 'audit-livetests: FAILED'; exit 1; }
+
+# A doc comment must name the declaration it sits on. The rule and the reason
+# are in the script; it is awk rather than inline here because the Makefile
+# escaping made it unreadable.
+audit-docnames:
+	@bad=0; 	for f in $$(find . -name '*.go' -not -path './.git/*'); do 	  awk -f scripts/audit-docnames.awk "$$f" "$$f" || bad=1; 	done; 	[ $$bad -eq 0 ] || { echo 'audit-docnames: FAILED'; exit 1; }
 
 clean:
 	rm -f $(BINARY) $(BINARY).exe

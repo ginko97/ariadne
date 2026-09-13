@@ -25,19 +25,13 @@ import (
 // tool calls waiting for results.
 var ErrTurnInFlight = errors.New("loop: cannot add a message while tool calls are pending")
 
-// AddUserMessage appends a turn from the person.
+// SetModel changes the model for subsequent turns.
 //
-// Refused while a batch is unfinished, and that refusal is the whole reason this
-// is a method rather than an append at the call site. A user turn inserted
-// between an assistant's tool_use and its results is two separate failures: the
-// provider rejects the request outright, and pendingToolCalls — which reads the
-// completion record out of the conversation itself — would no longer find the
-// pair it needs, so a resumed run could re-fire a tool that already ran.
-//
-// The caller finishes the batch first by calling Run, which is what it would do
-// anyway.
-// SetModel changes the model for subsequent turns. Refused while a tool batch
-// is unfinished to protect crash recovery replay fidelity.
+// Revises the rule that State.Model is authoritative for the life of a run. That
+// still holds within a turn and across a resume, where replay fidelity depends
+// on it — so this refuses while a batch is unfinished. Between turns it is
+// relaxed, because a conversation is a sequence of jobs and choosing a different
+// model for the next one is an ordinary thing to want.
 func (s *State) SetModel(model string) error {
 	model = strings.TrimSpace(model)
 	if model == "" {
@@ -50,6 +44,17 @@ func (s *State) SetModel(model string) error {
 	return nil
 }
 
+// AddUserMessage appends a turn from the person.
+//
+// Refused while a batch is unfinished, and that refusal is the whole reason this
+// is a method rather than an append at the call site. A user turn inserted
+// between an assistant's tool_use and its results is two separate failures: the
+// provider rejects the request outright, and pendingToolCalls — which reads the
+// completion record out of the conversation itself — would no longer find the
+// pair it needs, so a resumed run could re-fire a tool that already ran.
+//
+// The caller finishes the batch first by calling Run, which is what it would do
+// anyway.
 func (s *State) AddUserMessage(text string) error {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -59,7 +64,6 @@ func (s *State) AddUserMessage(text string) error {
 		return fmt.Errorf("%w: %d unfinished", ErrTurnInFlight, len(pending))
 	}
 
-	s.Task = text
 	s.Messages = append(s.Messages, llm.Message{
 		Role:   llm.RoleUser,
 		Blocks: []llm.Block{{Type: llm.BlockText, Text: text}},
@@ -87,6 +91,33 @@ func (a *Agent) ChatTurn(ctx context.Context, s *State, text string) (string, er
 		return "", err
 	}
 	return a.Run(ctx, s)
+}
+
+// turnPrompt is what this call to Run was asked to do: the most recent message
+// from the person.
+//
+// State.Task is the line the conversation opened with and stays that way — it is
+// the title `ariadne traces` lists a conversation under, and relabelling it on
+// every turn would retitle a long conversation after whatever was said last
+// ("thanks"). So the per-turn text is carried here instead, and a trace shows
+// both: Task in the listing, this in run_start.
+//
+// Falls back to Task when there is no user text to find, which is a run resumed
+// mid-batch — the trailing message is tool results, and the opener is the best
+// description of the job still available.
+func (s *State) turnPrompt() string {
+	for i := len(s.Messages) - 1; i >= 0; i-- {
+		m := s.Messages[i]
+		if m.Role != llm.RoleUser || isToolResults(m) {
+			continue
+		}
+		for _, b := range m.Blocks {
+			if b.Type == llm.BlockText && strings.TrimSpace(b.Text) != "" {
+				return b.Text
+			}
+		}
+	}
+	return s.Task
 }
 
 // Turns counts the messages from the person, which is what a conversation
