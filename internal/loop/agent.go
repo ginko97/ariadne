@@ -107,6 +107,15 @@ type Agent struct {
 	MaxCost  float64
 	Price    Price
 
+	// ToolTimeout bounds one tool call. 0 is unlimited, which is what this was
+	// before the limit existed and is still right for a test.
+	//
+	// Necessary because ctx alone does not bound anything: a tool that ignores
+	// its context — a blocking syscall, a client with its own timeouts, a tight
+	// loop — runs as long as it likes and the run waits. Ctrl-C was the only
+	// thing that stopped it, which is not a limit, it is a person.
+	ToolTimeout time.Duration
+
 	// ContextBudget is the prompt-token ceiling a fresh run aims to stay under.
 	// 0 disables compaction, which is right for short jobs: a conversation that
 	// never approaches the window should never lose anything.
@@ -426,7 +435,7 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 
 func (a *Agent) runOne(ctx context.Context, s *State, i int, c llm.ToolCall, mu *sync.Mutex) error {
 	toolStarted := time.Now()
-	res, err := a.RunTool(ctx, c)
+	res, err := a.callTool(ctx, c)
 	content := res.Content
 	if res.Untrusted {
 		content = fence(c.Name, res.Content)
@@ -473,6 +482,69 @@ func (a *Agent) runOne(ctx context.Context, s *State, i int, c llm.ToolCall, mu 
 	// Per call, not per step. This is the write that stops a resumed run
 	// re-firing a tool whose side effect already happened.
 	return a.checkpoint(s)
+}
+
+// callTool runs one tool, bounded by ToolTimeout.
+//
+// The call happens in a goroutine and the timeout abandons it rather than
+// cancelling it, because cancelling is not available: a context cannot stop a
+// function that does not check one, and those are exactly the functions worth
+// bounding. Passing a deadline and hoping is what the previous version did.
+//
+// Two consequences, both deliberate and neither free:
+//
+// The goroutine leaks until the tool returns on its own. That is the price of
+// bounding a run against code that will not cooperate, and it is bounded by the
+// process rather than unbounded.
+//
+// And the abandoned call may still complete, with its side effect, after the
+// run has recorded a timeout. So the result says exactly that rather than
+// claiming the tool failed — "may still be running" is the true statement, and
+// a model told the truth can decide not to retry a payment. The call does get a
+// result, so a resumed run will not fire it a second time.
+func (a *Agent) callTool(ctx context.Context, c llm.ToolCall) (llm.ToolResult, error) {
+	if a.ToolTimeout <= 0 {
+		return a.RunTool(ctx, c)
+	}
+
+	type outcome struct {
+		res llm.ToolResult
+		err error
+	}
+	// Buffered, so the abandoned goroutine can finish and exit rather than
+	// blocking forever on a send nobody is receiving.
+	done := make(chan outcome, 1)
+
+	callCtx, cancel := context.WithTimeout(ctx, a.ToolTimeout)
+	defer cancel()
+
+	go func() {
+		res, err := a.RunTool(callCtx, c)
+		done <- outcome{res, err}
+	}()
+
+	select {
+	case o := <-done:
+		return o.res, o.err
+	case <-callCtx.Done():
+		if ctx.Err() != nil {
+			// The whole run was cancelled, not just this call. That is the
+			// caller leaving, and it is a different thing from a slow tool.
+			return llm.ToolResult{}, ctx.Err()
+		}
+		a.emit(trace.Event{
+			Kind: trace.KindToolTimeout, Tool: c.Name, CallID: c.ID, Args: c.Args,
+			LatencyMS: a.ToolTimeout.Milliseconds(), IsError: true,
+			Content: fmt.Sprintf("timed out after %s", a.ToolTimeout),
+		})
+		return llm.ToolResult{
+			IsError: true,
+			Content: fmt.Sprintf(
+				"tool %q was abandoned after %s. It may still be running, and any "+
+					"effect it has may still happen. Do not assume it did nothing.",
+				c.Name, a.ToolTimeout),
+		}, nil
+	}
 }
 
 // deny records a call the runtime refused to make.

@@ -43,6 +43,11 @@ const (
 	runsDir        = "runs"
 	historyDir     = "eval/history"
 	workspaceDir   = "workspace"
+	// defaultToolTimeout bounds one tool call from the command line, where the
+	// Agent's own default of 0 means unlimited. Same split as MaxSteps: a
+	// library caller decides for itself, a job gets a limit whether or not
+	// anybody remembered to ask for one.
+	defaultToolTimeout = 60 * time.Second
 )
 
 // Outside workspaceDir on purpose: if the notes lived where the tools are
@@ -103,6 +108,7 @@ flags:
   -context-budget compact the conversation past this many prompt tokens (0: never)
   -stream         print tokens and tool calls as they arrive
   -remember       let the run read and append to MEMORY.md (off by default)
+  -tool-timeout   abandon a tool call that runs longer than this (default 1m0s)
 
 eval flags:
   -models         comma-separated model ids  (default: ARIADNE_MODEL)
@@ -135,6 +141,7 @@ func cmdRun(args []string) int {
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
 	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
+	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -192,7 +199,8 @@ func cmdRun(args []string) int {
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: *model, BaseURL: *baseURL, RunID: state.RunID,
 		MaxSteps: *maxSteps, Budget: *budget, Stream: *stream, Memory: *remember,
-		Allow: splitList(*allow), Approve: splitList(*approve),
+		ToolTimeout: *toolTimeout,
+		Allow:       splitList(*allow), Approve: splitList(*approve),
 		Store: store, Trace: tw,
 	})
 	state.BaseURL = *baseURL
@@ -217,6 +225,7 @@ func cmdResume(args []string) int {
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
 	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
+	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -304,7 +313,8 @@ func cmdResume(args []string) int {
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: state.Model, BaseURL: endpoint, RunID: state.RunID,
 		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem,
-		Allow: splitList(*allow), Approve: splitList(*approve),
+		ToolTimeout: *toolTimeout,
+		Allow:       splitList(*allow), Approve: splitList(*approve),
 		Store: store, Trace: tw,
 	})
 
@@ -368,9 +378,10 @@ type agentOpts struct {
 	BaseURL string
 	RunID   string
 
-	MaxSteps int
-	Budget   int
-	Stream   bool
+	MaxSteps    int
+	Budget      int
+	ToolTimeout time.Duration
+	Stream      bool
 	// Memory switches on both halves at once — the remember tool and the notes
 	// prepended to the prompt. Splitting them would allow a run that writes
 	// memory it cannot read, or reads memory it cannot correct.
@@ -446,6 +457,7 @@ func newAgentFor(o agentOpts) *loop.Agent {
 		Checkpoint:    o.Store.Save,
 		MaxSteps:      o.MaxSteps,
 		ContextBudget: o.Budget,
+		ToolTimeout:   o.ToolTimeout,
 		// MaxCost stays 0 (unlimited) until Price is a per-model table —
 		// a ceiling with no prices behind it would be theatre.
 	}
@@ -631,7 +643,7 @@ func cmdEval(args []string) int {
 		// something from task 3 is no longer measuring 34 independent tasks.
 		return newAgentFor(agentOpts{
 			Key: key, Model: model, BaseURL: *baseURL, RunID: runID,
-			MaxSteps: maxSteps, Budget: *budget,
+			MaxSteps: maxSteps, Budget: *budget, ToolTimeout: defaultToolTimeout,
 			Store: store, Trace: tw,
 		})
 	}

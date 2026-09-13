@@ -52,6 +52,12 @@ const (
 	// account of a long run: the checkpoint holds what the agent still knows,
 	// this holds what it used to.
 	KindCompact = "compact"
+	// KindToolTimeout is a tool the runtime stopped waiting for. Its own kind
+	// rather than a failed result, because the call was *abandoned* rather than
+	// finished: it may still be running, and whatever it does may still happen.
+	// "We gave up on it" and "it failed" are different facts and only one of
+	// them means nothing happened.
+	KindToolTimeout = "tool_timeout"
 )
 
 // Event is one thing that happened. Fields are shared across kinds and omitted
