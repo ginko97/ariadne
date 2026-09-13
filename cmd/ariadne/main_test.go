@@ -321,61 +321,87 @@ func TestMemoryIsRecordedNotInferred(t *testing.T) {
 	}
 }
 
-func TestResumeInheritedMemoryRejectsAllowListWithoutRemember(t *testing.T) {
-	state := loop.NewState("run_mem", "task")
-	state.Memory = true
+// These four replace tests that restated the condition in the test body and
+// asserted the restatement — they called no production code and would have
+// stayed green if the fix were deleted. The logic moved into functions so the
+// tests could reach it.
 
-	allow := []string{"calc", "fetch"}
-	mem := false || state.Memory
+// The loop reads State.ContextBudget, and Run only seeds it when it is zero. So
+// a checkpoint carrying a budget silently ignored the flag: accepted, no error,
+// no effect.
+func TestResolveBudgetRecordsAnExplicitOverride(t *testing.T) {
+	st := loop.NewState("r", "task")
+	st.ContextBudget = 5000
 
-	if !(mem && len(allow) > 0 && !contains(allow, "remember")) {
-		t.Error("inherited memory with --allow excluding remember should be rejected")
+	if got := resolveBudget(3000, st); got != 3000 {
+		t.Errorf("resolveBudget = %d, want the flag", got)
+	}
+	if st.ContextBudget != 3000 {
+		t.Errorf("State.ContextBudget = %d; the loop reads this, so the flag did nothing", st.ContextBudget)
 	}
 }
 
-func TestResumeWithMemoryRejectsCheckpointAllowListWithoutRemember(t *testing.T) {
-	state := loop.NewState("run_allow", "task")
-	state.Allow = []string{"calc", "fetch"}
+// No flag means the checkpoint's budget stands, which is what makes a resumed
+// run compact like the original.
+func TestResolveBudgetKeepsTheCheckpointWithoutAFlag(t *testing.T) {
+	st := loop.NewState("r", "task")
+	st.ContextBudget = 5000
 
-	mem := true
-
-	if !(mem && len(state.Allow) > 0 && !contains(state.Allow, "remember")) {
-		t.Error("resuming with memory when checkpoint allow-list excluded remember should be rejected")
+	if got := resolveBudget(0, st); got != 5000 {
+		t.Errorf("resolveBudget = %d, want the checkpoint's 5000", got)
+	}
+	if st.ContextBudget != 5000 {
+		t.Errorf("State.ContextBudget = %d, want it untouched", st.ContextBudget)
 	}
 }
 
-func TestResumeExplicitBudgetOverridesCheckpoint(t *testing.T) {
-	state := loop.NewState("run_budget", "task")
-	state.ContextBudget = 5000
+func TestResolveEndpointPrefersTheFlagAndRecordsIt(t *testing.T) {
+	st := loop.NewState("r", "task")
+	st.BaseURL = "https://checkpoint.test/v1"
 
-	budgetFlag := 2500
-	budgetVal := budgetFlag
-	if budgetVal == 0 && state.ContextBudget > 0 {
-		budgetVal = state.ContextBudget
-	} else if budgetFlag > 0 {
-		state.ContextBudget = budgetFlag
+	if got := resolveEndpoint("https://override.test/v1", st); got != "https://override.test/v1" {
+		t.Errorf("endpoint = %q", got)
+	}
+	if st.BaseURL != "https://override.test/v1" {
+		t.Errorf("the override was not recorded: %q", st.BaseURL)
 	}
 
-	if state.ContextBudget != 2500 {
-		t.Errorf("explicit budget override failed to update state: got %d, want 2500", state.ContextBudget)
+	st2 := loop.NewState("r", "task")
+	st2.BaseURL = "https://checkpoint.test/v1"
+	if got := resolveEndpoint("", st2); got != "https://checkpoint.test/v1" {
+		t.Errorf("without a flag the checkpoint should win, got %q", got)
 	}
 }
 
-func TestResumeExplicitBaseURLOverridesCheckpoint(t *testing.T) {
-	state := loop.NewState("run_base", "task")
-	state.BaseURL = "https://old-endpoint.com/v1"
-
-	baseURLFlag := "https://new-endpoint.com/v1"
-	endpoint := baseURLFlag
-	if endpoint == "" {
-		if state.BaseURL != "" {
-			endpoint = state.BaseURL
-		}
-	} else {
-		state.BaseURL = baseURLFlag
+// Both lists can refuse, and they refuse for different reasons.
+func TestCheckResumeGrants(t *testing.T) {
+	withAllow := func(a ...string) *loop.State {
+		st := loop.NewState("r", "task")
+		st.Allow = a
+		return st
 	}
 
-	if state.BaseURL != "https://new-endpoint.com/v1" {
-		t.Errorf("explicit base-url override failed to update state: got %s", state.BaseURL)
+	if err := checkResumeGrants(false, []string{"calc"}, withAllow("calc")); err != nil {
+		t.Errorf("no memory means nothing to check: %v", err)
+	}
+	if err := checkResumeGrants(true, nil, withAllow()); err != nil {
+		t.Errorf("no allow-list anywhere is unrestricted: %v", err)
+	}
+	if err := checkResumeGrants(true, []string{"calc", "remember"}, withAllow("calc", "remember")); err != nil {
+		t.Errorf("remember listed in both should pass: %v", err)
+	}
+
+	// The flag list is the operator's sentence now.
+	err := checkResumeGrants(true, []string{"calc", "fetch"}, withAllow("calc", "remember"))
+	if err == nil || !strings.Contains(err.Error(), "-allow") {
+		t.Errorf("a flag list without remember should be refused: %v", err)
+	}
+
+	// The checkpoint's list is the grant the run has been operating under, and
+	// resume never widens one. This is the case the write side would otherwise
+	// die in silently: memory read on, remember refused at the loop.
+	err = checkResumeGrants(true, nil, withAllow("calc", "fetch"))
+	if err == nil || !strings.Contains(err.Error(), "cannot widen") {
+		t.Errorf("a checkpoint list without remember should be refused: %v", err)
 	}
 }

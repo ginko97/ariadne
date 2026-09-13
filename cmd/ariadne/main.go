@@ -263,33 +263,12 @@ func cmdResume(args []string) int {
 		return exitUsage
 	}
 
-	// An explicit allow-list is the operator's sentence, and this project
-	// refuses to widen one everywhere else — resume can narrow a grant and
-	// never broaden it. Adding remember for convenience would be the same
-	// widening with a friendlier face, so it is an error instead. Silently
-	// leaving it out is worse than either: the tool would be offered and then
-	// refused at the loop, leaving the read side on with a dead write side.
-	if mem && len(splitList(*allow)) > 0 && !contains(splitList(*allow), "remember") {
-		fmt.Fprintln(os.Stderr,
-			"ariadne resume: memory with -allow needs remember in the list")
-		return exitUsage
-	}
-	if mem && len(state.Allow) > 0 && !contains(state.Allow, "remember") {
-		fmt.Fprintln(os.Stderr,
-			"ariadne resume: checkpoint allow-list cannot be widened to include remember")
+	if err := checkResumeGrants(mem, splitList(*allow), state); err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
 		return exitUsage
 	}
 
-	endpoint := *baseURL
-	if endpoint == "" {
-		if state.BaseURL != "" {
-			endpoint = state.BaseURL
-		} else {
-			endpoint = envOr("ARIADNE_BASE_URL", defaultBaseURL)
-		}
-	} else {
-		state.BaseURL = *baseURL
-	}
+	endpoint := resolveEndpoint(*baseURL, state)
 
 	key, envName := apiKey(endpoint)
 	if key == "" {
@@ -310,12 +289,7 @@ func cmdResume(args []string) int {
 	// The checkpoint's model wins: a job that finishes on a different model
 	// than it started on is a different job. The checkpoint's endpoint wins
 	// unless explicitly overridden on the command line.
-	budgetVal := *budget
-	if budgetVal == 0 && state.ContextBudget > 0 {
-		budgetVal = state.ContextBudget
-	} else if *budget > 0 {
-		state.ContextBudget = *budget
-	}
+	budgetVal := resolveBudget(*budget, state)
 	// Memory turned on for a run that started without it. The checkpoint's
 	// system prompt wins on resume, so the notes have to be added to it here or
 	// the tool would be present with nothing behind it. Recorded, so the next
@@ -1071,4 +1045,66 @@ func contains(list []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// Resume reconciles three things between what the checkpoint recorded and what
+// the command line says. Each is a function rather than a block inside
+// cmdResume because cmdResume parses flags, reads the filesystem and talks to a
+// provider — which is why the first tests written for this logic ended up
+// restating it in the test body and asserting the restatement. A test that
+// copies the fix passes whether or not the fix is there.
+
+// checkResumeGrants refuses a resume whose memory setting the allow-lists
+// cannot support.
+//
+// Two lists matter and they fail differently. The flag list is the operator's
+// sentence now; the checkpoint's list is the grant the run has been operating
+// under, and this project never widens one. Either way the failure to avoid is
+// silent: memory read on with the write tool refused at the loop, which looks
+// like a model that will not use a tool it can see.
+func checkResumeGrants(mem bool, allowFlag []string, st *loop.State) error {
+	if !mem {
+		return nil
+	}
+	if len(allowFlag) > 0 && !contains(allowFlag, "remember") {
+		return errors.New("memory with -allow needs remember in the list")
+	}
+	if len(st.Allow) > 0 && !contains(st.Allow, "remember") {
+		return errors.New("the checkpoint's allow-list has no remember, and resume cannot widen it")
+	}
+	return nil
+}
+
+// resolveEndpoint picks the provider for a resumed run, recording an explicit
+// override.
+//
+// The checkpoint wins by default: a job that finishes somewhere other than it
+// started is a different job. A flag is the operator saying otherwise, and that
+// belongs on the state too — the rest of the run really does go elsewhere, and
+// the next resume should know.
+func resolveEndpoint(flag string, st *loop.State) string {
+	if flag != "" {
+		st.BaseURL = flag
+		return flag
+	}
+	if st.BaseURL != "" {
+		return st.BaseURL
+	}
+	return envOr("ARIADNE_BASE_URL", defaultBaseURL)
+}
+
+// resolveBudget picks the context budget for a resumed run, recording an
+// explicit override.
+//
+// Recording is the whole point. The loop reads State.ContextBudget, and Run
+// only seeds it when it is zero — so a checkpoint carrying 5000 silently
+// ignored a `-context-budget 3000` on the command line and kept compacting
+// against the old number. The flag was accepted, printed in no error, and did
+// nothing.
+func resolveBudget(flag int, st *loop.State) int {
+	if flag > 0 {
+		st.ContextBudget = flag
+		return flag
+	}
+	return st.ContextBudget
 }
