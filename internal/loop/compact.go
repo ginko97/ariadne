@@ -27,31 +27,60 @@ const (
 	// conversation again, more slowly.
 	maxDigestChars = 1500
 	maxResultChars = 100
+
+	// maxTurnChars bounds a dropped question or answer. Longer than a tool
+	// result, because a result is recognised from its ends while a sentence has
+	// to survive as a sentence to be worth carrying at all.
+	maxTurnChars = 160
 )
 
 // span is a half-open range of messages that has to be dropped together.
 type span struct{ lo, hi int }
 
+// headLen is how many messages at the front are not droppable.
+//
+// Always the task: an agent that forgets what it was asked is not compacted, it
+// is lobotomised. Sometimes the task *and* the reply to it, and that second
+// message is the whole difference between the two shapes this loop handles.
+//
+// A single-task run goes task, tool_use, results, tool_use, results. Message 1
+// is half of a pair whose other half is message 2, so protecting it while its
+// results stay droppable orphans the call — a provider 400, the failure this
+// whole file exists to avoid.
+//
+// A conversation goes question, answer, question, answer. Message 1 is the
+// answer to the protected task, so it can never be paired with anything to its
+// right without splitting some later question from its answer. Protecting the
+// opening *exchange* rather than the opening *message* is what lets every unit
+// after it be a question with its own answer.
+//
+// The test is therefore whether message 1 requested tools, not what role it is.
+func headLen(msgs []llm.Message) int {
+	if len(msgs) >= 2 && msgs[1].Role == llm.RoleAssistant && !hasToolUse(msgs[1]) {
+		return 2
+	}
+	return 1
+}
+
 // units groups a conversation into what can be dropped without corrupting it.
 //
-// The unit is a turn *pair*, never a message. An assistant turn that requested
-// tools and the user turn carrying those results are one thing: drop the
-// results and the request is an unanswered tool call, drop the request and the
-// results have nothing to attach to. Both are a provider 400, not a smaller
-// conversation — the failure mode of a naive sliding window here is not a worse
-// answer, it is a run that stops working.
+// The unit is a turn *pair*, never a message, and the pair is always two
+// adjacent messages of different roles. In a tool run that is a request and the
+// results it is waiting for: drop the results and the request is an unanswered
+// tool call, drop the request and the results have nothing to attach to. Both
+// are a provider 400, not a smaller conversation — the failure mode of a naive
+// sliding window here is not a worse answer, it is a run that stops working.
 //
-// Index 0 is never a unit. It carries the task, and an agent that forgets what
-// it was asked is not compacted, it is lobotomised.
+// In a conversation, starting after the head above, the same rule pairs a
+// question with its answer. That is what keeps compaction from leaving an
+// answer to a question nobody can see: an earlier version paired each answer
+// with the *next* question, which preserved role alternation — the only thing
+// its test checked — while dropping "what is the deadline?" and keeping the
+// date on its own.
 func units(msgs []llm.Message) []span {
 	var out []span
-	for i := 1; i < len(msgs); {
-		if hasToolUse(msgs[i]) && i+1 < len(msgs) && isToolResults(msgs[i+1]) {
-			out = append(out, span{i, i + 2})
-			i += 2
-			continue
-		}
-		if msgs[i].Role == llm.RoleAssistant && i+1 < len(msgs) && msgs[i+1].Role == llm.RoleUser && !isToolResults(msgs[i+1]) {
+	for i := headLen(msgs); i < len(msgs); {
+		if i+1 < len(msgs) && msgs[i].Role != msgs[i+1].Role {
 			out = append(out, span{i, i + 2})
 			i += 2
 			continue
@@ -159,26 +188,34 @@ func compact(s *State, inputTokens, budget int) int {
 		return 0
 	}
 
+	head := headLen(s.Messages)
 	cut := all[drop-1].hi
-	dropped := s.Messages[1:cut]
+	dropped := s.Messages[head:cut]
 
-	kept := make([]llm.Message, 0, 1+len(s.Messages)-cut)
-	kept = append(kept, s.Messages[0])
+	kept := make([]llm.Message, 0, head+len(s.Messages)-cut)
+	kept = append(kept, s.Messages[:head]...)
 	kept = append(kept, s.Messages[cut:]...)
 	s.Messages = kept
 
 	s.Dropped += len(dropped)
-	mergeDigest(&s.Messages[0], callLines(dropped), s.Dropped)
+	mergeDigest(&s.Messages[0], digestLines(dropped), s.Dropped)
 	return len(dropped)
 }
 
-// callLines renders the dropped tool calls, one per line.
+// digestLines renders what was dropped, one line each, in the order it happened.
 //
-// Calls and their results, because that is the part of a dropped turn the model
-// needs later: what it already tried, and what came back. The assistant's prose
-// about it is the part that can go — it was derived from the results, and the
-// results are here.
-func callLines(dropped []llm.Message) []string {
+// Tool calls with their results, because that is the part of a dropped *task*
+// the model needs later: what it already tried, and what came back. An
+// assistant's prose alongside a call is still skipped — it was derived from the
+// results, and the results are on the line above it.
+//
+// But a conversation contains no calls at all, and rendering only calls made a
+// compacted chat produce a header announcing a list with nothing under it. The
+// questions and answers were simply gone, with no record that they had been
+// asked. So plain turns are recorded too: the person's messages always, and an
+// assistant turn when it requested no tools and its words are therefore the
+// only thing it contributed.
+func digestLines(dropped []llm.Message) []string {
 	results := map[string]string{}
 	for _, m := range dropped {
 		for _, blk := range m.Blocks {
@@ -190,13 +227,20 @@ func callLines(dropped []llm.Message) []string {
 
 	var lines []string
 	for _, m := range dropped {
+		calls := hasToolUse(m)
 		for _, blk := range m.Blocks {
-			if blk.Type != llm.BlockToolUse {
-				continue
+			switch {
+			case blk.Type == llm.BlockToolUse:
+				lines = append(lines, fmt.Sprintf("- %s(%s) -> %s",
+					blk.Name, shorten(string(blk.Args), maxResultChars),
+					shorten(results[blk.ID], maxResultChars)))
+			case blk.Type != llm.BlockText || strings.TrimSpace(blk.Text) == "":
+				// Tool results are already on the call's own line.
+			case m.Role == llm.RoleUser:
+				lines = append(lines, "- asked: "+shorten(blk.Text, maxTurnChars))
+			case !calls:
+				lines = append(lines, "- replied: "+shorten(blk.Text, maxTurnChars))
 			}
-			lines = append(lines, fmt.Sprintf("- %s(%s) -> %s",
-				blk.Name, shorten(string(blk.Args), maxResultChars),
-				shorten(results[blk.ID], maxResultChars)))
 		}
 	}
 	return lines
@@ -256,7 +300,7 @@ func mergeDigest(task *llm.Message, newLines []string, total int) {
 
 	header := fmt.Sprintf(
 		"[%d earlier messages have been dropped to stay within the context budget. "+
-			"The tool calls they contained:]", total)
+			"What they contained:]", total)
 
 	body := strings.Join(lines, "\n")
 	for len(lines) > 1 && len(header)+1+len(body) > maxDigestChars {

@@ -548,3 +548,112 @@ func TestMultiTurnCompactionPreservesRoleAlternation(t *testing.T) {
 
 	assertWellFormed(t, s.Messages)
 }
+
+// chat builds n question-and-answer exchanges, each labelled so a surviving
+// answer can be checked against the question it belongs to.
+func chat(n int) *State {
+	s := NewState("run_chat", "q1")
+	s.Messages = nil
+	for i := 1; i <= n; i++ {
+		s.Messages = append(s.Messages,
+			llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{
+				{Type: llm.BlockText, Text: fmt.Sprintf("q%d", i)}}},
+			llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{
+				{Type: llm.BlockText, Text: fmt.Sprintf("a%d %s", i, strings.Repeat("padding ", 20))}}},
+		)
+	}
+	return s
+}
+
+// assertAnswersKeepTheirQuestions is the invariant role alternation does not
+// imply. A compaction can leave every message alternating correctly and still
+// have thrown away the question that a surviving answer is answering — which is
+// what the first multi-turn implementation did, and what its test missed.
+func assertAnswersKeepTheirQuestions(t *testing.T, msgs []llm.Message) {
+	t.Helper()
+	for i, m := range msgs {
+		if m.Role != llm.RoleAssistant || len(m.Blocks) == 0 {
+			continue
+		}
+		label, _, _ := strings.Cut(m.Blocks[0].Text, " ")
+		if !strings.HasPrefix(label, "a") {
+			continue
+		}
+		want := "q" + strings.TrimPrefix(label, "a")
+		if i == 0 || msgs[i-1].Blocks[0].Text != want {
+			prev := "nothing"
+			if i > 0 {
+				prev = msgs[i-1].Blocks[0].Text
+			}
+			t.Errorf("answer %s at %d follows %q, want %q", label, i, shorten(prev, 20), want)
+		}
+	}
+}
+
+// Dropping an exchange must drop the question with its answer.
+//
+// The opening exchange is what makes this possible. Message 0 can never go — it
+// is the task — so message 1 is an answer that can never be paired with
+// anything to its right without splitting some later question from its own
+// answer. Protecting the pair, rather than only the task, is what lets every
+// unit after it be a question and the answer to it.
+func TestCompactDropsQuestionsWithTheirAnswers(t *testing.T) {
+	s := chat(5)
+	if n := compact(s, 4000, 500); n == 0 {
+		t.Fatal("expected compaction to drop messages")
+	}
+
+	assertAnswersKeepTheirQuestions(t, s.Messages)
+	assertWellFormed(t, s.Messages)
+	for i := 1; i < len(s.Messages); i++ {
+		if s.Messages[i].Role == s.Messages[i-1].Role {
+			t.Errorf("consecutive messages at %d and %d share role %s", i-1, i, s.Messages[i].Role)
+		}
+	}
+	if got := s.Messages[0].Blocks[0].Text; got != "q1" {
+		t.Errorf("message 0 = %q, want the task", got)
+	}
+}
+
+// A conversation contains no tool calls, so a digest that renders only tool
+// calls renders nothing — a header announcing a list with an empty list under
+// it, and no record that the questions were ever asked.
+func TestDigestRecordsDroppedConversationalTurns(t *testing.T) {
+	s := chat(5)
+	if n := compact(s, 4000, 500); n == 0 {
+		t.Fatal("expected compaction to drop messages")
+	}
+	if len(s.Messages[0].Blocks) < 2 {
+		t.Fatal("no digest block on the task message")
+	}
+	digest := s.Messages[0].Blocks[1].Text
+
+	for _, want := range []string{"q2", "a2"} {
+		if !strings.Contains(digest, want) {
+			t.Errorf("digest does not mention dropped turn %q:\n%s", want, digest)
+		}
+	}
+	header, listed, ok := strings.Cut(digest, "\n")
+	if !ok || strings.TrimSpace(listed) == "" {
+		t.Errorf("digest is a header announcing an empty list: %q", header)
+	}
+}
+
+// The head is the opening exchange only when the opening reply asked for no
+// tools. A task whose first reply is a tool_use has its results one message
+// later; protecting the call while its results stay droppable is the orphaned
+// call this file exists to prevent.
+func TestHeadNeverProtectsHalfOfAToolPair(t *testing.T) {
+	tool := conversation("fetch two documents", 4)
+	if got := headLen(tool.Messages); got != 1 {
+		t.Errorf("headLen on a tool run = %d, want 1", got)
+	}
+	if n := compact(tool, 4000, 500); n == 0 {
+		t.Fatal("expected compaction to drop messages")
+	}
+	assertWellFormed(t, tool.Messages)
+
+	if got := headLen(chat(3).Messages); got != 2 {
+		t.Errorf("headLen on a conversation = %d, want 2", got)
+	}
+}
