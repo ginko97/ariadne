@@ -469,23 +469,31 @@ func cmdChat(args []string) int {
 		if line == "" {
 			continue
 		}
-		if rest, ok := strings.CutPrefix(line, "/model"); ok {
-			newModel := strings.TrimSpace(rest)
-			if newModel == "" {
-				current := agent.Model
-				if state != nil && state.Model != "" {
-					current = state.Model
-				}
-				fmt.Fprintf(os.Stderr, "current model: %s (usage: /model <model-name>)\n", current)
-				continue
+		// Exact match, or the name separated by a space. A bare prefix cut
+		// makes "/modeled" a switch to the model "ed": the command silently
+		// reconfigures the conversation, and the 404 lands a turn later
+		// naming the provider rather than the typo.
+		if line == "/model" {
+			current := agent.Model
+			if state != nil && state.Model != "" {
+				current = state.Model
 			}
-			agent.Model = newModel
+			fmt.Fprintf(os.Stderr, "current model: %s (usage: /model <model-name>)\n", current)
+			continue
+		}
+		if rest, ok := strings.CutPrefix(line, "/model "); ok {
+			// line is already trimmed, so the prefix guarantees a name here.
+			newModel := strings.TrimSpace(rest)
+			// State first: a refusal must leave both unchanged, or the agent
+			// switches, the state does not, and ChatTurn's sync fails the same
+			// way on every turn after this one.
 			if state != nil {
 				if err := state.SetModel(newModel); err != nil {
 					fmt.Fprintf(os.Stderr, "! %v\n", err)
 					continue
 				}
 			}
+			agent.Model = newModel
 			fmt.Fprintf(os.Stderr, "model set to %s, takes effect next turn\n", agent.Model)
 			continue
 		}
