@@ -1,11 +1,13 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
+	"github.com/ginko97/ariadne/internal/memory"
 	"github.com/ginko97/ariadne/internal/trace"
 )
 
@@ -207,5 +209,83 @@ func TestMemoryGateDoesNotDropOtherApprovals(t *testing.T) {
 		if !contains(a.RequireApproval, want) {
 			t.Errorf("RequireApproval = %v, want %q in it", a.RequireApproval, want)
 		}
+	}
+}
+
+func TestMemoryImpliesAllowOnRemember(t *testing.T) {
+	opts := agentOpts{
+		Key: "k", Model: "m", BaseURL: "https://example.test/v1", RunID: "run_test",
+		MaxSteps: 5, Memory: true, Allow: []string{"calc"},
+		Store: &loop.Store{Dir: t.TempDir()},
+	}
+	a := newAgentFor(opts)
+
+	if !contains(a.Allow, "remember") {
+		t.Errorf("Allow = %v, want it to include remember", a.Allow)
+	}
+	if !contains(a.Allow, "calc") {
+		t.Errorf("Allow = %v, want it to keep calc", a.Allow)
+	}
+}
+
+func TestCheckNamesWithoutMemoryRejectsRemember(t *testing.T) {
+	defs := newRegistry("").Defs()
+	if err := checkNames(defs, []string{"remember"}); err == nil {
+		t.Fatal("remember was accepted as valid tool name when memory was not requested")
+	}
+	defsWithMem := newRegistry("validate").Defs()
+	if err := checkNames(defsWithMem, []string{"remember"}); err != nil {
+		t.Fatalf("remember was rejected when memory was requested: %v", err)
+	}
+}
+
+func TestResumeReconcilesMemoryPrompt(t *testing.T) {
+	state := loop.NewState("run_test", "task")
+	state.System = systemPrompt
+
+	origMemFile := memoryFile
+	t.Cleanup(func() { memoryFile = origMemFile })
+
+	tmpMem := filepath.Join(t.TempDir(), "MEMORY.md")
+	memoryFile = tmpMem
+	if err := (memory.Store{Path: tmpMem}).Append(memory.Note{Text: "remember this fact", RunID: "run_0"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(state.System, "<memory>") {
+		if prompt := memoryPrompt(true); prompt != "" {
+			state.System += prompt
+		}
+	}
+
+	if !strings.Contains(state.System, "remember this fact") {
+		t.Errorf("state.System did not receive memory prompt:\n%s", state.System)
+	}
+}
+
+func TestResumeInheritsMemory(t *testing.T) {
+	state := loop.NewState("run_mem", "task")
+	state.Model = "fake-model"
+	state.BaseURL = "https://example.test/v1"
+	state.RequireApproval = []string{"remember"}
+
+	mem := false || contains(state.RequireApproval, "remember")
+	if !mem {
+		t.Fatal("expected mem to be true from checkpoint RequireApproval")
+	}
+
+	a := newAgentFor(agentOpts{
+		Key: "k", Model: state.Model, BaseURL: state.BaseURL, RunID: state.RunID,
+		MaxSteps: 5, Memory: mem,
+		Store: &loop.Store{Dir: t.TempDir()},
+	})
+	var offered bool
+	for _, d := range a.Tools {
+		if d.Name == "remember" {
+			offered = true
+		}
+	}
+	if !offered {
+		t.Error("resumed run should offer remember tool when inherited from checkpoint")
 	}
 }

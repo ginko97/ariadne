@@ -78,16 +78,16 @@ func (s Store) Append(n Note) error {
 	if err != nil {
 		return err
 	}
-	if len(existing) >= MaxNotes {
-		return fmt.Errorf("memory: %s already holds %d notes, the limit; prune it by hand",
-			s.Path, len(existing))
-	}
 	for _, e := range existing {
 		if strings.EqualFold(e.Text, text) {
 			// Not an error: the agent re-learning something it already knows is
 			// ordinary, and failing the run over it would be worse than a no-op.
 			return nil
 		}
+	}
+	if len(existing) >= MaxNotes {
+		return fmt.Errorf("memory: %s already holds %d notes, the limit; prune it by hand",
+			s.Path, len(existing))
 	}
 
 	if n.At.IsZero() {
@@ -105,7 +105,11 @@ func (s Store) Append(n Note) error {
 	}
 	defer f.Close()
 
-	if len(existing) == 0 {
+	fi, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("memory: stat: %w", err)
+	}
+	if fi.Size() == 0 {
 		// A header, because a person will open this file and should not have to
 		// guess what wrote it or whether editing it is allowed.
 		if _, err := fmt.Fprint(f, header); err != nil {

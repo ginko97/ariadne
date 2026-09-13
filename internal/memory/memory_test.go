@@ -97,6 +97,19 @@ func TestNoteLengthAndCountAreBounded(t *testing.T) {
 	}
 }
 
+func TestDuplicateNoteAllowedAtCapacity(t *testing.T) {
+	s := store(t)
+	for i := 0; i < MaxNotes; i++ {
+		if err := s.Append(Note{Text: strings.Repeat("a", 10) + string(rune('a'+i%26)) + string(rune('0'+i/26)), RunID: "r"}); err != nil {
+			t.Fatalf("note %d: %v", i, err)
+		}
+	}
+	// Re-learning an existing note must succeed as a no-op even at capacity.
+	if err := s.Append(Note{Text: strings.Repeat("a", 10) + "a0", RunID: "r2"}); err != nil {
+		t.Errorf("duplicate at capacity failed: %v", err)
+	}
+}
+
 // Re-learning something already known is ordinary. Failing the run over it
 // would be worse than doing nothing.
 func TestDuplicateNoteIsANoOp(t *testing.T) {
@@ -198,5 +211,19 @@ func TestAppendCreatesTheHeaderOnce(t *testing.T) {
 	// The header has to tell a person the file is theirs to edit.
 	if !strings.Contains(string(data), "You may edit or delete") {
 		t.Error("the header does not say the file can be edited by hand")
+	}
+}
+
+func TestAppendDoesNotDuplicateExistingHeader(t *testing.T) {
+	s := store(t)
+	if err := os.WriteFile(s.Path, []byte("# MEMORY\n\nExisting hand-written header\n\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Append(Note{Text: "first note", RunID: "r"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(s.Path)
+	if n := strings.Count(string(data), "# MEMORY"); n != 1 {
+		t.Errorf("header appears %d times, want 1", n)
 	}
 }

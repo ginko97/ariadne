@@ -43,11 +43,12 @@ const (
 	runsDir        = "runs"
 	historyDir     = "eval/history"
 	workspaceDir   = "workspace"
-	// Outside workspaceDir on purpose: if the notes lived where the tools are
-	// confined, write_file could rewrite them and every rule in internal/memory
-	// would be decoration.
-	memoryFile = "MEMORY.md"
 )
+
+// Outside workspaceDir on purpose: if the notes lived where the tools are
+// confined, write_file could rewrite them and every rule in internal/memory
+// would be decoration.
+var memoryFile = "MEMORY.md"
 
 // Exit codes: 0 the run succeeded, 1 it failed, 2 the command line was wrong.
 const (
@@ -145,9 +146,11 @@ func cmdRun(args []string) int {
 		return exitUsage
 	}
 
-	// Checked before anything is spent: a typo here would otherwise deny
-	// silently and look like the model failing to use a tool it never had.
-	if err := checkNames(newRegistry("validate").Defs(), splitList(*allow), splitList(*approve)); err != nil {
+	rememberFor := ""
+	if *remember {
+		rememberFor = "validate"
+	}
+	if err := checkNames(newRegistry(rememberFor).Defs(), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne run: %v\n", err)
 		return exitUsage
 	}
@@ -215,16 +218,21 @@ func cmdResume(args []string) int {
 	}
 	runID := fs.Args()[0]
 
-	if err := checkNames(newRegistry("validate").Defs(), splitList(*allow), splitList(*approve)); err != nil {
-		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
-		return exitUsage
-	}
-
 	store := &loop.Store{Dir: runsDir}
 	state, err := store.Load(runID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
 		return exitFail
+	}
+
+	mem := *remember || contains(state.RequireApproval, "remember")
+	rememberFor := ""
+	if mem {
+		rememberFor = "validate"
+	}
+	if err := checkNames(newRegistry(rememberFor).Defs(), splitList(*allow), splitList(*approve)); err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
+		return exitUsage
 	}
 
 	endpoint := *baseURL
@@ -259,9 +267,14 @@ func cmdResume(args []string) int {
 	if budgetVal == 0 && state.ContextBudget > 0 {
 		budgetVal = state.ContextBudget
 	}
+	if *remember && !strings.Contains(state.System, "<memory>") {
+		if prompt := memoryPrompt(true); prompt != "" {
+			state.System += prompt
+		}
+	}
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: state.Model, BaseURL: endpoint, RunID: state.RunID,
-		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: *remember,
+		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem,
 		Allow: splitList(*allow), Approve: splitList(*approve),
 		Store: store, Trace: tw,
 	})
@@ -344,6 +357,7 @@ type agentOpts struct {
 func newAgentFor(o agentOpts) *loop.Agent {
 	rememberFor := ""
 	approve := o.Approve
+	allow := o.Allow
 	if o.Memory {
 		rememberFor = o.RunID
 		// Gated whether or not the operator asked, and this is the one place
@@ -359,6 +373,13 @@ func newAgentFor(o agentOpts) *loop.Agent {
 		// least likely to be noticed.
 		if !contains(approve, "remember") {
 			approve = append(append([]string{}, approve...), "remember")
+		}
+		// Memory switches on both halves at once (prompt and tool). If the
+		// operator specified an allow-list, remember must be in it so the tool
+		// is offered and permitted, rather than silently filtered out while the
+		// read side stays on.
+		if len(allow) > 0 && !contains(allow, "remember") {
+			allow = append(append([]string{}, allow...), "remember")
 		}
 	}
 	reg := newRegistry(rememberFor)
@@ -394,7 +415,7 @@ func newAgentFor(o agentOpts) *loop.Agent {
 		System:   systemPrompt + memoryPrompt(o.Memory),
 		BaseURL:  o.BaseURL,
 		Tools:    reg.Defs(),
-		Allow:    o.Allow,
+		Allow:    allow,
 
 		RequireApproval: approve,
 		Approve:         approveOnTerminal(os.Stdin),
