@@ -25,3 +25,8 @@ docs/*
 # thing to do by accident, because it is the first page anybody reads.
 README.md
 workspace/
+# MEMORY.md is what one machine's agent happens to have learned — runtime
+# state like runs/, not source. It also accumulates whatever a run was told
+# to remember, which is exactly the content that should not be committed by
+# reflex.
+MEMORY.md
