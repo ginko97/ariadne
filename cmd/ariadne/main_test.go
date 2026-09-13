@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -212,19 +213,20 @@ func TestMemoryGateDoesNotDropOtherApprovals(t *testing.T) {
 	}
 }
 
-func TestMemoryImpliesAllowOnRemember(t *testing.T) {
-	opts := agentOpts{
-		Key: "k", Model: "m", BaseURL: "https://example.test/v1", RunID: "run_test",
-		MaxSteps: 5, Memory: true, Allow: []string{"calc"},
+// An explicit allow-list is the operator's sentence. Memory does not quietly
+// extend it — everywhere else in this project a grant can narrow and never
+// widen, and convenience here would be the same widening with a friendlier
+// face. The command refuses instead; see cmdRun.
+func TestMemoryDoesNotWidenAnExplicitAllowList(t *testing.T) {
+	a := newAgentFor(agentOpts{
+		Key: "k", Model: "m", BaseURL: "https://example.test/v1", RunID: "r",
+		MaxSteps: 5, Memory: true,
+		Allow: []string{"calc", "fetch"},
 		Store: &loop.Store{Dir: t.TempDir()},
-	}
-	a := newAgentFor(opts)
+	})
 
-	if !contains(a.Allow, "remember") {
-		t.Errorf("Allow = %v, want it to include remember", a.Allow)
-	}
-	if !contains(a.Allow, "calc") {
-		t.Errorf("Allow = %v, want it to keep calc", a.Allow)
+	if contains(a.Allow, "remember") {
+		t.Errorf("Allow = %v; a grant the operator did not write was widened", a.Allow)
 	}
 }
 
@@ -287,5 +289,34 @@ func TestResumeInheritsMemory(t *testing.T) {
 	}
 	if !offered {
 		t.Error("resumed run should offer remember tool when inherited from checkpoint")
+	}
+}
+
+// Memory-enabled is recorded on the state, not inferred.
+//
+// It was inferred two different ways — the approval list containing "remember",
+// and the system prompt containing a "<memory>" marker. Both work until either
+// string is reworded, and then fail silently: the second would append a whole
+// second copy of the notes.
+func TestMemoryIsRecordedNotInferred(t *testing.T) {
+	var st loop.State
+	st.Memory = true
+
+	data, err := json.Marshal(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back loop.State
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !back.Memory {
+		t.Error("Memory did not survive the checkpoint round-trip")
+	}
+
+	// And the fact does not depend on how the prompt or the gate happen to read.
+	st2 := loop.State{Memory: true, System: "no marker here", RequireApproval: nil}
+	if !st2.Memory {
+		t.Error("Memory should not depend on the prompt text or the approval list")
 	}
 }

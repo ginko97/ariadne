@@ -37,6 +37,14 @@ type State struct {
 	Messages        []llm.Message `json:"messages"`
 	Steps           int           `json:"steps"`
 	Cost            float64       `json:"cost_usd"`
+	// Memory records that this run was started with MEMORY.md enabled.
+	//
+	// The loop never reads it — it is the command's bookkeeping, kept here for
+	// the same reason as BaseURL: a resumed run has to make the same decision
+	// the original did. Inferring it instead, from the approval list containing
+	// "remember" or from the system prompt containing a fence marker, works
+	// until either of those is reworded and then fails silently.
+	Memory bool `json:"memory,omitempty"`
 	// ContextBudget is the prompt-token ceiling this run aims to stay under.
 	// Saved on State so a resumed run inherits the budget rather than silently
 	// disabling compaction.

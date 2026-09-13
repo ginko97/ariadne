@@ -155,6 +155,18 @@ func cmdRun(args []string) int {
 		return exitUsage
 	}
 
+	// An explicit allow-list is the operator's sentence, and this project
+	// refuses to widen one everywhere else — resume can narrow a grant and
+	// never broaden it. Adding remember for convenience would be the same
+	// widening with a friendlier face, so it is an error instead. Silently
+	// leaving it out is worse than either: the tool would be offered and then
+	// refused at the loop, leaving the read side on with a dead write side.
+	if *remember && len(splitList(*allow)) > 0 && !contains(splitList(*allow), "remember") {
+		fmt.Fprintln(os.Stderr,
+			"ariadne run: -remember with -allow needs remember in the list")
+		return exitUsage
+	}
+
 	key, envName := apiKey(*baseURL)
 	if key == "" {
 		fmt.Fprintf(os.Stderr, "ariadne run: no api key for %s — set %s in the environment or .env\n", *baseURL, envName)
@@ -185,6 +197,7 @@ func cmdRun(args []string) int {
 	})
 	state.BaseURL = *baseURL
 	state.ContextBudget = *budget
+	state.Memory = *remember
 	fmt.Fprintf(os.Stderr, "run %s  model=%s\n", state.RunID, *model)
 
 	return execute(ctx, agent, state, *stream)
@@ -225,13 +238,25 @@ func cmdResume(args []string) int {
 		return exitFail
 	}
 
-	mem := *remember || contains(state.RequireApproval, "remember")
+	mem := *remember || state.Memory
 	rememberFor := ""
 	if mem {
 		rememberFor = "validate"
 	}
 	if err := checkNames(newRegistry(rememberFor).Defs(), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
+		return exitUsage
+	}
+
+	// An explicit allow-list is the operator's sentence, and this project
+	// refuses to widen one everywhere else — resume can narrow a grant and
+	// never broaden it. Adding remember for convenience would be the same
+	// widening with a friendlier face, so it is an error instead. Silently
+	// leaving it out is worse than either: the tool would be offered and then
+	// refused at the loop, leaving the read side on with a dead write side.
+	if *remember && len(splitList(*allow)) > 0 && !contains(splitList(*allow), "remember") {
+		fmt.Fprintln(os.Stderr,
+			"ariadne resume: -remember with -allow needs remember in the list")
 		return exitUsage
 	}
 
@@ -267,10 +292,14 @@ func cmdResume(args []string) int {
 	if budgetVal == 0 && state.ContextBudget > 0 {
 		budgetVal = state.ContextBudget
 	}
-	if *remember && !strings.Contains(state.System, "<memory>") {
-		if prompt := memoryPrompt(true); prompt != "" {
-			state.System += prompt
-		}
+	// Memory turned on for a run that started without it. The checkpoint's
+	// system prompt wins on resume, so the notes have to be added to it here or
+	// the tool would be present with nothing behind it. Recorded, so the next
+	// resume knows it is already there rather than matching on a fence marker
+	// that could be reworded.
+	if mem && !state.Memory {
+		state.System += memoryPrompt(true)
+		state.Memory = true
 	}
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: state.Model, BaseURL: endpoint, RunID: state.RunID,
@@ -373,13 +402,6 @@ func newAgentFor(o agentOpts) *loop.Agent {
 		// least likely to be noticed.
 		if !contains(approve, "remember") {
 			approve = append(append([]string{}, approve...), "remember")
-		}
-		// Memory switches on both halves at once (prompt and tool). If the
-		// operator specified an allow-list, remember must be in it so the tool
-		// is offered and permitted, rather than silently filtered out while the
-		// read side stays on.
-		if len(allow) > 0 && !contains(allow, "remember") {
-			allow = append(append([]string{}, allow...), "remember")
 		}
 	}
 	reg := newRegistry(rememberFor)
