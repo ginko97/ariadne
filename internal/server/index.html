@@ -166,6 +166,14 @@ function newConversation() {
 async function loadModels() {
   try {
     const d = await (await api('/api/models')).json();
+    // What is selected now outranks the default. The list is fetched without
+    // being awaited and can take ten seconds, so a conversation opened in the
+    // meantime has already set the picker to its own model — and rebuilding the
+    // options would drop that on the floor and silently revert to the configured
+    // one. The next message would then carry a model the person did not choose,
+    // switching the conversation underneath them. That is the same defect
+    // f6854cf fixed on the server, arriving from the client instead.
+    const chosen = modelEl.value;
     modelEl.replaceChildren();
     for (const m of d.models) {
       const o = document.createElement('option');
@@ -180,8 +188,9 @@ async function loadModels() {
     }
     // The server's configured model, not whatever sorts first. Alphabetical
     // order is not a ranking, and letting it decide means the opening turn of
-    // every conversation runs on a model nobody picked.
-    selectModel(d.configured);
+    // every conversation runs on a model nobody picked. Only when nothing was
+    // chosen yet, per the note above.
+    selectModel(chosen || d.configured);
     if (d.warning) warn(d.warning);
   } catch (e) { warn('Could not load the model list: ' + e.message); }
 }
