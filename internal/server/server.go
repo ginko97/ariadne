@@ -81,6 +81,7 @@ func newToken() string {
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/chat", s.handleChat)
+	mux.HandleFunc("GET /api/runs", s.handleRuns)
 	return guard(s.CSRFToken, mux)
 }
 

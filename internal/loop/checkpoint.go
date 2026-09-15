@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"time"
 )
 
@@ -37,6 +38,77 @@ func ValidRunID(id string) bool {
 		return false
 	}
 	return runIDPattern.MatchString(id)
+}
+
+// Summary is one run as a list entry: enough to choose between conversations
+// without loading any of them.
+//
+// Task rather than the most recent message, because Task is the line a
+// conversation opened with and is what it should be listed under — relabelling
+// it every turn titles a database migration "thanks", which is the bug 207dae3
+// fixed and the reason the field is kept separate from turnPrompt.
+type Summary struct {
+	RunID    string    `json:"run_id"`
+	Task     string    `json:"task"`
+	Model    string    `json:"model"`
+	Steps    int       `json:"steps"`
+	Turns    int       `json:"turns"`
+	Messages int       `json:"messages"`
+	Cost     float64   `json:"cost_usd"`
+	Updated  time.Time `json:"updated"`
+}
+
+// List returns every run that has a checkpoint, most recently written first,
+// and the number it could not read.
+//
+// A run that fails to parse is skipped rather than failing the listing. One
+// unreadable checkpoint hiding every conversation behind it is the same defect
+// as the corrupt trace line that hid every event after it — and the count is
+// returned rather than swallowed, because "some runs are unreadable" is
+// information and a silently shorter list is not.
+//
+// Ordered by mtime rather than by run id. Ids sort by creation and a
+// conversation resumed today would sort under the day it began, which is the
+// opposite of what "find what I was working on" wants.
+func (s *Store) List() ([]Summary, int, error) {
+	entries, err := os.ReadDir(s.Dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, 0, nil // no runs yet is not a failure
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("loop: list runs: %w", err)
+	}
+
+	var out []Summary
+	skipped := 0
+	for _, e := range entries {
+		if !e.IsDir() || !ValidRunID(e.Name()) {
+			continue
+		}
+		path := filepath.Join(s.Dir, e.Name(), "checkpoint.json")
+		fi, err := os.Stat(path)
+		if err != nil {
+			continue // a run directory with no checkpoint yet is not an error
+		}
+		st, err := s.Load(e.Name())
+		if err != nil {
+			skipped++
+			continue
+		}
+		out = append(out, Summary{
+			RunID:    st.RunID,
+			Task:     st.Task,
+			Model:    st.Model,
+			Steps:    st.Steps,
+			Turns:    st.Turns(),
+			Messages: len(st.Messages),
+			Cost:     st.Cost,
+			Updated:  fi.ModTime(),
+		})
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].Updated.After(out[j].Updated) })
+	return out, skipped, nil
 }
 
 // Save writes st atomically to <Dir>/<RunID>/checkpoint.json.
