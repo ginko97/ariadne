@@ -1,0 +1,172 @@
+// Package server exposes a run over HTTP, for the browser half of v0.2.0.
+//
+// It adds no new notion of a conversation. A chat is a run, the same object
+// cmd/ariadne already checkpoints, resumes, compacts and traces — this package
+// only carries one over the wire. What it does add is everything the REPL
+// never had to think about, because a REPL is one conversation on one
+// goroutine and a server is neither: turns arriving concurrently for the same
+// run, a writer that is only valid for the life of one request, and a caller
+// who can disappear mid-answer.
+package server
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+
+	"github.com/ginko97/ariadne/internal/llm"
+	"github.com/ginko97/ariadne/internal/loop"
+)
+
+// AgentFactory builds the agent for one request.
+//
+// Per request rather than per server, because onDelta writes into that
+// request's ResponseWriter and is valid exactly as long as the handler is.
+// An Agent is a plain struct, so this costs a few allocations and buys the
+// guarantee that no two turns ever share a delta sink.
+type AgentFactory func(runID string, onDelta func(llm.Chunk)) *loop.Agent
+
+// Server holds what outlives a request: the checkpoint store, how to build an
+// agent, and which runs are busy.
+//
+// Deliberately not an Agent. One agent shared across requests would mean one
+// delta sink shared across requests, which is the same conversation streamed
+// into somebody else's browser.
+type Server struct {
+	Store    *loop.Store
+	NewAgent AgentFactory
+
+	// NewRunID mints the id for a fresh conversation. Injected rather than
+	// implemented here: cmd/ariadne already has one, and a run id format
+	// living in two packages is a format that will eventually differ in one.
+	NewRunID func() string
+
+	// CSRFToken gates every mutating request. Loopback binding is not
+	// protection on its own: any page the browser has open can POST to
+	// localhost, and the worst case here is not noise, it is a page spending
+	// somebody's API budget and reading the answer back. Settled 2026-09-10
+	// for /setup; it applies to every endpoint that changes something.
+	CSRFToken string
+
+	mu   sync.Mutex
+	live map[string]bool // run ids with a turn in flight
+}
+
+func New(store *loop.Store, newAgent AgentFactory, newRunID func() string) *Server {
+	return &Server{
+		Store:     store,
+		NewAgent:  newAgent,
+		NewRunID:  newRunID,
+		CSRFToken: newToken(),
+		live:      map[string]bool{},
+	}
+}
+
+func newToken() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+func (s *Server) Routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/chat", s.handleChat)
+	return guard(s.CSRFToken, mux)
+}
+
+// claim marks a run busy, or reports that it already is.
+//
+// Check and set under one lock: two requests that each look, see "free", and
+// then proceed is the whole bug this prevents. loop.State is mutated
+// throughout Run — messages, steps, cost — and a checkpoint is written per
+// tool call, so two turns on one run is both a data race and two writers on
+// one file.
+//
+// Busy is answered with 409 rather than a queue. The refusal already exists in
+// the domain: AddUserMessage will not add a message while a batch is
+// unfinished. A queue would also mean one browser tab blocking silently behind
+// another tab's turn, with no way to tell that from a slow model.
+func (s *Server) claim(runID string) (release func(), ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.live[runID] {
+		return nil, false
+	}
+	s.live[runID] = true
+	return func() {
+		s.mu.Lock()
+		delete(s.live, runID)
+		s.mu.Unlock()
+	}, true
+}
+
+// guard enforces the conditions settled on 2026-09-10, restated here because
+// they apply per endpoint rather than once at bind time.
+//
+// Host must be loopback: binding to 127.0.0.1 stops other machines, not other
+// pages. Origin, when the browser sends one, must be loopback too — a page on
+// any origin can POST to localhost, and it is the Origin header rather than
+// the bind address that says who asked. The token then covers what neither
+// does, since a page may know the URL without being able to read a response.
+func guard(token string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLoopbackHost(r.Host) {
+			httpError(w, http.StatusForbidden, "host is not loopback")
+			return
+		}
+		if o := r.Header.Get("Origin"); o != "" && !isLoopbackOrigin(o) {
+			httpError(w, http.StatusForbidden, "cross-origin request refused")
+			return
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			if r.Header.Get("X-Ariadne-CSRF") != token {
+				httpError(w, http.StatusForbidden, "missing or wrong X-Ariadne-CSRF")
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isLoopbackHost(host string) bool {
+	h, _, err := net.SplitHostPort(host)
+	if err != nil {
+		h = host // no port
+	}
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+func isLoopbackOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return isLoopbackHost(u.Host)
+}
+
+func httpError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	fmt.Fprintf(w, `{"error":%q}`+"\n", msg)
+}
+
+// sanitiseRunID refuses anything that is not a plain id.
+//
+// loop.Store has its own traversal guard and this is not a substitute for it;
+// it is here so a bad id is a 400 naming the field rather than a 500 from the
+// layer below.
+func sanitiseRunID(id string) bool {
+	if id == "" || len(id) > 128 {
+		return false
+	}
+	return !strings.ContainsAny(id, `/\.`)
+}
