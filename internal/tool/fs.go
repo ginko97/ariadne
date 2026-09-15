@@ -119,23 +119,39 @@ func (f Fetch) Call(_ context.Context, _ string, args json.RawMessage) (llm.Tool
 	}
 	defer file.Close()
 
-	// Size is checked before reading rather than after. ReadFile on a 20MB PDF
-	// has already spent the memory by the time anyone can object, and the
-	// refusal has to happen before the bytes exist rather than before they are
-	// returned.
+	// Format before size, and the order is the point. A PDF is a PDF at any
+	// size, but size was checked first, so a 2MB one was reported as too large
+	// while a 244KB one — the only one small enough to reach the second check —
+	// was reported as not text. Shown that table, a model reasonably concluded
+	// the small one was corrupt. Two identical files should not get two
+	// different explanations because of which limit they happened to trip.
+	//
+	// Reading the head is cheap and bounded, so this costs nothing even when the
+	// file is enormous.
+	head := make([]byte, 8000)
+	n, err := file.Read(head)
+	if err != nil && err != io.EOF {
+		return fail("fetch: cannot read %q: %v", in.Path, err)
+	}
+	if isBinary(head[:n]) {
+		return fail("fetch: %q is not a text document — it looks like binary "+
+			"data such as a PDF, image or archive. This tool reads text only; "+
+			"a text export of it could be read instead", in.Path)
+	}
+
+	// Size is checked before reading the rest rather than after. ReadFile on a
+	// 20MB file has already spent the memory by the time anyone can object.
 	if fi, err := file.Stat(); err == nil && fi.Size() > maxFetchBytes {
 		return fail("fetch: %q is %d bytes, over the %d-byte limit; "+
 			"a document this large cannot be read into the conversation",
 			in.Path, fi.Size(), maxFetchBytes)
 	}
 
-	data, err := io.ReadAll(io.LimitReader(file, maxFetchBytes))
+	rest, err := io.ReadAll(io.LimitReader(file, maxFetchBytes-int64(n)))
 	if err != nil {
 		return fail("fetch: cannot read %q: %v", in.Path, err)
 	}
-	if isBinary(data) {
-		return fail("fetch: %q is not text; this tool reads text documents only", in.Path)
-	}
+	data := append(head[:n], rest...)
 
 	// Untrusted: whoever wrote this document is not whoever asked the question.
 	return llm.ToolResult{Content: string(data), Untrusted: true}, nil

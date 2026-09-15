@@ -336,7 +336,7 @@ func TestFetchRefusesBinary(t *testing.T) {
 	if !res.IsError {
 		t.Fatal("a binary file was read into the conversation")
 	}
-	if !strings.Contains(res.Content, "not text") {
+	if !strings.Contains(res.Content, "not a text document") {
 		t.Errorf("the refusal does not say why: %q", res.Content)
 	}
 }
@@ -358,5 +358,38 @@ func TestFetchStillReadsTextDocuments(t *testing.T) {
 	}
 	if !res.Untrusted {
 		t.Error("a fetched document must still be marked untrusted")
+	}
+}
+
+// A PDF is a PDF at any size. Size used to be checked first, so a 2MB one was
+// reported as too large while a 244KB one was reported as not text — and shown
+// that table, a model concluded the small one was corrupt. Two identical
+// formats must not get two explanations because of which limit they tripped.
+func TestFetchReportsFormatBeforeSize(t *testing.T) {
+	dir := t.TempDir()
+
+	small := append([]byte("%PDF-1.7\n"), make([]byte, 100)...)
+	large := append([]byte("%PDF-1.7\n"), make([]byte, maxFetchBytes+1)...)
+	if err := os.WriteFile(filepath.Join(dir, "small.pdf"), small, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "large.pdf"), large, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f := NewFetch(dir)
+	for _, name := range []string{"small.pdf", "large.pdf"} {
+		res, err := f.Call(context.Background(), "c1",
+			json.RawMessage(`{"path":"`+name+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.IsError {
+			t.Fatalf("%s was read into the conversation", name)
+		}
+		if !strings.Contains(res.Content, "not a text document") {
+			t.Errorf("%s: got %q, want the same format refusal regardless of size",
+				name, res.Content)
+		}
 	}
 }
