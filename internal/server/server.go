@@ -51,6 +51,10 @@ type Server struct {
 	// living in two packages is a format that will eventually differ in one.
 	NewRunID func() string
 
+	// Models is the picker's source. Nil disables the endpoint rather than
+	// failing it, so a server can run without ever reaching the network.
+	Models *ModelCache
+
 	// CSRFToken gates every mutating request. Loopback binding is not
 	// protection on its own: any page the browser has open can POST to
 	// localhost, and the worst case here is not noise, it is a page spending
@@ -82,6 +86,7 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/chat", s.handleChat)
 	mux.HandleFunc("GET /api/runs", s.handleRuns)
+	mux.HandleFunc("GET /api/models", s.handleModels)
 	return guard(s.CSRFToken, mux)
 }
 

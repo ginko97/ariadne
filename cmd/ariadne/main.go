@@ -629,6 +629,9 @@ func cmdUI(args []string) int {
 	}
 
 	srv := server.New(store, newAgent, newRunID)
+	// The picker's fallback is the model this process was started with: the one
+	// model known to work, because every turn here already uses it.
+	srv.Models = server.NewModelCache(*model)
 
 	// Host is a constant, not a flag: the loopback guarantee is structural
 	// rather than something an operator can mistype into 0.0.0.0.
