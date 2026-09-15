@@ -285,3 +285,78 @@ func TestWriteFileCreatesMissingRoot(t *testing.T) {
 		t.Errorf("file = %q, err = %v", data, err)
 	}
 }
+
+// A tool result is not a file, it is a message resent with every later request,
+// so an unbounded read is an unbounded prompt. Found the hard way: a 20MB PDF
+// fetched once produced a 66MB checkpoint and a 400 on the next request, and
+// the run could never finish — compaction could not help, because the keep-floor
+// protects the most recent exchange, which was the oversized message.
+func TestFetchRefusesADocumentTooLargeForTheConversation(t *testing.T) {
+	dir := t.TempDir()
+	big := make([]byte, maxFetchBytes+1)
+	for i := range big {
+		big[i] = 'a'
+	}
+	if err := os.WriteFile(filepath.Join(dir, "huge.txt"), big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := NewFetch(dir).Call(context.Background(), "c1",
+		json.RawMessage(`{"path":"huge.txt"}`))
+	if err != nil {
+		t.Fatalf("a refusal the model can act on is a result, not an error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("an oversized document was read into the conversation")
+	}
+	if !strings.Contains(res.Content, "limit") {
+		t.Errorf("the refusal does not say why: %q", res.Content)
+	}
+	// The bytes must not come back at all — a truncated 20MB file is still far
+	// past what belongs in a prompt.
+	if len(res.Content) > 500 {
+		t.Errorf("the refusal carried %d characters of the document", len(res.Content))
+	}
+}
+
+// Reading a PDF as a string does not fail, it succeeds at producing millions of
+// characters of compressed rubbish that costs tokens and answers nothing.
+func TestFetchRefusesBinary(t *testing.T) {
+	dir := t.TempDir()
+	pdf := append([]byte("%PDF-1.7\n"), 0x00, 0x8f, 0x1e, 0x00, 'j', 'u', 'n', 'k')
+	if err := os.WriteFile(filepath.Join(dir, "doc.pdf"), pdf, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := NewFetch(dir).Call(context.Background(), "c1",
+		json.RawMessage(`{"path":"doc.pdf"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError {
+		t.Fatal("a binary file was read into the conversation")
+	}
+	if !strings.Contains(res.Content, "not text") {
+		t.Errorf("the refusal does not say why: %q", res.Content)
+	}
+}
+
+// The ordinary case still works, and is still marked untrusted.
+func TestFetchStillReadsTextDocuments(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("total due: 42"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := NewFetch(dir).Call(context.Background(), "c1",
+		json.RawMessage(`{"path":"notes.txt"}`))
+	if err != nil || res.IsError {
+		t.Fatalf("a plain text document was refused: %v %q", err, res.Content)
+	}
+	if res.Content != "total due: 42" {
+		t.Errorf("content = %q", res.Content)
+	}
+	if !res.Untrusted {
+		t.Error("a fetched document must still be marked untrusted")
+	}
+}

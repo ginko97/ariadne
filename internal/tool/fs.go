@@ -1,9 +1,11 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -72,7 +74,9 @@ var _ Tool = Fetch{}
 func (Fetch) Name() string { return "fetch" }
 
 func (Fetch) Description() string {
-	return "Fetch a document by path and return its text content."
+	return "Fetch a document by path and return its text content. " +
+		"Paths are relative to a workspace directory this tool cannot read " +
+		"outside of; absolute paths are refused."
 }
 
 func (Fetch) Schema() json.RawMessage {
@@ -109,12 +113,61 @@ func (f Fetch) Call(_ context.Context, _ string, args json.RawMessage) (llm.Tool
 	}
 	defer root.Close()
 
-	data, err := root.ReadFile(in.Path)
+	file, err := root.Open(in.Path)
 	if err != nil {
 		return fail("fetch: cannot read %q: %v", in.Path, err)
 	}
+	defer file.Close()
+
+	// Size is checked before reading rather than after. ReadFile on a 20MB PDF
+	// has already spent the memory by the time anyone can object, and the
+	// refusal has to happen before the bytes exist rather than before they are
+	// returned.
+	if fi, err := file.Stat(); err == nil && fi.Size() > maxFetchBytes {
+		return fail("fetch: %q is %d bytes, over the %d-byte limit; "+
+			"a document this large cannot be read into the conversation",
+			in.Path, fi.Size(), maxFetchBytes)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, maxFetchBytes))
+	if err != nil {
+		return fail("fetch: cannot read %q: %v", in.Path, err)
+	}
+	if isBinary(data) {
+		return fail("fetch: %q is not text; this tool reads text documents only", in.Path)
+	}
+
 	// Untrusted: whoever wrote this document is not whoever asked the question.
 	return llm.ToolResult{Content: string(data), Untrusted: true}, nil
+}
+
+// maxFetchBytes bounds one document.
+//
+// A tool result is not a file, it is a message that joins the conversation and
+// is resent with every subsequent request — so an unbounded read is an
+// unbounded prompt. A 20MB PDF fetched once produced a 66MB checkpoint, a 400
+// from the provider on the very next request, and a run that was checkpointed,
+// resumable and permanently unable to finish: compaction could not rescue it
+// either, because the keep-floor protects the most recent exchange, which was
+// the 20MB message.
+//
+// 256KB is far past any text document worth summarising and far short of what
+// breaks a context window.
+const maxFetchBytes = 256 << 10
+
+// isBinary reports whether data looks like something no model can read.
+//
+// A NUL byte in the first few kilobytes, which is the heuristic git uses and is
+// right for the same reason: text files do not contain them and binary formats
+// almost always do within a header. Reading a PDF as a string does not fail, it
+// succeeds at producing several million characters of compressed rubbish that
+// costs tokens and answers nothing.
+func isBinary(data []byte) bool {
+	head := data
+	if len(head) > 8000 {
+		head = head[:8000]
+	}
+	return bytes.IndexByte(head, 0) >= 0
 }
 
 // ---------------------------------------------------------------- write_file
@@ -134,7 +187,9 @@ var _ Tool = WriteFile{}
 func (WriteFile) Name() string { return "write_file" }
 
 func (WriteFile) Description() string {
-	return "Write text to a file, creating it or replacing its contents."
+	return "Write text to a file, creating it or replacing its contents. " +
+		"Paths are relative to a workspace directory this tool cannot write " +
+		"outside of; absolute paths are refused."
 }
 
 func (WriteFile) Schema() json.RawMessage {
