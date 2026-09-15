@@ -432,7 +432,7 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 
 	// Canonical ordering: sort results message blocks to match the assistant turn's
 	// tool call order, regardless of parallel completion order.
-	if i > 0 && len(calls) > 1 && i < len(s.Messages) {
+	if i > 0 && len(s.Messages[i].Blocks) > 1 && i < len(s.Messages) {
 		assistant := s.Messages[i-1]
 		pos := make(map[string]int)
 		idx := 0
