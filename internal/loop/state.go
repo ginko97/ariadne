@@ -13,6 +13,15 @@ import "github.com/ginko97/ariadne/internal/llm"
 type State struct {
 	RunID string `json:"run_id"`
 	Task  string `json:"task"`
+	// Provider is the backend that served the most recent response, where the
+	// gateway reports one. Deliberately *not* folded into Model: Model is what
+	// this run asks for and what a resume must keep asking for, while this is
+	// what answered. A gateway can change the second without the first moving.
+	//
+	// Per-run because a scorecard needs one value; the trace records it per
+	// response, which is the accurate account if a run is served by more than
+	// one backend.
+	Provider string `json:"provider,omitempty"`
 	// Model is recorded on the first step and is authoritative on resume: a job
 	// that finished on a different model than it started on is a different job,
 	// and evals need to know which model produced a trace.

@@ -47,6 +47,13 @@ type Result struct {
 	Cost   float64 `json:"cost_usd"`
 	Answer string  `json:"answer"`
 	RunID  string  `json:"run_id"` // the trace to read when this fails
+	// Provider is the backend that served this task, where the gateway reports
+	// one. Two sweeps of one model id may not have run on the same thing —
+	// backends differ in quantisation, context handling and latency — and this
+	// project has already recorded pass-rate variance it could not attribute
+	// and latency variance it called provider-side without being able to see
+	// the provider. Recorded so the question can at least be asked.
+	Provider string `json:"provider,omitempty"`
 }
 
 // Scorecard is one model's run over one task set, at one commit.
@@ -61,12 +68,13 @@ type Scorecard struct {
 	TotalCost float64   `json:"total_cost_usd"`
 }
 
-// Score judges one finished run. It never inspects the model or the provider —
-// only what the run actually did.
+// Score judges one finished run. It never *judges* on the model or the provider
+// — only on what the run actually did — but it records which backend served it,
+// because a comparison that cannot name what answered is comparing labels.
 func Score(t Task, s *loop.State, answer string, runErr error) Result {
 	r := Result{TaskID: t.ID, Answer: answer}
 	if s != nil {
-		r.Steps, r.Cost, r.RunID = s.Steps, s.Cost, s.RunID
+		r.Steps, r.Cost, r.RunID, r.Provider = s.Steps, s.Cost, s.RunID, s.Provider
 	}
 
 	// A run that failed is a failed task, but the reason matters: a step limit

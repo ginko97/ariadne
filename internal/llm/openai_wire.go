@@ -34,6 +34,10 @@ type oaStreamChunk struct {
 	Choices []oaStreamChoice `json:"choices"`
 	Usage   *oaUsage         `json:"usage"`
 	Error   *oaError         `json:"error"`
+	// Model and Provider: see oaResponse. Streamed chunks carry them too, and
+	// only the first one usually does.
+	Model    string `json:"model"`
+	Provider string `json:"provider"`
 }
 
 type oaStreamChoice struct {
@@ -93,6 +97,15 @@ type oaResponse struct {
 	Choices []oaChoice `json:"choices"`
 	Usage   oaUsage    `json:"usage"`
 	Error   *oaError   `json:"error"`
+	// Model is what actually answered, which is not always what was asked for:
+	// a gateway may route an alias, a variant, or a fallback.
+	Model string `json:"model"`
+	// Provider is an OpenRouter extension naming the backend that served the
+	// request. One model id is served by several of them, and they differ in
+	// quantisation, context handling and latency — so two sweeps of "the same
+	// model" may not have run on the same thing. Absent elsewhere, which is
+	// exactly what an empty string says.
+	Provider string `json:"provider"`
 }
 
 type oaChoice struct {
@@ -278,8 +291,10 @@ func fromWire(body []byte) (Response, error) {
 	}
 
 	return Response{
-		Blocks: blocks,
-		Stop:   stopReason(c.FinishReason, len(c.Message.ToolCalls) > 0),
+		Blocks:   blocks,
+		Model:    raw.Model,
+		Provider: raw.Provider,
+		Stop:     stopReason(c.FinishReason, len(c.Message.ToolCalls) > 0),
 		Usage: Usage{
 			InputTokens:  raw.Usage.PromptTokens,
 			OutputTokens: raw.Usage.CompletionTokens,

@@ -267,9 +267,19 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		// provider priced it. Without the pair the count cannot be scaled, and
 		// growth since the last request is invisible.
 		s.InputChars = totalSize(s.Messages)
+		if resp.Provider != "" {
+			s.Provider = resp.Provider
+		}
 
+		// The served model, not the requested one — they are the same until a
+		// gateway routes elsewhere, and that is exactly the case worth seeing.
+		served := resp.Model
+		if served == "" {
+			served = s.Model
+		}
 		a.emit(trace.Event{
 			Kind: trace.KindResponse, Step: s.Steps,
+			Model: served, Provider: resp.Provider,
 			Stop: string(resp.Stop), LatencyMS: latency,
 			InTokens: resp.Usage.InputTokens, OutTokens: resp.Usage.OutputTokens,
 			Cost: a.Price.Cost(resp.Usage), Text: resp.Text(),

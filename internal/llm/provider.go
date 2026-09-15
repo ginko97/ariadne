@@ -49,6 +49,16 @@ type Response struct {
 	Blocks []Block    `json:"blocks"`
 	Stop   StopReason `json:"stop"`
 	Usage  Usage      `json:"usage"`
+
+	// Model is what answered, as the provider reports it — not what was asked
+	// for. A gateway may route an alias or a fallback, and a run that records
+	// only the request cannot tell the difference.
+	Model string `json:"model,omitempty"`
+	// Provider is the backend that served it, where the gateway says. One model
+	// id is served by several, and they differ in quantisation, context
+	// handling and latency, so "the same model" across two sweeps is a weaker
+	// claim than it looks. Empty when the endpoint does not report one.
+	Provider string `json:"provider,omitempty"`
 }
 
 // ToolResult is what a tool produced. It becomes a BlockToolResult in the

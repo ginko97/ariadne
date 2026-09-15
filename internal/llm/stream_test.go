@@ -386,3 +386,18 @@ func (c cancelingStreamer) Stream(context.Context, Request) (iter.Seq2[Chunk, er
 		yield(Chunk{}, c.boom)
 	}, nil
 }
+
+// Model and provider arrive once, usually on the first chunk, so the
+// accumulator has to keep the first non-empty value rather than the last.
+func TestAccumulatorKeepsWhoAnswered(t *testing.T) {
+	a := newAccumulator()
+	a.add(Chunk{Model: "openai/gpt-oss-20b", Provider: "Darkbloom"})
+	a.add(Chunk{Text: "hello"})
+	a.add(Chunk{Stop: StopEnd})
+
+	got := a.response()
+	if got.Model != "openai/gpt-oss-20b" || got.Provider != "Darkbloom" {
+		t.Errorf("Model=%q Provider=%q, want them carried through the stream",
+			got.Model, got.Provider)
+	}
+}

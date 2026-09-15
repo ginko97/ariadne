@@ -439,3 +439,38 @@ func TestWithTimeoutPreservesHTTPClientTransport(t *testing.T) {
 		t.Errorf("Timeout = %v, want 45s", o.HTTP.Timeout)
 	}
 }
+
+// A gateway that routes tells you who answered. Recording only the request
+// means a scorecard attributes a result to a label rather than to a backend,
+// and two sweeps of one model id may not have run on the same thing.
+func TestFromWireCapturesWhoAnswered(t *testing.T) {
+	body := []byte(`{
+  "model": "openai/gpt-oss-20b",
+  "provider": "Darkbloom",
+  "choices": [{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],
+  "usage": {"prompt_tokens": 10, "completion_tokens": 2}
+}`)
+	resp, err := fromWire(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Model != "openai/gpt-oss-20b" {
+		t.Errorf("Model = %q, want the model the response reports", resp.Model)
+	}
+	if resp.Provider != "Darkbloom" {
+		t.Errorf("Provider = %q, want the backend that served it", resp.Provider)
+	}
+}
+
+// Endpoints that report neither leave both empty, which is what "we do not
+// know" should look like — not a guess copied from the request.
+func TestFromWireLeavesWhoAnsweredEmptyWhenUnreported(t *testing.T) {
+	body := []byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{}}`)
+	resp, err := fromWire(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Model != "" || resp.Provider != "" {
+		t.Errorf("Model=%q Provider=%q, want both empty", resp.Model, resp.Provider)
+	}
+}

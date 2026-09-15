@@ -69,7 +69,15 @@ type Event struct {
 	Kind  string    `json:"kind"`
 	Step  int       `json:"step,omitempty"`
 
-	Model     string  `json:"model,omitempty"`
+	// Model on a request event is what was asked for; on a response event it is
+	// what answered, which a routing gateway may change without saying so
+	// anywhere else.
+	Model string `json:"model,omitempty"`
+	// Provider is the backend that served a response, where the gateway reports
+	// one. Recorded because two sweeps of one model id may not have run on the
+	// same thing, and latency variance here was already documented as
+	// provider-side while being impossible to attribute.
+	Provider  string  `json:"provider,omitempty"`
 	Stop      string  `json:"stop,omitempty"`
 	InTokens  int     `json:"input_tokens,omitempty"`
 	OutTokens int     `json:"output_tokens,omitempty"`

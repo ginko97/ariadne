@@ -34,6 +34,12 @@ type Chunk struct {
 	ToolCall *ToolDelta
 	Stop     StopReason
 	Usage    Usage
+
+	// Model and Provider say what actually answered. They arrive once, usually
+	// on the first chunk, so the accumulator keeps the first non-empty value
+	// rather than the last.
+	Model    string
+	Provider string
 }
 
 // ToolDelta is a fragment of one tool call.
@@ -68,10 +74,12 @@ type Streamer interface {
 // Kept apart from the SSE parsing so the hard half — fragment reassembly — is
 // testable without a transport.
 type accumulator struct {
-	text  string
-	calls map[int]*ToolDelta
-	stop  StopReason
-	usage Usage
+	text     string
+	calls    map[int]*ToolDelta
+	stop     StopReason
+	usage    Usage
+	model    string
+	provider string
 }
 
 func newAccumulator() *accumulator {
@@ -106,6 +114,14 @@ func (a *accumulator) add(c Chunk) {
 	// stream_options in openai.go.
 	if c.Usage.InputTokens > 0 || c.Usage.OutputTokens > 0 || c.Usage.Cost > 0 {
 		a.usage = c.Usage
+	}
+	// First non-empty wins: these are properties of the response, not of the
+	// chunk, and only one chunk carries them.
+	if a.model == "" {
+		a.model = c.Model
+	}
+	if a.provider == "" {
+		a.provider = c.Provider
 	}
 }
 
@@ -171,7 +187,7 @@ func (a *accumulator) response() Response {
 		}
 	}
 
-	return Response{Blocks: blocks, Stop: stop, Usage: a.usage}
+	return Response{Blocks: blocks, Stop: stop, Usage: a.usage, Model: a.model, Provider: a.provider}
 }
 
 // Streaming turns a Streamer into a Provider.

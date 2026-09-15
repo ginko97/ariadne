@@ -550,3 +550,48 @@ func TestTraceRecordsNoToolRunnerFailure(t *testing.T) {
 		t.Errorf("run_end error = %q, want mention of ToolRunner", last.Error)
 	}
 }
+
+// The run records who answered, kept separate from the model it asks for.
+// Folding them together would change what a resume requests; keeping only the
+// request loses the one variable a comparison across sweeps needs.
+func TestRunRecordsWhoAnsweredWithoutChangingWhatItAsksFor(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{{
+		Blocks:   []llm.Block{{Type: llm.BlockText, Text: "done"}},
+		Stop:     llm.StopEnd,
+		Usage:    llm.Usage{InputTokens: 10, OutputTokens: 2},
+		Model:    "openai/gpt-oss-20b",
+		Provider: "Darkbloom",
+	}}}
+
+	var events []trace.Event
+	a := &Agent{
+		Provider: fake,
+		Model:    "openai/gpt-oss-20b",
+		MaxSteps: 3,
+		Trace:    func(e trace.Event) { events = append(events, e) },
+	}
+	s := NewState("run_provider", "do a thing")
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+
+	if s.Provider != "Darkbloom" {
+		t.Errorf("State.Provider = %q, want the backend that served it", s.Provider)
+	}
+	if s.Model != "openai/gpt-oss-20b" {
+		t.Errorf("State.Model = %q — the requested model must not move", s.Model)
+	}
+
+	var resp *trace.Event
+	for i := range events {
+		if events[i].Kind == trace.KindResponse {
+			resp = &events[i]
+		}
+	}
+	if resp == nil {
+		t.Fatal("no response event")
+	}
+	if resp.Provider != "Darkbloom" {
+		t.Errorf("response event provider = %q, want Darkbloom", resp.Provider)
+	}
+}

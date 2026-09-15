@@ -138,6 +138,13 @@ func (o *OpenAI) Stream(ctx context.Context, req Request) (iter.Seq2[Chunk, erro
 func chunksOf(raw oaStreamChunk) []Chunk {
 	var out []Chunk
 
+	// Who answered, emitted as its own chunk so the accumulator can keep it
+	// without every other chunk having to carry it. Usually only the first
+	// chunk of a stream says.
+	if raw.Model != "" || raw.Provider != "" {
+		out = append(out, Chunk{Model: raw.Model, Provider: raw.Provider})
+	}
+
 	for _, ch := range raw.Choices {
 		if ch.Delta.Content != nil && *ch.Delta.Content != "" {
 			out = append(out, Chunk{Text: *ch.Delta.Content})
