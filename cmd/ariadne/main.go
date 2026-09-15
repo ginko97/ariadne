@@ -783,6 +783,7 @@ func cmdUI(args []string) int {
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
 	allow := fs.String("allow", "", "comma-separated tools a conversation may call (default: all)")
+	approve := fs.String("approve", "", "tools needing approval in the browser before each call")
 	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (fresh: default workspace; resumed: checkpoint's unless overridden)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
@@ -796,7 +797,7 @@ func cmdUI(args []string) int {
 	if *model == "" {
 		*model = defaultModelFor(*baseURL)
 	}
-	if err := checkNames(newRegistry("", *workspace).Defs(), splitList(*allow)); err != nil {
+	if err := checkNames(newRegistry("", *workspace).Defs(), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
 		return exitUsage
 	}
@@ -850,14 +851,12 @@ func cmdUI(args []string) int {
 			Workspace: workspaceDir,
 			MCPTools:  mcpTools,
 			OnDelta:   onDelta,
-			// Fails closed and says why. Unreachable while no tool is gated,
-			// and here anyway: a denial the operator cannot see is the correct
-			// answer when the only place to ask is a console the person on the
-			// other end of the socket is not looking at.
-			ApproveFn: func(_ context.Context, c llm.ToolCall) (bool, error) {
-				fmt.Fprintf(os.Stderr, "denied %s: no approval route over http yet\n", c.Name)
-				return false, nil
-			},
+			Approve:   splitList(*approve),
+			// No ApproveFn: internal/server replaces Agent.Approve per request
+			// with one that asks over the stream that request is holding, which
+			// is a writer only the handler has. A denier here would be silently
+			// overwritten, and leaving one would imply a fallback that does not
+			// exist.
 			Store: store, Trace: tw,
 		})
 		if tw == nil {

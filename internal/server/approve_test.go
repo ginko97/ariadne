@@ -340,3 +340,65 @@ func TestAgentFactoryReceivesStateForAFreshConversation(t *testing.T) {
 		t.Errorf("factory saw task %q, want the opening line", gotTask)
 	}
 }
+
+// The factory's own Approve is replaced, not consulted.
+//
+// This is what lets cmdUI pass -approve with no ApproveFn at all: the approver
+// needs the stream the request is holding, which the factory cannot see, so
+// handleChat sets Agent.Approve after construction. A denier left in cmdUI
+// would be dead code implying a fallback that does not exist — this is the
+// test that says so, rather than a comment claiming it.
+func TestServerReplacesTheFactorysApprover(t *testing.T) {
+	store := &loop.Store{Dir: t.TempDir()}
+	fake := &llm.Fake{Responses: []llm.Response{
+		{
+			Blocks: []llm.Block{{Type: llm.BlockToolUse, ID: "w1", Name: "write_file",
+				Args: json.RawMessage(`{"path":"a.txt"}`)}},
+			Stop:  llm.StopToolUse,
+			Usage: llm.Usage{InputTokens: 5, OutputTokens: 5},
+		},
+		endResponse("done"),
+	}}
+
+	var factoryApproverRan bool
+	s := New(store,
+		func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
+			return &loop.Agent{
+				Provider:        fake,
+				Model:           "test-model",
+				MaxSteps:        5,
+				Checkpoint:      store.Save,
+				RequireApproval: []string{"write_file"},
+				// A blanket yes. If it were consulted the call would run with
+				// nobody asked, and no prompt would reach the stream.
+				Approve: func(context.Context, llm.ToolCall) (bool, error) {
+					factoryApproverRan = true
+					return true, nil
+				},
+				RunTool: func(context.Context, llm.ToolCall) (llm.ToolResult, error) {
+					return llm.ToolResult{Content: "ok"}, nil
+				},
+			}, nil
+		},
+		func() string { return "run_replace" },
+	)
+	ts := httptest.NewServer(s.Routes())
+	defer ts.Close()
+
+	go func() {
+		for range 200 {
+			if s.approvals.decide(approvalKey("run_replace", "w1"), true) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	body := bodyOf(t, post(t, s, ts, `{"message":"write a file"}`, nil))
+	if factoryApproverRan {
+		t.Error("the factory's approver was consulted; the server's never reached the page")
+	}
+	if !strings.Contains(body, "approval_required") {
+		t.Errorf("no prompt reached the stream:\n%s", body)
+	}
+}

@@ -28,6 +28,14 @@
                              font-size:.82em; border-left:2px solid var(--edge); padding-left:.6rem; }
   .notice { color:var(--dim); font-size:.85em; border-left:2px dashed var(--edge); padding-left:.6rem; }
   .is_error { color:var(--err); border-left-color:var(--err); }
+  .approval { border:1px solid var(--edge); border-left:3px solid #d90; border-radius:.4rem;
+              padding:.6rem .75rem; display:flex; flex-direction:column; gap:.5rem;
+              max-width:52rem; }
+  .approval code { font-family:ui-monospace,SFMono-Regular,monospace; font-size:.85em;
+                   overflow-wrap:anywhere; }
+  .approval .row { display:flex; gap:.5rem; align-items:center; }
+  .approval button { font:inherit; padding:.3rem .9rem; cursor:pointer; }
+  .approval.settled { border-left-color:var(--edge); color:var(--dim); }
   form { display:flex; gap:.5rem; padding:.75rem .9rem; border-top:1px solid var(--edge); }
   textarea { flex:1; resize:none; font:inherit; padding:.5rem; min-height:2.6rem; max-height:11rem; }
   button.primary { font:inherit; padding:.5rem 1.1rem; cursor:pointer; }
@@ -60,6 +68,7 @@ const CSRF = document.querySelector('meta[name=csrf]').content;
 const $ = id => document.getElementById(id);
 const log = $('log'), runsEl = $('runs'), modelEl = $('model'), statsEl = $('stats');
 let runID = null, busy = false;
+const pendingApprovals = new Map();
 
 const api = (path, opts = {}) => fetch(path, {
   ...opts,
@@ -99,6 +108,65 @@ function selectModel(id) {
     modelEl.prepend(o);
   }
   modelEl.value = id;
+}
+
+
+// A gated tool asks here and waits. Every path that is not an explicit yes is a
+// denial on the server — a closed tab, a five-minute silence, a restarted
+// process — so this only has to carry an answer, never to enforce one.
+function approvalCard(d) {
+  const el = document.createElement('div');
+  el.className = 'e approval';
+
+  const q = document.createElement('div');
+  q.textContent = `Allow ${d.tool}?`;
+  const args = document.createElement('code');
+  args.textContent = d.args || '';
+
+  const row = document.createElement('div');
+  row.className = 'row';
+  const yes = document.createElement('button');
+  yes.textContent = 'Approve';
+  const no = document.createElement('button');
+  no.textContent = 'Deny';
+  const note = document.createElement('span');
+  note.className = 'dim';
+
+  async function answer(approve) {
+    yes.disabled = no.disabled = true;
+    try {
+      const resp = await api('/api/approve', {
+        method: 'POST',
+        body: JSON.stringify({ run_id: d.run_id, call_id: d.call_id, approve }),
+      });
+      if (!resp.ok) {
+        // 410 is the usual one: the turn stopped waiting before this got sent.
+        // The question is over either way, so the card settles rather than
+        // offering buttons for an answer nothing will read.
+        const { error } = await resp.json().catch(() => ({ error: 'refused' }));
+        note.textContent = error;
+        el.classList.add('settled');
+        pendingApprovals.delete(d.call_id);
+        return;
+      }
+      note.textContent = approve ? 'approved' : 'denied';
+      el.classList.add('settled');
+      pendingApprovals.delete(d.call_id);
+    } catch (e) {
+      note.textContent = 'could not send: ' + e.message;
+      yes.disabled = no.disabled = false;
+    }
+  }
+  yes.onclick = () => answer(true);
+  no.onclick = () => answer(false);
+
+  row.append(yes, no, note);
+  el.append(q, args, row);
+  log.append(el);
+  log.scrollTop = log.scrollHeight;
+  // Held so a timeout can settle the card rather than leaving two live buttons
+  // for a question the server has already stopped waiting on.
+  pendingApprovals.set(d.call_id, { el, note, yes, no });
 }
 
 function render(entries) {
@@ -265,6 +333,16 @@ async function send(text) {
           answer.textContent = d.answer;
           stats(d.turns, d.steps, d.cost);
           selectModel(d.model);
+        } else if (name === 'approval_required') {
+          approvalCard(d);
+          answer = null;
+        } else if (name === 'approval_timeout') {
+          const p = pendingApprovals.get(d.call_id);
+          if (p) {
+            p.yes.disabled = p.no.disabled = true;
+            p.note.textContent = 'timed out — denied';
+            p.el.classList.add('settled');
+          }
         } else if (name === 'error') {
           entry('tool_result', d.error, 'is_error');
           answer = null;
