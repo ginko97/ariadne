@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/trace"
@@ -282,5 +283,170 @@ func TestValidRunID(t *testing.T) {
 		if got := ValidRunID(tc.id); got != tc.want {
 			t.Errorf("ValidRunID(%q) = %v, want %v", tc.id, got, tc.want)
 		}
+	}
+}
+
+// The order must come from what Save recorded, not from the filesystem.
+//
+// mtime is an artifact of how a file got where it is: restoring a backup,
+// a git checkout, rsync, or copying a runs/ directory between machines all
+// rewrite it, and every one of those would reshuffle the conversation list into
+// an order nobody chose. WrittenAt travels inside the checkpoint, so it says
+// when the run was actually written however the bytes arrived.
+func TestStoreListOrdersByWrittenAtNotFileTime(t *testing.T) {
+	dir := t.TempDir()
+	store := &Store{Dir: dir}
+
+	older := NewState("run_20260912T000001_older", "asked first")
+	newer := NewState("run_20260912T000002_newer", "asked second")
+	if err := store.Save(older); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(newer); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reverse the file times: the newer run's file now looks ancient, which is
+	// exactly what a restore or a checkout does to a directory of runs.
+	long, _ := time.Parse(time.RFC3339, "2001-01-01T00:00:00Z")
+	recent := time.Now().Add(24 * time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, newer.RunID, "checkpoint.json"), long, long); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(dir, older.RunID, "checkpoint.json"), recent, recent); err != nil {
+		t.Fatal(err)
+	}
+
+	list, _, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("got %d runs, want 2", len(list))
+	}
+	if list[0].RunID != newer.RunID {
+		t.Errorf("first run = %s, want %s — the list followed file times rather than WrittenAt",
+			list[0].RunID, newer.RunID)
+	}
+}
+
+// sort.Slice is not stable, so runs written inside the same clock tick can swap
+// places between two calls. A conversation list that reorders itself when
+// nothing changed is the kind of flicker nobody reports and nobody can
+// reproduce, so the order is made total with the run id.
+func TestStoreListIsDeterministicWhenTimestampsTie(t *testing.T) {
+	dir := t.TempDir()
+	store := &Store{Dir: dir}
+
+	tied, _ := time.Parse(time.RFC3339, "2026-09-15T12:00:00Z")
+	for _, id := range []string{"run_tie_a", "run_tie_b", "run_tie_c", "run_tie_d"} {
+		st := NewState(id, "same instant")
+		if err := store.Save(st); err != nil {
+			t.Fatal(err)
+		}
+		// Rewrite the envelope so every run claims the identical write time.
+		path := filepath.Join(dir, id, "checkpoint.json")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cp Checkpoint
+		if err := json.Unmarshal(data, &cp); err != nil {
+			t.Fatal(err)
+		}
+		cp.WrittenAt = tied
+		out, err := json.Marshal(cp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, out, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first, _, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 4 {
+		t.Fatalf("got %d runs, want 4", len(first))
+	}
+	for i := 1; i < len(first); i++ {
+		if first[i-1].RunID <= first[i].RunID {
+			t.Fatalf("tied runs are not in a defined order: %s then %s",
+				first[i-1].RunID, first[i].RunID)
+		}
+	}
+	// Repeated because the failure is instability, not a wrong first answer.
+	for range 20 {
+		again, _, err := store.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range again {
+			if again[i].RunID != first[i].RunID {
+				t.Fatalf("order moved between calls at %d: %s then %s",
+					i, first[i].RunID, again[i].RunID)
+			}
+		}
+	}
+}
+
+func TestStoreList(t *testing.T) {
+	dir := t.TempDir()
+	store := &Store{Dir: dir}
+
+	// 1. Non-existent directory returns nil, 0, nil
+	sNone := &Store{Dir: filepath.Join(dir, "missing")}
+	runs, skipped, err := sNone.List()
+	if err != nil || len(runs) != 0 || skipped != 0 {
+		t.Fatalf("List on missing dir = (%v, %d, %v), want (nil, 0, nil)", runs, skipped, err)
+	}
+
+	// 2. Save two runs with known timestamps
+	st1 := NewState("run_20260912T000001_aaa", "first task")
+	st1.Model = "model-1"
+	if err := store.Save(st1); err != nil {
+		t.Fatal(err)
+	}
+
+	st2 := NewState("run_20260912T000002_bbb", "second task")
+	st2.Model = "model-2"
+	if err := store.Save(st2); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Directory with no checkpoint is not skipped or listed
+	if err := os.MkdirAll(filepath.Join(dir, "run_20260912T000003_uncheckpointed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. Directory with corrupt checkpoint is skipped
+	corruptDir := filepath.Join(dir, "run_20260912T000004_corrupt")
+	if err := os.MkdirAll(corruptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(corruptDir, "checkpoint.json"), []byte("{bad json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	list, skipped, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if skipped != 1 {
+		t.Errorf("skipped = %d, want 1", skipped)
+	}
+	if len(list) != 2 {
+		t.Fatalf("got %d runs, want 2", len(list))
+	}
+	if list[0].RunID != st2.RunID {
+		t.Errorf("first run = %s, want %s (newest first)", list[0].RunID, st2.RunID)
+	}
+	if list[1].RunID != st1.RunID {
+		t.Errorf("second run = %s, want %s", list[1].RunID, st1.RunID)
+	}
+	if list[0].Updated.IsZero() || list[1].Updated.IsZero() {
+		t.Error("Updated timestamp should be non-zero from WrittenAt")
 	}
 }

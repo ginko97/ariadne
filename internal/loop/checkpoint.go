@@ -67,7 +67,7 @@ type Summary struct {
 // returned rather than swallowed, because "some runs are unreadable" is
 // information and a silently shorter list is not.
 //
-// Ordered by mtime rather than by run id. Ids sort by creation and a
+// Ordered by written time rather than by run id. Ids sort by creation and a
 // conversation resumed today would sort under the day it began, which is the
 // opposite of what "find what I was working on" wants.
 func (s *Store) List() ([]Summary, int, error) {
@@ -85,15 +85,20 @@ func (s *Store) List() ([]Summary, int, error) {
 		if !e.IsDir() || !ValidRunID(e.Name()) {
 			continue
 		}
-		path := filepath.Join(s.Dir, e.Name(), "checkpoint.json")
-		fi, err := os.Stat(path)
+		cp, err := s.LoadCheckpoint(e.Name())
 		if err != nil {
-			continue // a run directory with no checkpoint yet is not an error
-		}
-		st, err := s.Load(e.Name())
-		if err != nil {
+			if errors.Is(err, ErrNoCheckpoint) {
+				continue // a run directory with no checkpoint yet is not an error
+			}
 			skipped++
 			continue
+		}
+		st := cp.State
+		updated := cp.WrittenAt
+		if updated.IsZero() {
+			if fi, err := os.Stat(filepath.Join(s.Dir, e.Name(), "checkpoint.json")); err == nil {
+				updated = fi.ModTime()
+			}
 		}
 		out = append(out, Summary{
 			RunID:    st.RunID,
@@ -103,11 +108,16 @@ func (s *Store) List() ([]Summary, int, error) {
 			Turns:    st.Turns(),
 			Messages: len(st.Messages),
 			Cost:     st.Cost,
-			Updated:  fi.ModTime(),
+			Updated:  updated,
 		})
 	}
 
-	sort.Slice(out, func(i, j int) bool { return out[i].Updated.After(out[j].Updated) })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Updated.Equal(out[j].Updated) {
+			return out[i].RunID > out[j].RunID
+		}
+		return out[i].Updated.After(out[j].Updated)
+	})
 	return out, skipped, nil
 }
 
@@ -165,8 +175,8 @@ func (s *Store) Save(st *State) error {
 	return nil
 }
 
-// Load reads the checkpoint for runID.
-func (s *Store) Load(runID string) (*State, error) {
+// LoadCheckpoint reads the checkpoint envelope for runID.
+func (s *Store) LoadCheckpoint(runID string) (*Checkpoint, error) {
 	if !ValidRunID(runID) {
 		return nil, fmt.Errorf("loop: refusing to load run id %q", runID)
 	}
@@ -190,6 +200,15 @@ func (s *Store) Load(runID string) (*State, error) {
 	}
 	if cp.State == nil {
 		return nil, fmt.Errorf("loop: checkpoint %s contains no state", runID)
+	}
+	return &cp, nil
+}
+
+// Load reads the checkpoint for runID and returns its state.
+func (s *Store) Load(runID string) (*State, error) {
+	cp, err := s.LoadCheckpoint(runID)
+	if err != nil {
+		return nil, err
 	}
 	return cp.State, nil
 }

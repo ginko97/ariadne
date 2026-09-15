@@ -502,3 +502,57 @@ func TestDeltaEventsResetOnUsageChunk(t *testing.T) {
 		t.Errorf("expected calc to be announced twice across responses, got %d times in:\n%s", n, body)
 	}
 }
+
+// A conversation resumed without an explicit model switch preserves its original
+// model rather than having it clobbered by the server's default model.
+func TestChatPreservesConversationModelOnSubsequentTurns(t *testing.T) {
+	s, ts := newTestServer(t, endResponse("turn 1"), endResponse("turn 2"))
+
+	// Create conversation with custom-model
+	evs1 := events(t, bodyOf(t, post(t, s, ts, `{"message":"hello","model":"custom-model"}`, nil)))
+	runID := evs1[len(evs1)-1].Data["run_id"].(string)
+
+	st1, err := s.Store.Load(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st1.Model != "custom-model" {
+		t.Fatalf("turn 1 model = %q, want custom-model", st1.Model)
+	}
+
+	// Turn 2 does not specify a model: must preserve custom-model, not revert to test-model
+	evs2 := events(t, bodyOf(t, post(t, s, ts, `{"run_id":"`+runID+`","message":"more"}`, nil)))
+	if got := evs2[len(evs2)-1].Data["model"]; got != "custom-model" {
+		t.Errorf("done event model = %v, want custom-model", got)
+	}
+
+	st2, err := s.Store.Load(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st2.Model != "custom-model" {
+		t.Errorf("saved model = %q, want custom-model preserved across turns", st2.Model)
+	}
+}
+
+// An explicit model in chatRequest switches the model for subsequent turns.
+func TestChatSwitchesModelWhenExplicitlyRequested(t *testing.T) {
+	s, ts := newTestServer(t, endResponse("turn 1"), endResponse("turn 2"))
+
+	evs1 := events(t, bodyOf(t, post(t, s, ts, `{"message":"hello"}`, nil)))
+	runID := evs1[len(evs1)-1].Data["run_id"].(string)
+
+	// Turn 2 explicitly requests a different model
+	evs2 := events(t, bodyOf(t, post(t, s, ts, `{"run_id":"`+runID+`","message":"switch","model":"switched-model"}`, nil)))
+	if got := evs2[len(evs2)-1].Data["model"]; got != "switched-model" {
+		t.Errorf("done event model = %v, want switched-model", got)
+	}
+
+	st2, err := s.Store.Load(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st2.Model != "switched-model" {
+		t.Errorf("saved model = %q, want switched-model", st2.Model)
+	}
+}

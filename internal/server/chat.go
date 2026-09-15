@@ -14,6 +14,7 @@ import (
 type chatRequest struct {
 	RunID   string `json:"run_id"` // empty starts a new conversation
 	Message string `json:"message"`
+	Model   string `json:"model,omitempty"`
 }
 
 // handleChat runs one turn and streams it.
@@ -33,6 +34,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "message is required")
 		return
 	}
+	req.Model = strings.TrimSpace(req.Model)
 	if req.RunID != "" && !sanitiseRunID(req.RunID) {
 		httpError(w, http.StatusBadRequest, "malformed run_id")
 		return
@@ -101,6 +103,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	agent, cleanup := s.NewAgent(runID, deltaEvents(out))
 	if cleanup != nil {
 		defer cleanup()
+	}
+
+	if req.Model != "" {
+		agent.Model = req.Model
+	} else if !fresh && state.Model != "" {
+		// A conversation resumed without an explicit model switch keeps the
+		// model it was already using, rather than silently adopting the
+		// server's startup model.
+		agent.Model = state.Model
 	}
 
 	// r.Context() on purpose: a closed tab cancels the turn, the loop's guards
