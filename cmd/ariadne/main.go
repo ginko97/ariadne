@@ -494,7 +494,7 @@ func cmdChat(args []string) int {
 			if models == nil {
 				models = llm.NewModelCache(*model)
 				if !strings.Contains(endpoint, "openrouter.ai") {
-					models.Unsupported = endpoint + " publishes no model list this can read"
+					models.Unsupported = noModelList(endpoint)
 				}
 			}
 			listModels(models, strings.TrimSpace(rest))
@@ -578,6 +578,20 @@ const chatCommands = `commands:
   //text          send a line that really does start with a slash
   Ctrl-D          exit
 `
+
+// noModelList explains why there is no catalogue, and how to get one.
+//
+// One function because the REPL and the browser hit the identical condition,
+// and they had drifted: the browser named the remedy and the REPL named only
+// the problem. A message that says what is wrong without saying what to do
+// leaves somebody staring at "1 of 1" wondering what they broke — which is
+// exactly what happened.
+func noModelList(endpoint string) string {
+	return fmt.Sprintf(
+		"%s publishes no model list this can read, so only the configured model "+
+			"is offered. For the full catalogue start with "+
+			"-base-url https://openrouter.ai/api/v1", endpoint)
+}
 
 // listModels prints the catalogue the picker in the browser already has.
 //
@@ -734,9 +748,7 @@ func cmdUI(args []string) int {
 	// answer is one model and a reason, not a longer list of wrong ones.
 	srv.Models = llm.NewModelCache(*model)
 	if !strings.Contains(*baseURL, "openrouter.ai") {
-		srv.Models.Unsupported = fmt.Sprintf(
-			"%s does not publish a model list this can read; showing the configured model. "+
-				"Use -base-url https://openrouter.ai/api/v1 for the full picker", *baseURL)
+		srv.Models.Unsupported = noModelList(*baseURL)
 	}
 
 	// Host is a constant, not a flag: the loopback guarantee is structural
