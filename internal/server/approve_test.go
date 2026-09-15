@@ -221,7 +221,7 @@ func TestGatedToolIsApprovedOverHTTP(t *testing.T) {
 
 	var called bool
 	s := New(store,
-		func(runID string, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
+		func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
 			return &loop.Agent{
 				Provider:        fake,
 				Model:           "test-model",

@@ -400,7 +400,7 @@ func cmdChat(args []string) int {
 	baseURL := fs.String("base-url", "", "OpenAI-compatible endpoint (fresh: default "+defaultBaseURL+"; resumed: checkpoint's unless overridden)")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
 	allow := fs.String("allow", "", "comma-separated tools this run may call (resume can only narrow it)")
-	workspace := fs.String("workspace", defaultWorkspace, "directory fetch and write_file are confined to")
+	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (fresh: default workspace; resumed: checkpoint's unless overridden)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "tools needing a yes on the terminal before each call (resume can only add)")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
@@ -473,6 +473,8 @@ func cmdChat(args []string) int {
 	workspaceDir := *workspace
 	if resuming {
 		workspaceDir = resolveWorkspace(*workspace, state)
+	} else if workspaceDir == "" {
+		workspaceDir = defaultWorkspace
 	}
 
 	// Started once for the session rather than per turn: a subprocess per
@@ -781,7 +783,7 @@ func cmdUI(args []string) int {
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
 	allow := fs.String("allow", "", "comma-separated tools a conversation may call (default: all)")
-	workspace := fs.String("workspace", defaultWorkspace, "directory fetch and write_file are confined to")
+	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (fresh: default workspace; resumed: checkpoint's unless overridden)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
 	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")
@@ -819,7 +821,7 @@ func cmdUI(args []string) int {
 
 	// One agent per request. The trace writer is opened here and closed by the
 	// returned cleanup, because a server has no end-of-main to defer to.
-	newAgent := func(runID string, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
+	newAgent := func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
 		tw, err := trace.NewFileWriter(runsDir, runID)
 		if err != nil {
 			// A run that cannot be traced is still a run; say so and continue,
@@ -827,12 +829,25 @@ func cmdUI(args []string) int {
 			fmt.Fprintf(os.Stderr, "warning: trace unavailable for %s: %v\n", runID, err)
 			tw = nil
 		}
+		
+		workspaceDir := *workspace
+		if state != nil {
+			workspaceDir = resolveWorkspace(*workspace, state)
+		} else if workspaceDir == "" {
+			workspaceDir = defaultWorkspace
+		}
+		
+		budgetVal := *budget
+		if state != nil {
+			budgetVal = resolveBudget(*budget, state)
+		}
+		
 		agent := newAgentFor(agentOpts{
 			Key: key, Model: *model, BaseURL: *baseURL, RunID: runID,
-			MaxSteps: *maxSteps, Budget: *budget,
+			MaxSteps: *maxSteps, Budget: budgetVal,
 			ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 			Allow:     splitList(*allow),
-			Workspace: *workspace,
+			Workspace: workspaceDir,
 			MCPTools:  mcpTools,
 			OnDelta:   onDelta,
 			// Fails closed and says why. Unreachable while no tool is gated,

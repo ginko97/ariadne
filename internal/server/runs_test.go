@@ -153,7 +153,7 @@ func TestRunsLimit(t *testing.T) {
 func TestRunsOnAnEmptyStore(t *testing.T) {
 	store := &loop.Store{Dir: filepath.Join(t.TempDir(), "never-created")}
 	s := New(store,
-		func(string, func(llm.Chunk)) (*loop.Agent, func()) { return nil, nil },
+		func(string, *loop.State, func(llm.Chunk)) (*loop.Agent, func()) { return nil, nil },
 		func() string { return "run_unused" },
 	)
 	ts := httptest.NewServer(s.Routes())

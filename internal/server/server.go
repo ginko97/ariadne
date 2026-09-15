@@ -34,7 +34,7 @@ import (
 // only implementation that matters. A single-shot command can defer that to
 // the end of main; a server cannot, because "the end" is when the process
 // stops and the handles accumulate one per turn until then. May be nil.
-type AgentFactory func(runID string, onDelta func(llm.Chunk)) (*loop.Agent, func())
+type AgentFactory func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func())
 
 // Server holds what outlives a request: the checkpoint store, how to build an
 // agent, and which runs are busy.

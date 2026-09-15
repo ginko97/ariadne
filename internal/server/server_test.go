@@ -32,7 +32,7 @@ func newTestServer(t *testing.T, responses ...llm.Response) (*Server, *httptest.
 
 	n := 0
 	s := New(store,
-		func(runID string, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
+		func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
 			return &loop.Agent{
 				Provider:   fake,
 				Model:      "test-model",
@@ -449,7 +449,7 @@ func TestChatClosesWhatTheFactoryOpened(t *testing.T) {
 
 	closed := 0
 	s := New(store,
-		func(runID string, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
+		func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
 			return &loop.Agent{Provider: fake, Model: "m", MaxSteps: 5, Checkpoint: store.Save},
 				func() { closed++ }
 		},

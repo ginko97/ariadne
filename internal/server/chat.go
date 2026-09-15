@@ -100,7 +100,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	out := &sseWriter{w: w, f: flusher}
 	out.event("start", map[string]any{"run_id": runID})
 
-	agent, cleanup := s.NewAgent(runID, deltaEvents(out))
+	agent, cleanup := s.NewAgent(runID, state, deltaEvents(out))
 	if cleanup != nil {
 		defer cleanup()
 	}
