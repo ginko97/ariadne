@@ -420,6 +420,24 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 			t.Errorf("status = %d, want 200", resp.StatusCode)
 		}
 	})
+
+	t.Run("case-insensitive localhost host", func(t *testing.T) {
+		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
+			r.Host = "Localhost:8080"
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+
+	t.Run("case-insensitive localhost origin", func(t *testing.T) {
+		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
+			r.Header.Set("Origin", "http://Localhost:3000")
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
 }
 
 // The factory's cleanup closes a trace file. A single-shot command defers that

@@ -171,3 +171,37 @@ func TestTranscriptRejectsUnknownAndMalformedIDs(t *testing.T) {
 		t.Errorf("malformed id gave %d, want 400", resp.StatusCode)
 	}
 }
+
+func TestTranscriptDistinguishesCompactionNoticesFromPrompts(t *testing.T) {
+	s, ts := newTestServer(t)
+
+	st := loop.NewState("run_compacted", "what is the capital of France?")
+	st.Messages[0].Blocks = append(st.Messages[0].Blocks, llm.Block{
+		Type: llm.BlockText,
+		Text: "[2 earlier messages have been dropped to stay within the context budget. What they contained:]\n- asked: hi\n- replied: hello",
+	})
+	st.Messages = append(st.Messages, llm.Message{
+		Role: llm.RoleAssistant,
+		Blocks: []llm.Block{{Type: llm.BlockText, Text: "Paris"}},
+	})
+	if err := s.Store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, got := getTranscript(t, ts, "run_compacted")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(got.Messages) != 3 {
+		t.Fatalf("got %d messages, want 3: %+v", len(got.Messages), got.Messages)
+	}
+	if got.Messages[0].Kind != "prompt" {
+		t.Errorf("entry 0 kind = %q, want prompt", got.Messages[0].Kind)
+	}
+	if got.Messages[1].Kind != "notice" {
+		t.Errorf("entry 1 kind = %q, want notice", got.Messages[1].Kind)
+	}
+	if got.Messages[2].Kind != "answer" {
+		t.Errorf("entry 2 kind = %q, want answer", got.Messages[2].Kind)
+	}
+}

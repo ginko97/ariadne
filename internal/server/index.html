@@ -26,6 +26,7 @@
   .prompt { align-self:flex-end; background:#8882; padding:.5rem .75rem; border-radius:.6rem; }
   .tool_call, .tool_result { color:var(--dim); font-family:ui-monospace,SFMono-Regular,monospace;
                              font-size:.82em; border-left:2px solid var(--edge); padding-left:.6rem; }
+  .notice { color:var(--dim); font-size:.85em; border-left:2px dashed var(--edge); padding-left:.6rem; }
   .is_error { color:var(--err); border-left-color:var(--err); }
   form { display:flex; gap:.5rem; padding:.75rem .9rem; border-top:1px solid var(--edge); }
   textarea { flex:1; resize:none; font:inherit; padding:.5rem; min-height:2.6rem; max-height:11rem; }
@@ -127,6 +128,7 @@ async function loadRuns() {
 }
 
 async function open(id) {
+  if (busy) return;
   const resp = await api('/api/runs/' + id);
   if (!resp.ok) { warn('Could not open that conversation.'); return; }
   const t = await resp.json();
@@ -148,6 +150,7 @@ function stats(turns, steps, cost) {
 }
 
 function newConversation() {
+  if (busy) return;
   runID = null;
   log.replaceChildren();
   statsEl.textContent = '';
@@ -179,12 +182,18 @@ async function loadModels() {
   } catch (e) { warn('Could not load the model list: ' + e.message); }
 }
 
+function setBusy(val) {
+  busy = val;
+  $('send').disabled = val;
+  $('new').disabled = val;
+}
+
 // EventSource cannot be used here: it only issues GET and cannot set headers,
 // and /api/chat is a POST behind a CSRF token because it spends money. So the
 // stream is read from the response body and framed by hand.
 async function send(text) {
   if (busy) return;
-  busy = true; $('send').disabled = true;
+  setBusy(true);
   warn('');
   entry('prompt', text);
 
@@ -196,69 +205,77 @@ async function send(text) {
     });
   } catch (e) {
     entry('tool_result', 'Could not reach ariadne: ' + e.message, 'is_error');
-    busy = false; $('send').disabled = false;
+    setBusy(false);
     return;
   }
 
   if (!resp.ok) {
     const { error } = await resp.json().catch(() => ({ error: 'request refused' }));
     entry('tool_result', error, 'is_error');
-    busy = false; $('send').disabled = false;
+    setBusy(false);
     return;
   }
 
   const reader = resp.body.getReader(), dec = new TextDecoder();
   let buf = '';
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    // Events are separated by a blank line; a partial one stays in the buffer
-    // until the rest of it arrives.
-    let i;
-    while ((i = buf.indexOf('\n\n')) !== -1) {
-      const block = buf.slice(0, i); buf = buf.slice(i + 2);
-      let name = '', data = '';
-      for (const line of block.split('\n')) {
-        if (line.startsWith('event: ')) name = line.slice(7);
-        else if (line.startsWith('data: ')) data = line.slice(6);
-      }
-      if (!name) continue;
-      let d = {};
-      try { d = JSON.parse(data); } catch {}
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      // Events are separated by a blank line; a partial one stays in the buffer
+      // until the rest of it arrives.
+      let i;
+      while ((i = buf.indexOf('\n\n')) !== -1) {
+        const block = buf.slice(0, i); buf = buf.slice(i + 2);
+        let name = '', data = '';
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event: ')) name = line.slice(7);
+          else if (line.startsWith('data: ')) data = line.slice(6);
+        }
+        if (!name) continue;
+        let d = {};
+        try { d = JSON.parse(data); } catch {}
 
-      if (name === 'start') runID = d.run_id;
-      else if (name === 'tool') entry('tool_call', '→ ' + d.name);
-      else if (name === 'token') {
-        if (!answer) answer = entry('answer', '');
-        answer.textContent += d.text;
-        log.scrollTop = log.scrollHeight;
-      } else if (name === 'done') {
-        // The streamed text and the final answer are the same words; replace
-        // rather than append, so a provider that does not stream still shows one.
-        if (!answer) answer = entry('answer', '');
-        answer.textContent = d.answer;
-        stats(d.turns, d.steps, d.cost);
-        selectModel(d.model);
-      } else if (name === 'error') {
-        entry('tool_result', d.error, 'is_error');
+        if (name === 'start') runID = d.run_id;
+        else if (name === 'tool') {
+          entry('tool_call', '→ ' + d.name);
+          answer = null;
+        } else if (name === 'token') {
+          if (!answer) answer = entry('answer', '');
+          answer.textContent += d.text;
+          log.scrollTop = log.scrollHeight;
+        } else if (name === 'done') {
+          // The streamed text and the final answer are the same words; replace
+          // rather than append, so a provider that does not stream still shows one.
+          if (!answer) answer = entry('answer', '');
+          answer.textContent = d.answer;
+          stats(d.turns, d.steps, d.cost);
+          selectModel(d.model);
+        } else if (name === 'error') {
+          entry('tool_result', d.error, 'is_error');
+          answer = null;
+        }
       }
     }
+  } catch (e) {
+    entry('tool_result', 'Stream interrupted: ' + e.message, 'is_error');
+  } finally {
+    setBusy(false);
+    loadRuns();
   }
-
-  busy = false; $('send').disabled = false;
-  loadRuns();
 }
 
 $('composer').onsubmit = e => {
   e.preventDefault();
+  if (busy) return;
   const t = $('input').value.trim();
   if (!t) return;
   $('input').value = '';
   send(t);
 };
 $('input').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('composer').requestSubmit(); }
 });
 $('new').onclick = newConversation;
 

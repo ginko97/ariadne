@@ -118,6 +118,9 @@ func entries(msgs []llm.Message) []transcriptEntry {
 				kind := "answer"
 				if m.Role == llm.RoleUser {
 					kind = "prompt"
+					if strings.HasPrefix(b.Text, "[") && strings.Contains(b.Text, "earlier messages have been dropped") {
+						kind = "notice"
+					}
 				}
 				out = append(out, transcriptEntry{Kind: kind, Text: b.Text})
 
