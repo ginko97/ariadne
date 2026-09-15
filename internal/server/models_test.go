@@ -172,6 +172,32 @@ func TestModelsFallsBackToTheConfiguredModel(t *testing.T) {
 	}
 }
 
+// Pointed at a provider that is not OpenRouter, the picker offers the
+// configured model and says why — and never reaches the network at all.
+// Listing OpenRouter's catalogue here would fill the dropdown with namespaced
+// ids (anthropic/…, openai/…) that the configured endpoint rejects: every row
+// a model that cannot be selected.
+func TestModelsUnsupportedProviderOffersTheConfiguredModelOnly(t *testing.T) {
+	ts, hits := upstream(t, modelsFixture, http.StatusOK)
+	m := newCache(t, ts.URL)
+	m.Unsupported = "api.example.com publishes no readable model list"
+
+	rows, source, warning := m.Get(context.Background())
+	if source != "fallback" {
+		t.Errorf("source = %q, want fallback", source)
+	}
+	if len(rows) != 1 || rows[0].ID != "configured/model" {
+		t.Errorf("rows = %v, want just the configured model", rows)
+	}
+	if warning != m.Unsupported {
+		t.Errorf("warning = %q, want the reason this provider has no list", warning)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("hit upstream %d times, want 0 — a list was fetched from a gateway "+
+			"this process is not talking to", hits.Load())
+	}
+}
+
 // A 200 carrying nothing usable is a failure. Treating it as success would
 // overwrite a good cache with an empty picker.
 func TestModelsTreatsAnEmptyListAsAFailure(t *testing.T) {

@@ -51,6 +51,18 @@ type ModelCache struct {
 	Client   *http.Client
 	Fallback string // the configured -model, used before any fetch has succeeded
 
+	// Unsupported, when set, is why this endpoint has no model list — it is
+	// not OpenRouter. The picker then offers the configured model and says so.
+	//
+	// Listing OpenRouter's catalogue while pointed somewhere else would be
+	// worse than listing nothing: the ids are gateway-namespaced
+	// (anthropic/…, openai/…) and the endpoint would reject every one of them,
+	// so every row in the picker would be a model that cannot be selected.
+	// Prices and the tool-capability filter are OpenRouter extensions too, so
+	// there is no smaller version of this list to show elsewhere — only a less
+	// correct one.
+	Unsupported string
+
 	mu      sync.Mutex
 	rows    []ModelRow
 	fetched time.Time
@@ -78,6 +90,10 @@ func (m *ModelCache) Get(ctx context.Context) (rows []ModelRow, source string, w
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if m.Unsupported != "" {
+		return m.fallbackRows(), "fallback", m.Unsupported
+	}
+
 	if m.rows != nil && time.Since(m.fetched) < m.ttl() {
 		return m.rows, "cache", ""
 	}
@@ -100,8 +116,17 @@ func (m *ModelCache) Get(ctx context.Context) (rows []ModelRow, source string, w
 	if m.Fallback == "" {
 		return []ModelRow{}, "fallback", "no model list and no configured model: " + m.lastErr
 	}
-	return []ModelRow{{ID: m.Fallback, Name: m.Fallback}}, "fallback",
+	return m.fallbackRows(), "fallback",
 		"could not reach the model list, offering the configured model only: " + m.lastErr
+}
+
+// fallbackRows is the configured model alone: the one model known to work,
+// because every turn in this process already uses it.
+func (m *ModelCache) fallbackRows() []ModelRow {
+	if m.Fallback == "" {
+		return []ModelRow{}
+	}
+	return []ModelRow{{ID: m.Fallback, Name: m.Fallback}}
 }
 
 func (m *ModelCache) ttl() time.Duration {

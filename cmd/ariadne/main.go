@@ -631,7 +631,18 @@ func cmdUI(args []string) int {
 	srv := server.New(store, newAgent, newRunID)
 	// The picker's fallback is the model this process was started with: the one
 	// model known to work, because every turn here already uses it.
+	//
+	// The list itself only exists for OpenRouter. Pricing and the
+	// tool-capability filter are extensions of that gateway, and its model ids
+	// are namespaced for it — so offering that catalogue while pointed at
+	// api.openai.com would fill the picker with ids the endpoint rejects. The
+	// answer is one model and a reason, not a longer list of wrong ones.
 	srv.Models = server.NewModelCache(*model)
+	if !strings.Contains(*baseURL, "openrouter.ai") {
+		srv.Models.Unsupported = fmt.Sprintf(
+			"%s does not publish a model list this can read; showing the configured model. "+
+				"Use -base-url https://openrouter.ai/api/v1 for the full picker", *baseURL)
+	}
 
 	// Host is a constant, not a flag: the loopback guarantee is structural
 	// rather than something an operator can mistype into 0.0.0.0.
