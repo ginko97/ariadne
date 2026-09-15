@@ -237,3 +237,36 @@ func TestModelsEndpointNeverReturnsAnError(t *testing.T) {
 		t.Error("no warning on a degraded response")
 	}
 }
+
+// Upstream failures must enter a cooldown rather than blocking every subsequent
+// request for the full network timeout.
+func TestModelsFailureCooldownPreventsHammeringUpstream(t *testing.T) {
+	ts, hits := upstream(t, "", http.StatusInternalServerError)
+	m := newCache(t, ts.URL)
+	m.TTL = 50 * time.Millisecond
+
+	// First call fails and records failedAt.
+	_, source1, _ := m.Get(context.Background())
+	if source1 != "fallback" {
+		t.Fatalf("first call source = %q, want fallback", source1)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("hits = %d, want 1", hits.Load())
+	}
+
+	// Immediate second call is inside cooldown: must not hit upstream again.
+	_, source2, _ := m.Get(context.Background())
+	if source2 != "fallback" {
+		t.Fatalf("second call source = %q, want fallback", source2)
+	}
+	if hits.Load() != 1 {
+		t.Errorf("hits = %d inside cooldown, want 1 — upstream was hammered again", hits.Load())
+	}
+
+	// After cooldown expires, the next call attempts a refresh again.
+	time.Sleep(60 * time.Millisecond)
+	_, _, _ = m.Get(context.Background())
+	if hits.Load() != 2 {
+		t.Errorf("hits = %d after cooldown expired, want 2", hits.Load())
+	}
+}

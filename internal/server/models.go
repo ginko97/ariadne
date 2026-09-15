@@ -63,10 +63,11 @@ type ModelCache struct {
 	// correct one.
 	Unsupported string
 
-	mu      sync.Mutex
-	rows    []ModelRow
-	fetched time.Time
-	lastErr string
+	mu       sync.Mutex
+	rows     []ModelRow
+	fetched  time.Time
+	failedAt time.Time
+	lastErr  string
 }
 
 func NewModelCache(fallback string) *ModelCache {
@@ -98,11 +99,24 @@ func (m *ModelCache) Get(ctx context.Context) (rows []ModelRow, source string, w
 		return m.rows, "cache", ""
 	}
 
+	// Do not hammer upstream repeatedly when it is failing.
+	if !m.failedAt.IsZero() && time.Since(m.failedAt) < m.cooldown() {
+		if m.rows != nil {
+			return m.rows, "cache", "refresh failed, showing the last list: " + m.lastErr
+		}
+		if m.Fallback == "" {
+			return []ModelRow{}, "fallback", "no model list and no configured model: " + m.lastErr
+		}
+		return m.fallbackRows(), "fallback",
+			"could not reach the model list, offering the configured model only: " + m.lastErr
+	}
+
 	fetched, err := m.fetch(ctx)
 	if err == nil {
-		m.rows, m.fetched, m.lastErr = fetched, time.Now(), ""
+		m.rows, m.fetched, m.failedAt, m.lastErr = fetched, time.Now(), time.Time{}, ""
 		return m.rows, "live", ""
 	}
+	m.failedAt = time.Now()
 	m.lastErr = err.Error()
 
 	// Stale beats absent. An expired list is still a list of models that
@@ -127,6 +141,16 @@ func (m *ModelCache) fallbackRows() []ModelRow {
 		return []ModelRow{}
 	}
 	return []ModelRow{{ID: m.Fallback, Name: m.Fallback}}
+}
+
+const failureCooldown = 1 * time.Minute
+
+func (m *ModelCache) cooldown() time.Duration {
+	cd := failureCooldown
+	if ttl := m.ttl(); ttl < cd {
+		cd = ttl
+	}
+	return cd
 }
 
 func (m *ModelCache) ttl() time.Duration {
