@@ -140,10 +140,14 @@ async function open(id) {
 }
 
 function stats(turns, steps, cost) {
-  // Cost is only reported by gateways that price their own calls. Zero from a
-  // provider that does not is "unknown", not "free", so it is not shown as a
-  // number that looks measured.
-  const money = cost > 0 ? ` · $${cost.toFixed(4)}` : '';
+  // Three states, and they must not look alike. A provider that does not price
+  // its own calls reports nothing, which is "unknown" rather than "free", so it
+  // shows no figure at all. A real cost below the rounding floor is not free
+  // either — two steps on a cheap model come to about $0.00002 — and printing
+  // $0.0000 for it is the exact string this distinction exists to avoid.
+  const money = cost > 0
+    ? (cost < 0.0001 ? ' · <$0.0001' : ` · $${cost.toFixed(4)}`)
+    : '';
   statsEl.textContent = runID
     ? `${turns} turn${turns === 1 ? '' : 's'} · ${steps} step${steps === 1 ? '' : 's'}${money}`
     : '';
