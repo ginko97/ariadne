@@ -502,6 +502,10 @@ func cmdChat(args []string) int {
 			listModels(models, strings.TrimSpace(rest))
 			continue
 		}
+		if line == "/help" || line == "/?" {
+			fmt.Fprint(os.Stderr, chatCommands)
+			continue
+		}
 		if line == "/model" {
 			current := agent.Model
 			if state != nil && state.Model != "" {
@@ -524,6 +528,20 @@ func cmdChat(args []string) int {
 			}
 			agent.Model = newModel
 			fmt.Fprintf(os.Stderr, "model set to %s, takes effect next turn\n", agent.Model)
+			continue
+		}
+
+		// A line meant as a command must not become a prompt. Sending /model-list
+		// to the provider spends a request to be told the model has no tool for
+		// listing models, which is both true and useless — and the typo is
+		// invisible, because the reply reads like an ordinary refusal.
+		//
+		// Escaped with a leading double slash, so a question that genuinely
+		// starts with one — about /etc/hosts, or /api/chat — is still askable.
+		if strings.HasPrefix(line, "//") {
+			line = line[1:]
+		} else if strings.HasPrefix(line, "/") {
+			fmt.Fprintf(os.Stderr, "unknown command %q\n%s", strings.Fields(line)[0], chatCommands)
 			continue
 		}
 
@@ -550,6 +568,17 @@ func cmdChat(args []string) int {
 	}
 	return exitOK
 }
+
+// chatCommands is what the REPL answers to, printed on /help and on a typo.
+// One constant, so the two places that show it cannot disagree.
+const chatCommands = `commands:
+  /models [text]  list tool-capable models, filtered by substring
+  /model <id>     switch model starting next turn
+  /model          show the current model
+  /help           this list
+  //text          send a line that really does start with a slash
+  Ctrl-D          exit
+`
 
 // listModels prints the catalogue the picker in the browser already has.
 //
