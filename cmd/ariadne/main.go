@@ -42,9 +42,19 @@ import (
 )
 
 const (
-	defaultModel   = "gemini-2.5-flash"
-	defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
-	runsDir        = "runs"
+	// defaultModel belongs to defaultBaseURL, and the pair is the point: the two
+	// flags default independently, so a bare id aimed at a gateway that
+	// namespaces everything is a mismatch nobody asked for. OpenRouter resolved
+	// "gemini-2.5-flash" to "google/gemini-2.5-flash" silently — visible only
+	// because the served model is now recorded — and a stricter endpoint would
+	// have refused it outright.
+	defaultModel = "gemini-2.5-flash"
+	// defaultOpenRouterModel is this project's pinned eval baseline, chosen by
+	// measurement rather than from a price table: 6/6 on the task set at
+	// $0.000031 a task, and the cheapest model that actually called the tool.
+	defaultOpenRouterModel = "deepseek/deepseek-v4-flash-0731"
+	defaultBaseURL         = "https://generativelanguage.googleapis.com/v1beta/openai"
+	runsDir                = "runs"
 	// Loopback only, and the port is the only part an operator can change:
 	// a --port int cannot be spelled 0.0.0.0. Settled 2026-09-10.
 	defaultPort  = 7357
@@ -149,10 +159,23 @@ environment:
 `)
 }
 
+// defaultModelFor picks a model that belongs to the endpoint being used.
+//
+// Explicit flag beats ARIADNE_MODEL beats this, so nothing anybody typed is
+// overridden — it only decides what a bare command means. A gateway that
+// namespaces its ids has no use for a bare one, and the reverse is equally
+// true.
+func defaultModelFor(baseURL string) string {
+	if strings.Contains(baseURL, "openrouter.ai") {
+		return defaultOpenRouterModel
+	}
+	return defaultModel
+}
+
 func cmdRun(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	model := fs.String("model", envOr("ARIADNE_MODEL", defaultModel), "model id")
+	model := fs.String("model", envOr("ARIADNE_MODEL", ""), "model id (default depends on -base-url)")
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
 	allow := fs.String("allow", "", "comma-separated tools this run may call (default: all)")
@@ -165,6 +188,10 @@ func cmdRun(args []string) int {
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
+	}
+
+	if *model == "" {
+		*model = defaultModelFor(*baseURL)
 	}
 
 	task := strings.TrimSpace(strings.Join(fs.Args(), " "))
@@ -343,7 +370,7 @@ func cmdResume(args []string) int {
 func cmdChat(args []string) int {
 	fs := flag.NewFlagSet("chat", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	model := fs.String("model", envOr("ARIADNE_MODEL", defaultModel), "model id")
+	model := fs.String("model", envOr("ARIADNE_MODEL", ""), "model id (default depends on -base-url)")
 	baseURL := fs.String("base-url", "", "OpenAI-compatible endpoint (fresh: default "+defaultBaseURL+"; resumed: checkpoint's unless overridden)")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
 	allow := fs.String("allow", "", "comma-separated tools this run may call (resume can only narrow it)")
@@ -357,6 +384,7 @@ func cmdChat(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
+
 	if len(fs.Args()) > 1 {
 		fmt.Fprintf(os.Stderr, "ariadne chat: unexpected arguments %v (flags must come before the run id)\n", fs.Args()[1:])
 		return exitUsage
@@ -402,6 +430,13 @@ func cmdChat(args []string) int {
 		endpoint = resolveEndpoint(*baseURL, state)
 	} else if endpoint == "" {
 		endpoint = envOr("ARIADNE_BASE_URL", defaultBaseURL)
+	}
+
+	// After the endpoint is known, because that is what the default depends on.
+	// A resumed conversation already recorded its own model, so this only
+	// decides what a fresh one starts with.
+	if *model == "" {
+		*model = defaultModelFor(endpoint)
 	}
 
 	key, envName := apiKey(endpoint)
@@ -693,7 +728,7 @@ func cmdUI(args []string) int {
 	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	port := fs.Int("port", envInt("ARIADNE_PORT", defaultPort), "loopback port to listen on (0: pick a free one)")
-	model := fs.String("model", envOr("ARIADNE_MODEL", defaultModel), "model id")
+	model := fs.String("model", envOr("ARIADNE_MODEL", ""), "model id (default depends on -base-url)")
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
 	allow := fs.String("allow", "", "comma-separated tools a conversation may call (default: all)")
@@ -703,6 +738,10 @@ func cmdUI(args []string) int {
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
+	}
+
+	if *model == "" {
+		*model = defaultModelFor(*baseURL)
 	}
 	if err := checkNames(newRegistry("").Defs(), splitList(*allow)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
@@ -1089,7 +1128,7 @@ func apiKey(baseURL string) (key, envName string) {
 func cmdEval(args []string) int {
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	models := fs.String("models", envOr("ARIADNE_MODEL", defaultModel), "comma-separated model ids")
+	models := fs.String("models", envOr("ARIADNE_MODEL", ""), "comma-separated model ids (default depends on -base-url)")
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	tasksPath := fs.String("tasks", "testdata/tasks.json", "task set")
 	minPass := fs.Float64("min-pass-rate", 0, "exit non-zero if any model scores below this (0 = report only)")
@@ -1101,6 +1140,10 @@ func cmdEval(args []string) int {
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
+	}
+
+	if *models == "" {
+		*models = defaultModelFor(*baseURL)
 	}
 
 	tasks, err := eval.LoadTasks(*tasksPath)
