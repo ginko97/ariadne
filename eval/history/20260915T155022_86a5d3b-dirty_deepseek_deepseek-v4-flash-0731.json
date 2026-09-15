@@ -1,0 +1,317 @@
+{
+  "model": "deepseek/deepseek-v4-flash-0731",
+  "commit": "86a5d3b-dirty",
+  "when": "2026-09-15T15:50:22.61076Z",
+  "results": [
+    {
+      "task_id": "pct-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001083368,
+      "answer": "15% of 240 is 36.",
+      "run_id": "run_20260915T154522_c6215c_pct-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "div-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001064492,
+      "answer": "7 divided by 2 is **3.5**.",
+      "run_id": "run_20260915T154616_64eaa5_div-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "mod-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001125124,
+      "answer": "The remainder when 10 is divided by 3 is **1**.",
+      "run_id": "run_20260915T154630_fc311b_mod-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "chain-01",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00018201039999999997,
+      "answer": "15% of 240 = 36. Taking 20% of that: 36 × 0.20 = 7.2.\n\n**Final answer: 7.2**",
+      "run_id": "run_20260915T154638_b17b38_chain-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "parens-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00006786416,
+      "answer": "The answer is 27.",
+      "run_id": "run_20260915T154644_97fb60_parens-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "exact-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001110824,
+      "answer": "The exact answer is **1**.",
+      "run_id": "run_20260915T154647_3b2544_exact-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "pct-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001102244,
+      "answer": "35% of 880 is **308**.",
+      "run_id": "run_20260915T154652_0669dc_pct-02",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "pct-03",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001200056,
+      "answer": "**1100**\n\nA 12% reduction means the price is multiplied by (1 − 0.12) = 0.88: 1250 × 0.88 = 1100.",
+      "run_id": "run_20260915T154658_ca16d3_pct-03",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "div-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00008135504,
+      "answer": "22 divided by 8 is **2.75**.",
+      "run_id": "run_20260915T154704_9f836a_div-02",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "div-03",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001071064,
+      "answer": "1 divided by 8 is **0.125**.",
+      "run_id": "run_20260915T154710_b98af2_div-03",
+      "provider": "Relace"
+    },
+    {
+      "task_id": "mod-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.000115544,
+      "answer": "The remainder when 100 is divided by 7 is **2**.",
+      "run_id": "run_20260915T154716_493416_mod-02",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "prec-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001091948,
+      "answer": "The answer is 14.",
+      "run_id": "run_20260915T154722_2ee58c_prec-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "prec-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001078788,
+      "answer": "The answer is **25**.",
+      "run_id": "run_20260915T154726_474d29_prec-02",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "neg-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001064492,
+      "answer": "15 - 40 = **-25**.",
+      "run_id": "run_20260915T154746_652258_neg-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "big-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001067352,
+      "answer": "37 * 24 = 888.",
+      "run_id": "run_20260915T154750_5802f0_big-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "dec-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001127412,
+      "answer": "The calc tool evaluated `0.1 + 0.2` and returned **0.3**.",
+      "run_id": "run_20260915T154755_f731db_dec-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "chain-02",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00018568320000000003,
+      "answer": "Final answer: 84",
+      "run_id": "run_20260915T154758_e0476a_chain-02",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "chain-03",
+      "pass": true,
+      "steps": 4,
+      "cost_usd": 0.00020239856,
+      "answer": "Final answer: 25",
+      "run_id": "run_20260915T154815_135e52_chain-03",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "chain-04",
+      "pass": true,
+      "steps": 4,
+      "cost_usd": 0.0001341776,
+      "answer": "The final answer is 16.",
+      "run_id": "run_20260915T154826_db781b_chain-04",
+      "provider": "Relace"
+    },
+    {
+      "task_id": "frac-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001081652,
+      "answer": "2/3 × 3 = **2** (exactly).",
+      "run_id": "run_20260915T154831_2687b9_frac-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "frac-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00010582000000000001,
+      "answer": "7/8 = 0.875",
+      "run_id": "run_20260915T154836_25742a_frac-02",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "round-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001051232,
+      "answer": "10/4 = **2.5**",
+      "run_id": "run_20260915T154840_bdcda7_round-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "zero-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00006420335999999999,
+      "answer": "0 * 12345 = **0**",
+      "run_id": "run_20260915T154854_14e7b2_zero-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "pct-04",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00010908040000000001,
+      "answer": "200% of 45 is **90**.",
+      "run_id": "run_20260915T154858_f7df05_pct-04",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "hard-chain-01",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.000068448,
+      "answer": "The final amount is **985.68** (37 × 24 = 888, then 888 × 1.11 = 985.68).",
+      "run_id": "run_20260915T154902_ab93f3_hard-chain-01",
+      "provider": "Relace"
+    },
+    {
+      "task_id": "hard-chain-02",
+      "pass": true,
+      "steps": 4,
+      "cost_usd": 0.00021103576000000004,
+      "answer": "The final amount after three successive 5% increases starting from 1000 is **1157.625**.",
+      "run_id": "run_20260915T154917_9f38cd_hard-chain-02",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "hard-chain-03",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.0001846416,
+      "answer": "The average of 17, 23, 41, and 19 is **25**.",
+      "run_id": "run_20260915T154931_01550e_hard-chain-03",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "hard-word-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.00008501584,
+      "answer": "The train's average speed is **70 km per hour** (245 km ÷ 3.5 hours = 70 km/h).",
+      "run_id": "run_20260915T154939_529e78_hard-word-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "hard-word-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001307592,
+      "answer": "The area minus the perimeter is **71**.\n\n- Area = 14.5 × 8 = 116 m²\n- Perimeter = 2 × (14.5 + 8) = 45 m\n- 116 − 45 = 71",
+      "run_id": "run_20260915T154944_fa5987_hard-word-02",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "hard-word-03",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00018018,
+      "answer": "Each person pays **74.50** in total (62.50 split share + 12 flat tip).",
+      "run_id": "run_20260915T154951_97d8cc_hard-word-03",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "hard-order-01",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.0001204632,
+      "answer": "100 - 20 * 3 + 5 = **45** (multiplication is performed first: 20 × 3 = 60, then 100 − 60 + 5 = 45).",
+      "run_id": "run_20260915T154957_a60562_hard-order-01",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "hard-order-02",
+      "pass": true,
+      "steps": 2,
+      "cost_usd": 0.000071556,
+      "answer": "The result is 640.",
+      "run_id": "run_20260915T155003_06e80c_hard-order-02",
+      "provider": "Relace"
+    },
+    {
+      "task_id": "hard-frac-01",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.000082608,
+      "answer": "5/8 = 0.625, then adding 3/8 gives the exact answer 1 (i.e., 8/8).",
+      "run_id": "run_20260915T155006_43314e_hard-frac-01",
+      "provider": "Relace"
+    },
+    {
+      "task_id": "hard-pct-01",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00015616384000000002,
+      "answer": "The final value is **450**.\n\n(480 reduced by 25% = 360, then increased by 25% = 450.)",
+      "run_id": "run_20260915T155011_46cab5_hard-pct-01",
+      "provider": "StreamLake"
+    }
+  ],
+  "passed": 34,
+  "total": 34,
+  "pass_rate": 1,
+  "total_cost_usd": 0.004071012959999999
+}
