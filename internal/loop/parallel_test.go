@@ -505,3 +505,62 @@ func TestParallelOrderIsCheckpointed(t *testing.T) {
 		t.Errorf("last checkpoint = %v, want %v — the sorted order never reached disk", lastSaved, want)
 	}
 }
+
+// A resumed batch finishes one call at a time, so len(calls) is 1 even though
+// the results message holds several — which is exactly when the ordering can
+// already be wrong. The interrupted parallel batch wrote its results in
+// completion order and crashed before the sort ran; guarding the sort on "did
+// this invocation have more than one call" skips it precisely there.
+func TestResumeSortsAResultsMessageItDidNotFill(t *testing.T) {
+	s := NewState("run_resume_sort", "three things")
+	s.Model = "test"
+
+	// The assistant asked for a, b, c in that order.
+	s.Messages = append(s.Messages, llm.Message{
+		Role: llm.RoleAssistant,
+		Blocks: []llm.Block{
+			{Type: llm.BlockToolUse, ID: "a", Name: "calc", Args: json.RawMessage(`{}`)},
+			{Type: llm.BlockToolUse, ID: "b", Name: "calc", Args: json.RawMessage(`{}`)},
+			{Type: llm.BlockToolUse, ID: "c", Name: "calc", Args: json.RawMessage(`{}`)},
+		},
+	})
+	// b and a finished, in that order, before the crash. c never ran.
+	s.Messages = append(s.Messages, llm.Message{
+		Role: llm.RoleUser,
+		Blocks: []llm.Block{
+			{Type: llm.BlockToolResult, CallID: "b", Content: "B"},
+			{Type: llm.BlockToolResult, CallID: "a", Content: "A"},
+		},
+	})
+
+	a := &Agent{
+		Model:    "test",
+		MaxSteps: 5,
+		RunTool: func(_ context.Context, c llm.ToolCall) (llm.ToolResult, error) {
+			return llm.ToolResult{Content: c.ID}, nil
+		},
+	}
+
+	pending := s.pendingToolCalls()
+	if len(pending) != 1 || pending[0].ID != "c" {
+		t.Fatalf("pending = %+v, want just c", pending)
+	}
+	if err := a.runCalls(context.Background(), s, pending); err != nil {
+		t.Fatal(err)
+	}
+
+	var order []string
+	for _, b := range s.Messages[len(s.Messages)-1].Blocks {
+		order = append(order, b.CallID)
+	}
+	want := []string{"a", "b", "c"}
+	if len(order) != 3 {
+		t.Fatalf("results = %v, want three", order)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("results in %v, want %v — the message the resume did not fill "+
+				"was left in completion order", order, want)
+		}
+	}
+}

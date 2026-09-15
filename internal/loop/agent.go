@@ -432,7 +432,15 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 
 	// Canonical ordering: sort results message blocks to match the assistant turn's
 	// tool call order, regardless of parallel completion order.
-	if i > 0 && len(s.Messages[i].Blocks) > 1 && i < len(s.Messages) {
+	// Guarded on the *message*, not on this call's batch. A resume finishes one
+	// call at a time, so len(calls) is 1 while the message already holds the
+	// results an interrupted parallel batch wrote in completion order — which is
+	// the case that most needs sorting and the one a batch-sized guard skips.
+	//
+	// i indexes a message that was appended above and messages are only ever
+	// appended, so no bounds check: the previous one sat after the index it
+	// claimed to guard, which made it decoration rather than protection.
+	if i > 0 && len(s.Messages[i].Blocks) > 1 {
 		assistant := s.Messages[i-1]
 		pos := make(map[string]int)
 		idx := 0
