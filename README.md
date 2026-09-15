@@ -183,6 +183,32 @@ The full write-up, with the traces and what each control costs, is in
 
 ---
 
+## A conversation is a run you keep adding to
+
+```bash
+ariadne chat                       # terminal
+ariadne ui                         # browser, on 127.0.0.1
+```
+
+A chat here is not a session. It is a run with more messages appended, so it is
+checkpointed per tool call, resumable after a crash, compacted, cost-capped and traced —
+and `ariadne traces` lists conversations without being taught to, because they were never
+a separate kind of thing.
+
+The two interfaces are the same conversations. Start one in the browser, close the tab,
+pick it up in the terminal with `ariadne chat <run-id>`, and the history is there; neither
+side can tell which one wrote a turn, because there is nothing to tell apart.
+
+`ariadne ui` binds loopback only and serves one embedded page — no Node, no build step,
+nothing to install. It offers the model list from OpenRouter filtered to models that can
+actually call tools, and a model may change between turns but never inside one.
+
+What it does **not** do yet: there is no approval route over HTTP, so the browser cannot
+write memory. That half did not ship, and the release was renamed rather than its exit
+test rewritten.
+
+---
+
 ## Also in here
 
 - **Parallel tool calls** with serial pre-flight gating, so interactive approval prompts
@@ -242,10 +268,15 @@ all.
 ```bash
 go build ./cmd/ariadne
 
+ariadne chat                          # talk in the terminal
+ariadne chat <run-id>                 # pick a conversation back up
+ariadne ui                            # talk in a browser
+
 ariadne run "What is 15% of 240?"
 ariadne run -stream -allow calc,fetch -approve write_file "..."
 ariadne run -context-budget 8000 -remember "..."
 ariadne resume <run-id>
+ariadne run -workspace ~/code/project "..."   # point the file tools somewhere
 ariadne eval   -models a,b -min-pass-rate 0.9
 ariadne traces --stats
 ariadne traces --kind tool_denied,approval
@@ -264,16 +295,17 @@ Set `ARIADNE_API_KEY` (or `OPENROUTER_API_KEY`, or `GEMINI_API_KEY`) in the envi
 in a `.env` at the repo root. `runs/` holds checkpoints and traces and is not committed.
 
 ```bash
-make check     # gofmt, vet in both build modes, tests, and two audits
+make check     # gofmt, vet in both build modes, tests, and three audits
 make eval      # score the task set against the pinned baseline model
 make workspace # stage the fetchable fixtures the postmortem is written against
 go test ./... -tags live -run TestLive -v   # real API calls; needs a key
 ```
 
-`make check` includes two audits that exist because both failures actually happened here:
-one catches a `.go` file silently excluded by `.gitignore`, the other catches a live test
-with no build tag making real API calls on every `go test ./...`. Neither is caught by
-`go build`, `go vet`, or a green test run.
+`make check` includes three audits that exist because all three failures actually happened
+here: one catches a `.go` file silently excluded by `.gitignore`, one catches a live test
+with no build tag making real API calls on every `go test ./...`, and one catches a doc
+comment reattached to the wrong declaration by a function inserted between them. None of
+the three is caught by `go build`, `go vet`, or a green test run.
 
 ---
 
