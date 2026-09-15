@@ -31,6 +31,14 @@ var ErrNoCheckpoint = errors.New("loop: no checkpoint for that run")
 // store via filepath.Join.
 var runIDPattern = regexp.MustCompile(`^run_[0-9A-Za-z_-]+$`)
 
+// ValidRunID reports whether id is safe and well-formed as a run identifier.
+func ValidRunID(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	return runIDPattern.MatchString(id)
+}
+
 // Save writes st atomically to <Dir>/<RunID>/checkpoint.json.
 //
 // Temp file, Sync, rename. Rename is atomic over an existing file on both
@@ -39,7 +47,7 @@ var runIDPattern = regexp.MustCompile(`^run_[0-9A-Za-z_-]+$`)
 // entry, not the bytes, so without it a power cut can leave a perfectly-renamed
 // empty file — which looks valid, and is worse than no checkpoint at all.
 func (s *Store) Save(st *State) error {
-	if !runIDPattern.MatchString(st.RunID) {
+	if !ValidRunID(st.RunID) {
 		return fmt.Errorf("loop: refusing to save run id %q", st.RunID)
 	}
 
@@ -87,7 +95,7 @@ func (s *Store) Save(st *State) error {
 
 // Load reads the checkpoint for runID.
 func (s *Store) Load(runID string) (*State, error) {
-	if !runIDPattern.MatchString(runID) {
+	if !ValidRunID(runID) {
 		return nil, fmt.Errorf("loop: refusing to load run id %q", runID)
 	}
 

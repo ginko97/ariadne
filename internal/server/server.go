@@ -143,6 +143,7 @@ func isLoopbackHost(host string) bool {
 	if err != nil {
 		h = host // no port
 	}
+	h = strings.Trim(h, "[]")
 	if h == "localhost" {
 		return true
 	}
@@ -170,8 +171,5 @@ func httpError(w http.ResponseWriter, code int, msg string) {
 // it is here so a bad id is a 400 naming the field rather than a 500 from the
 // layer below.
 func sanitiseRunID(id string) bool {
-	if id == "" || len(id) > 128 {
-		return false
-	}
-	return !strings.ContainsAny(id, `/\.`)
+	return loop.ValidRunID(id)
 }

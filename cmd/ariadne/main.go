@@ -445,15 +445,16 @@ func cmdChat(args []string) int {
 		}
 	}
 
+	stdinReader := bufio.NewReader(os.Stdin)
+
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: startModel, BaseURL: endpoint, RunID: runID,
 		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: splitList(*approve),
-		Store: store, Trace: tw,
+		ApproveFn: approveOnTerminalReader(os.Stdin, stdinReader),
+		Store:     store, Trace: tw,
 	})
-
-	in := bufio.NewScanner(os.Stdin)
 
 	if resuming {
 		fmt.Fprintf(os.Stderr, "chat %s  model=%s  from step %d (%d messages)  (Ctrl-D to exit)\n",
@@ -472,11 +473,15 @@ func cmdChat(args []string) int {
 		}
 
 		fmt.Fprint(os.Stderr, "> ")
-		if !in.Scan() {
-			break // Ctrl-D
+		line, err := stdinReader.ReadString('\n')
+		if err != nil && (len(line) == 0 || !errors.Is(err, io.EOF)) {
+			break // Ctrl-D or error
 		}
-		line := strings.TrimSpace(in.Text())
+		line = strings.TrimSpace(line)
 		if line == "" {
+			if err != nil {
+				break
+			}
 			continue
 		}
 		// Exact match, or the name separated by a space. A bare prefix cut
@@ -1130,27 +1135,33 @@ func isTerminal(f *os.File) bool {
 // returns, because os.Stdin has no deadline. The context is accepted so the
 // interface does not have to change when that is fixed.
 func approveOnTerminal(in *os.File) func(context.Context, llm.ToolCall) (bool, error) {
-	reader := bufio.NewReader(in)
+	return approveOnTerminalReader(in, bufio.NewReader(in))
+}
+
+func approveOnTerminalReader(in *os.File, reader *bufio.Reader) func(context.Context, llm.ToolCall) (bool, error) {
 	return func(_ context.Context, c llm.ToolCall) (bool, error) {
 		if !isTerminal(in) {
 			fmt.Fprintf(os.Stderr, "denied %s: approval required and no terminal to ask\n", c.Name)
 			return false, nil
 		}
+		return approveFromReader(reader, os.Stderr, c)
+	}
+}
 
-		fmt.Fprintf(os.Stderr, "\napprove %s %s ? [y/N] ", c.Name, c.Args)
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			// EOF on a terminal means the operator closed the input rather than
-			// answering. Not an answer, so not a yes.
-			fmt.Fprintln(os.Stderr, "no answer; denied")
-			return false, nil
-		}
-		switch strings.ToLower(strings.TrimSpace(line)) {
-		case "y", "yes":
-			return true, nil
-		default:
-			return false, nil
-		}
+func approveFromReader(reader *bufio.Reader, out io.Writer, c llm.ToolCall) (bool, error) {
+	fmt.Fprintf(out, "\napprove %s %s ? [y/N] ", c.Name, c.Args)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		// EOF on a terminal means the operator closed the input rather than
+		// answering. Not an answer, so not a yes.
+		fmt.Fprintln(out, "no answer; denied")
+		return false, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
 	}
 }
 

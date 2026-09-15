@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -62,7 +63,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	} else {
 		st, err := s.Store.Load(runID)
 		if err != nil {
-			httpError(w, http.StatusNotFound, "no such conversation")
+			if errors.Is(err, loop.ErrNoCheckpoint) {
+				httpError(w, http.StatusNotFound, "no such conversation")
+				return
+			}
+			httpError(w, http.StatusInternalServerError, "failed to load conversation")
 			return
 		}
 		state = st
@@ -145,7 +150,7 @@ func deltaEvents(out *sseWriter) func(llm.Chunk) {
 			announced[d.Index] = true
 			out.event("tool", map[string]any{"name": d.Name})
 		}
-		if c.Stop != "" {
+		if c.Stop != "" || c.Usage.InputTokens > 0 || c.Usage.OutputTokens > 0 || c.Usage.Cost > 0 {
 			clear(announced)
 		}
 	}

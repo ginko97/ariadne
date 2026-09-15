@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -295,6 +297,9 @@ func TestChatRejectsBadRequests(t *testing.T) {
 		{"no message", `{"run_id":"run_x"}`},
 		{"malformed json", `{"message":`},
 		{"traversal in run id", `{"run_id":"../../etc","message":"hi"}`},
+		{"invalid run id prefix", `{"run_id":"test123_without_prefix","message":"hi"}`},
+		{"invalid run id characters", `{"run_id":"run_!bad","message":"hi"}`},
+		{"empty run id suffix", `{"run_id":"run_","message":"hi"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resp := post(t, s, ts, tc.body, nil)
@@ -310,6 +315,22 @@ func TestChatRejectsUnknownRun(t *testing.T) {
 	resp := post(t, s, ts, `{"run_id":"run_nope","message":"hi"}`, nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestChatCorruptCheckpointReturns500(t *testing.T) {
+	s, ts := newTestServer(t, endResponse("unused"))
+	dir := filepath.Join(s.Store.Dir, "run_corrupt")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "checkpoint.json"), []byte(`{invalid json`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := post(t, s, ts, `{"run_id":"run_corrupt","message":"hi"}`, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
 	}
 }
 
@@ -361,6 +382,42 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 		})
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status = %d, want 200 — a same-origin request was refused", resp.StatusCode)
+		}
+	})
+
+	t.Run("ipv6 loopback host without port", func(t *testing.T) {
+		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
+			r.Host = "[::1]"
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+
+	t.Run("ipv6 loopback host with port", func(t *testing.T) {
+		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
+			r.Host = "[::1]:8080"
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+
+	t.Run("ipv6 loopback origin without port", func(t *testing.T) {
+		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
+			r.Header.Set("Origin", "http://[::1]")
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+
+	t.Run("ipv6 loopback origin with port", func(t *testing.T) {
+		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
+			r.Header.Set("Origin", "http://[::1]:3000")
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
 		}
 	})
 }
@@ -425,5 +482,23 @@ func TestDeltaEventsAnnounceEachToolOnceAndResetBetweenTurns(t *testing.T) {
 	}
 	if !strings.Contains(body, `"text":"thinking "`) {
 		t.Errorf("text delta was not streamed:\n%s", body)
+	}
+}
+
+func TestDeltaEventsResetOnUsageChunk(t *testing.T) {
+	rec := httptest.NewRecorder()
+	out := &sseWriter{w: rec, f: rec}
+	emit := deltaEvents(out)
+
+	// Turn 1 ends with usage but no Stop reason
+	emit(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c1", Name: "calc"}})
+	emit(llm.Chunk{Usage: llm.Usage{InputTokens: 10, OutputTokens: 5}})
+
+	// Turn 2 calls tool at index 0 again; it must be announced because usage reset the state
+	emit(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c2", Name: "calc"}})
+
+	body := rec.Body.String()
+	if n := strings.Count(body, `"name":"calc"`); n != 2 {
+		t.Errorf("expected calc to be announced twice across responses, got %d times in:\n%s", n, body)
 	}
 }

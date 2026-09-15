@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -443,5 +446,72 @@ func TestPrintDeltaResetsOnUsageChunk(t *testing.T) {
 	got := out.String()
 	if n := strings.Count(got, "calc"); n != 2 {
 		t.Errorf("expected calc to be announced twice across responses, got %d times in:\n%s", n, got)
+	}
+}
+
+func TestApproveFromReader(t *testing.T) {
+	cases := []struct {
+		input string
+		want  bool
+	}{
+		{"y\n", true},
+		{"yes\n", true},
+		{"YES\n", true},
+		{"n\n", false},
+		{"no\n", false},
+		{"\n", false},
+		{"", false},
+	}
+
+	call := llm.ToolCall{Name: "bash", Args: json.RawMessage(`{}`)}
+	for _, tc := range cases {
+		r := bufio.NewReader(strings.NewReader(tc.input))
+		var out strings.Builder
+		got, err := approveFromReader(r, &out, call)
+		if err != nil {
+			t.Errorf("approveFromReader(%q) unexpected error: %v", tc.input, err)
+		}
+		if got != tc.want {
+			t.Errorf("approveFromReader(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestApproveSharedReaderPreservesInput(t *testing.T) {
+	input := "first line\ny\nsecond line\n"
+	r := bufio.NewReader(strings.NewReader(input))
+
+	line1, err := r.ReadString('\n')
+	if err != nil || strings.TrimSpace(line1) != "first line" {
+		t.Fatalf("reading line 1: %q, %v", line1, err)
+	}
+
+	var out strings.Builder
+	ok, err := approveFromReader(r, &out, llm.ToolCall{Name: "calc"})
+	if err != nil || !ok {
+		t.Fatalf("approval: %v, %v", ok, err)
+	}
+
+	line2, err := r.ReadString('\n')
+	if err != nil || strings.TrimSpace(line2) != "second line" {
+		t.Fatalf("reading line 2: %q, %v", line2, err)
+	}
+}
+
+func TestApproveOnTerminalFailsClosedOnNonTerminal(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "not_a_tty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	r := bufio.NewReader(f)
+	fn := approveOnTerminalReader(f, r)
+	approved, err := fn(context.Background(), llm.ToolCall{Name: "write_file"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if approved {
+		t.Error("non-terminal input must fail closed (deny)")
 	}
 }

@@ -261,3 +261,26 @@ func assertNoSecretInDir(t *testing.T, dir, secret string) {
 		t.Fatal("assertNoSecretInDir: expected files in dir, found none")
 	}
 }
+
+func TestValidRunID(t *testing.T) {
+	cases := []struct {
+		id   string
+		want bool
+	}{
+		{"run_123", true},
+		{"run_abc-def_456", true},
+		{"run_", false},
+		{"", false},
+		{"run_invalid!char", false},
+		{"run_with/slash", false},
+		{"run_with..dot", false},
+		{"run_" + strings.Repeat("a", 125), false}, // 129 chars total
+		{"run_" + strings.Repeat("a", 124), true},  // 128 chars total
+		{"norunprefix", false},
+	}
+	for _, tc := range cases {
+		if got := ValidRunID(tc.id); got != tc.want {
+			t.Errorf("ValidRunID(%q) = %v, want %v", tc.id, got, tc.want)
+		}
+	}
+}

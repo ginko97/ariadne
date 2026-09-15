@@ -307,7 +307,7 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 			return "", a.endRun(s, errors.Join(ErrEmptyToolUse, a.checkpoint(s)))
 		}
 		if a.RunTool == nil {
-			return "", a.endRun(s, ErrNoToolRunner)
+			return "", a.endRun(s, errors.Join(ErrNoToolRunner, a.checkpoint(s)))
 		}
 
 		// Requested but not executed. A crash between here and the first result

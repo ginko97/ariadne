@@ -392,6 +392,13 @@ func TestCheckpointOnErrorPaths(t *testing.T) {
 			Blocks: []llm.Block{{Type: llm.BlockText, Text: "?"}},
 			Stop:   llm.StopReason("wat"),
 		}},
+		{"no tool runner", llm.Response{
+			Blocks: []llm.Block{
+				{Type: llm.BlockText, Text: "using tool"},
+				{Type: llm.BlockToolUse, ID: "call_1", Name: "calc", Args: json.RawMessage(`{}`)},
+			},
+			Stop: llm.StopToolUse,
+		}},
 	}
 
 	for _, tc := range cases {
