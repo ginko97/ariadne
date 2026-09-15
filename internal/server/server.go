@@ -62,6 +62,11 @@ type Server struct {
 	// for /setup; it applies to every endpoint that changes something.
 	CSRFToken string
 
+	// approvals carries a decision from POST /api/approve to the turn that is
+	// blocked waiting for it. A turn cannot read its own answer: it is holding
+	// the SSE stream the question went out on.
+	approvals *approvals
+
 	mu   sync.Mutex
 	live map[string]bool // run ids with a turn in flight
 }
@@ -72,6 +77,7 @@ func New(store *loop.Store, newAgent AgentFactory, newRunID func() string) *Serv
 		NewAgent:  newAgent,
 		NewRunID:  newRunID,
 		CSRFToken: newToken(),
+		approvals: newApprovals(),
 		live:      map[string]bool{},
 	}
 }
@@ -88,6 +94,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/runs", s.handleRuns)
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/runs/{id}", s.handleTranscript)
+	mux.HandleFunc("POST /api/approve", s.handleApprove)
 	mux.HandleFunc("GET /", s.handleIndex)
 	return guard(s.CSRFToken, mux)
 }

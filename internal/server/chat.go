@@ -104,6 +104,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if cleanup != nil {
 		defer cleanup()
 	}
+	// Set after construction rather than through the factory: the approver needs
+	// this request's stream, which the factory has no way to know about, and
+	// Agent.Approve being a plain func field is exactly why no interface was
+	// built for it.
+	agent.Approve = s.approver(runID, out)
 
 	if req.Model != "" {
 		agent.Model = req.Model
