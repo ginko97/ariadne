@@ -458,10 +458,10 @@ func cmdChat(args []string) int {
 	})
 
 	if resuming {
-		fmt.Fprintf(os.Stderr, "chat %s  model=%s  from step %d (%d messages)  (Ctrl-D to exit)\n",
+		fmt.Fprintf(os.Stderr, "chat %s  model=%s  from step %d (%d messages)  (/help for commands, /exit to leave)\n",
 			state.RunID, state.Model, state.Steps, len(state.Messages))
 	} else {
-		fmt.Fprint(os.Stderr, "chat: type your message (Ctrl-D to exit)\n")
+		fmt.Fprint(os.Stderr, "chat: type your message (/help for commands, /exit to leave)\n")
 	}
 
 	for {
@@ -503,6 +503,18 @@ func cmdChat(args []string) int {
 		if line == "/help" || line == "/?" {
 			fmt.Fprint(os.Stderr, chatCommands)
 			continue
+		}
+		if line == "/exit" || line == "/quit" {
+			break
+		}
+		// Ctrl-D is not end-of-input on Windows. The console does not translate
+		// it, so it arrives as a literal EOT inside the line — which TrimSpace
+		// leaves alone, being a control character rather than whitespace — and
+		// the line goes to the provider, which is asked to answer a keystroke.
+		// Nobody types EOT at a chat prompt on purpose, so it is taken to mean
+		// what it means everywhere else.
+		if strings.TrimFunc(line, func(r rune) bool { return r == '\x04' }) == "" {
+			break
 		}
 		if line == "/model" {
 			current := agent.Model
@@ -576,7 +588,7 @@ const chatCommands = `commands:
   /model          show the current model
   /help           this list
   //text          send a line that really does start with a slash
-  Ctrl-D          exit
+  /exit           leave (Ctrl-D on Unix; Ctrl-Z then Enter on Windows)
 `
 
 // noModelList explains why there is no catalogue, and how to get one.
