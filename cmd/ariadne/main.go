@@ -35,6 +35,7 @@ import (
 	"github.com/ginko97/ariadne/internal/eval"
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
+	"github.com/ginko97/ariadne/internal/mcp"
 	"github.com/ginko97/ariadne/internal/memory"
 	"github.com/ginko97/ariadne/internal/server"
 	"github.com/ginko97/ariadne/internal/tool"
@@ -181,6 +182,7 @@ func cmdRun(args []string) int {
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
 	allow := fs.String("allow", "", "comma-separated tools this run may call (default: all)")
 	workspace := fs.String("workspace", defaultWorkspace, "directory fetch and write_file are confined to")
+	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "comma-separated tools that need a yes on the terminal before each call")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
@@ -235,6 +237,13 @@ func cmdRun(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	mcpTools, closeMCP, err := connectMCP(ctx, *mcpConfig, rememberFor, *workspace)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne run: %v\n", err)
+		return exitUsage
+	}
+	defer closeMCP()
+
 	store := &loop.Store{Dir: runsDir}
 	state := loop.NewState(newRunID(), task)
 
@@ -251,6 +260,7 @@ func cmdRun(args []string) int {
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: splitList(*approve),
 		Workspace: *workspace,
+		MCPTools:  mcpTools,
 		Store:     store, Trace: tw,
 	})
 	state.BaseURL = *baseURL
@@ -273,6 +283,7 @@ func cmdResume(args []string) int {
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
 	allow := fs.String("allow", "", "narrow the tools this run may call; it can never widen the grant in the checkpoint")
 	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (defaults to the checkpoint's)")
+	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "add tools needing approval; a gate in the checkpoint cannot be dropped here")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
@@ -338,6 +349,13 @@ func cmdResume(args []string) int {
 	// unless explicitly overridden on the command line.
 	budgetVal := resolveBudget(*budget, state)
 	workspaceDir := resolveWorkspace(*workspace, state)
+
+	mcpTools, closeMCP, err := connectMCP(ctx, *mcpConfig, rememberFor, workspaceDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
+		return exitUsage
+	}
+	defer closeMCP()
 	// Memory turned on for a run that started without it. The checkpoint's
 	// system prompt wins on resume, so the notes have to be added to it here or
 	// the tool would be present with nothing behind it. Recorded, so the next
@@ -353,6 +371,7 @@ func cmdResume(args []string) int {
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: splitList(*approve),
 		Workspace: workspaceDir,
+		MCPTools:  mcpTools,
 		Store:     store, Trace: tw,
 	})
 
@@ -382,6 +401,7 @@ func cmdChat(args []string) int {
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
 	allow := fs.String("allow", "", "comma-separated tools this run may call (resume can only narrow it)")
 	workspace := fs.String("workspace", defaultWorkspace, "directory fetch and write_file are confined to")
+	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "tools needing a yes on the terminal before each call (resume can only add)")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
@@ -455,6 +475,16 @@ func cmdChat(args []string) int {
 		workspaceDir = resolveWorkspace(*workspace, state)
 	}
 
+	// Started once for the session rather than per turn: a subprocess per
+	// message would pay the handshake every time and lose whatever state the
+	// server keeps between calls.
+	mcpTools, closeMCP, err := connectMCP(context.Background(), *mcpConfig, rememberFor, workspaceDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
+		return exitUsage
+	}
+	defer closeMCP()
+
 	key, envName := apiKey(endpoint)
 	if key == "" {
 		fmt.Fprintf(os.Stderr, "ariadne chat: no api key for %s — set %s in the environment or .env\n", endpoint, envName)
@@ -506,6 +536,7 @@ func cmdChat(args []string) int {
 		Allow: splitList(*allow), Approve: splitList(*approve),
 		ApproveFn: approveOnTerminalReader(os.Stdin, stdinReader),
 		Workspace: workspaceDir,
+		MCPTools:  mcpTools,
 		Store:     store, Trace: tw,
 	})
 
@@ -751,6 +782,7 @@ func cmdUI(args []string) int {
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
 	allow := fs.String("allow", "", "comma-separated tools a conversation may call (default: all)")
 	workspace := fs.String("workspace", defaultWorkspace, "directory fetch and write_file are confined to")
+	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
 	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")
 	httpTimeout := fs.Duration("http-timeout", defaultHTTPTimeout, "bound one provider request, body included (0: only the context)")
@@ -766,6 +798,16 @@ func cmdUI(args []string) int {
 		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
 		return exitUsage
 	}
+
+	// For the life of the server, not per request: a subprocess started and
+	// stopped around every turn would pay its handshake each time, and the
+	// agent factory has no moment to close one.
+	mcpTools, closeMCP, err := connectMCP(context.Background(), *mcpConfig, "", *workspace)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
+		return exitUsage
+	}
+	defer closeMCP()
 
 	key, envName := apiKey(*baseURL)
 	if key == "" {
@@ -789,8 +831,10 @@ func cmdUI(args []string) int {
 			Key: key, Model: *model, BaseURL: *baseURL, RunID: runID,
 			MaxSteps: *maxSteps, Budget: *budget,
 			ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
-			Allow:   splitList(*allow),
-			OnDelta: onDelta,
+			Allow:     splitList(*allow),
+			Workspace: *workspace,
+			MCPTools:  mcpTools,
+			OnDelta:   onDelta,
 			// Fails closed and says why. Unreachable while no tool is gated,
 			// and here anyway: a denial the operator cannot see is the correct
 			// answer when the only place to ask is a console the person on the
@@ -890,7 +934,14 @@ task.`
 // remember is added only when a run asks for it. It is the one tool whose
 // effect outlives the run, so it is not something to have switched on by
 // default — see internal/memory.
-func newRegistry(rememberFor, workspace string) *tool.Registry {
+func newRegistry(rememberFor, workspace string, remote ...tool.Tool) *tool.Registry {
+	tools := localTools(rememberFor, workspace)
+	return tool.New(append(tools, remote...)...)
+}
+
+// localTools is the set this binary implements itself, separated so the MCP
+// wiring can ask what the names already are before adding to them.
+func localTools(rememberFor, workspace string) []tool.Tool {
 	tools := []tool.Tool{
 		tool.Calc{},
 		tool.NewFetch(workspace),
@@ -899,7 +950,34 @@ func newRegistry(rememberFor, workspace string) *tool.Registry {
 	if rememberFor != "" {
 		tools = append(tools, tool.NewRemember(memory.Store{Path: memoryFile}, rememberFor))
 	}
-	return tool.New(tools...)
+	return tools
+}
+
+// connectMCP starts the servers a config names and returns their tools.
+//
+// Nothing configured means nothing started, no subprocess and no delay — the
+// common case pays nothing for a feature it is not using.
+//
+// Collisions are refused rather than resolved by ordering: tool.New keeps the
+// last tool of a given name and says nothing, so a server offering "fetch"
+// would silently replace the one confined by os.Root.
+func connectMCP(ctx context.Context, path, rememberFor, workspace string) ([]tool.Tool, func(), error) {
+	if path == "" {
+		return nil, func() {}, nil
+	}
+	cfg, err := mcp.LoadConfig(path)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	remote, closeAll, err := mcp.Connect(ctx, cfg)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	if err := mcp.CheckCollisions(localTools(rememberFor, workspace), remote); err != nil {
+		closeAll()
+		return nil, func() {}, err
+	}
+	return remote, closeAll, nil
 }
 
 // agentOpts is what a command decided before an agent could be built.
@@ -938,6 +1016,11 @@ type agentOpts struct {
 	// decided once at construction. Setting it implies streaming.
 	OnDelta func(llm.Chunk)
 
+	// MCPTools are tools a configured MCP server offers. Connected once by the
+	// command and passed in, because a server is a subprocess with a lifetime
+	// and the loop should not learn what one is.
+	MCPTools []tool.Tool
+
 	// Workspace is the directory fetch and write_file are confined to. Carried
 	// rather than read from a const because it is now an operator's choice, and
 	// because a resumed run has to be given the same one it started with.
@@ -968,7 +1051,7 @@ func newAgentFor(o agentOpts) *loop.Agent {
 			approve = append(append([]string{}, approve...), "remember")
 		}
 	}
-	reg := newRegistry(rememberFor, o.Workspace)
+	reg := newRegistry(rememberFor, o.Workspace, o.MCPTools...)
 	client := llm.NewOpenAI(o.Key,
 		llm.WithBaseURL(o.BaseURL),
 		// One request, including reading the body. A big enough conversation

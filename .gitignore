@@ -22,3 +22,5 @@ workspace/
 # to remember, which is exactly the content that should not be committed by
 # reflex.
 MEMORY.md
+/echoserver.exe
+/mcp.json
