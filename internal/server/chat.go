@@ -137,6 +137,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	out.event("done", map[string]any{
 		"run_id": runID,
 		"answer": answer,
+		"turns":  state.Turns(),
 		"steps":  state.Steps,
 		"cost":   state.Cost,
 		"model":  state.Model,

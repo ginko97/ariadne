@@ -88,6 +88,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/runs", s.handleRuns)
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/runs/{id}", s.handleTranscript)
+	mux.HandleFunc("GET /", s.handleIndex)
 	return guard(s.CSRFToken, mux)
 }
 

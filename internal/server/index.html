@@ -1,0 +1,268 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ariadne</title>
+<meta name="csrf" content="{{.CSRF}}">
+<style>
+  :root { color-scheme: light dark; --edge:#8883; --dim:#8888; --err:#c33; }
+  * { box-sizing: border-box; }
+  body { margin:0; height:100vh; display:grid; grid-template-columns:17rem 1fr;
+         font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif; }
+  aside { border-right:1px solid var(--edge); display:flex; flex-direction:column; min-height:0; }
+  aside header { padding:.7rem .9rem; border-bottom:1px solid var(--edge); display:flex; gap:.5rem; }
+  #runs { overflow-y:auto; flex:1; }
+  #runs button { display:block; width:100%; text-align:left; background:none; border:0;
+                 border-bottom:1px solid var(--edge); padding:.6rem .9rem; cursor:pointer;
+                 font:inherit; color:inherit; }
+  #runs button:hover { background:#8881; }
+  #runs button[aria-current="true"] { background:#8882; font-weight:600; }
+  #runs .meta, .dim { color:var(--dim); font-size:.8em; font-weight:400; }
+  #runs .title { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  main { display:flex; flex-direction:column; min-height:0; min-width:0; }
+  #bar { padding:.55rem .9rem; border-bottom:1px solid var(--edge); display:flex;
+         gap:.6rem; align-items:center; }
+  #bar select { max-width:22rem; font:inherit; }
+  #log { flex:1; overflow-y:auto; padding:1rem; display:flex; flex-direction:column; gap:.7rem; }
+  .e { max-width:52rem; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .prompt { align-self:flex-end; background:#8882; padding:.5rem .75rem; border-radius:.6rem; }
+  .tool_call, .tool_result { color:var(--dim); font-family:ui-monospace,SFMono-Regular,monospace;
+                             font-size:.82em; border-left:2px solid var(--edge); padding-left:.6rem; }
+  .is_error { color:var(--err); border-left-color:var(--err); }
+  form { display:flex; gap:.5rem; padding:.75rem .9rem; border-top:1px solid var(--edge); }
+  textarea { flex:1; resize:none; font:inherit; padding:.5rem; min-height:2.6rem; max-height:11rem; }
+  button.primary { font:inherit; padding:.5rem 1.1rem; cursor:pointer; }
+  #warn { padding:.4rem .9rem; background:#fd42; font-size:.85em; }
+  [hidden] { display:none !important; }
+</style>
+
+<aside>
+  <header>
+    <button class="primary" id="new" style="flex:1">New conversation</button>
+  </header>
+  <div id="runs"></div>
+</aside>
+
+<main>
+  <div id="bar">
+    <select id="model" title="Model for the next turn"></select>
+    <span id="stats" class="dim"></span>
+  </div>
+  <div id="warn" hidden></div>
+  <div id="log"></div>
+  <form id="composer">
+    <textarea id="input" rows="1" placeholder="Ask something…  (Enter to send, Shift+Enter for a newline)"></textarea>
+    <button class="primary" id="send">Send</button>
+  </form>
+</main>
+
+<script>
+const CSRF = document.querySelector('meta[name=csrf]').content;
+const $ = id => document.getElementById(id);
+const log = $('log'), runsEl = $('runs'), modelEl = $('model'), statsEl = $('stats');
+let runID = null, busy = false;
+
+const api = (path, opts = {}) => fetch(path, {
+  ...opts,
+  headers: { 'Content-Type': 'application/json', 'X-Ariadne-CSRF': CSRF, ...(opts.headers || {}) },
+});
+
+function warn(msg) {
+  const el = $('warn');
+  el.textContent = msg || '';
+  el.hidden = !msg;
+}
+
+// Entries are appended as elements rather than re-rendered from a model. A
+// streaming answer grows one text node while the rest of the transcript stays
+// untouched, and scroll position survives.
+function entry(kind, text, cls) {
+  const el = document.createElement('div');
+  el.className = 'e ' + kind + (cls ? ' ' + cls : '');
+  el.textContent = text;
+  log.append(el);
+  log.scrollTop = log.scrollHeight;
+  return el;
+}
+
+// Selecting a model the list does not contain silently clears the picker:
+// assigning an unknown value to a <select> leaves it blank. That happens
+// whenever a conversation ran on a model the current list is missing — an
+// older model, or a fallback list holding only the configured one — and a
+// blank picker cannot say what the next turn will use. The model is real
+// either way, since a conversation ran on it, so it is added rather than lost.
+function selectModel(id) {
+  if (!id) return;
+  if (![...modelEl.options].some(o => o.value === id)) {
+    const o = document.createElement('option');
+    o.value = id;
+    o.textContent = id;
+    modelEl.prepend(o);
+  }
+  modelEl.value = id;
+}
+
+function render(entries) {
+  log.replaceChildren();
+  for (const e of entries) {
+    if (e.kind === 'tool_call') entry('tool_call', `→ ${e.tool}(${e.args || ''})`);
+    else if (e.kind === 'tool_result') entry('tool_result', `← ${e.text}`, e.is_error ? 'is_error' : '');
+    else entry(e.kind, e.text);
+  }
+}
+
+async function loadRuns() {
+  try {
+    const { runs } = await (await api('/api/runs?limit=100')).json();
+    runsEl.replaceChildren();
+    for (const r of runs) {
+      const b = document.createElement('button');
+      b.innerHTML = '<span class="title"></span><span class="meta"></span>';
+      b.querySelector('.title').textContent = r.title || '(untitled)';
+      b.querySelector('.meta').textContent =
+        `${r.turns} turn${r.turns === 1 ? '' : 's'} · ${r.model || ''}`;
+      if (r.run_id === runID) b.setAttribute('aria-current', 'true');
+      b.onclick = () => open(r.run_id);
+      runsEl.append(b);
+    }
+  } catch (e) { warn('Could not list conversations: ' + e.message); }
+}
+
+async function open(id) {
+  const resp = await api('/api/runs/' + id);
+  if (!resp.ok) { warn('Could not open that conversation.'); return; }
+  const t = await resp.json();
+  runID = t.run_id;
+  render(t.messages);
+  stats(t.turns, t.steps, t.cost_usd);
+  selectModel(t.model);
+  loadRuns();
+}
+
+function stats(turns, steps, cost) {
+  // Cost is only reported by gateways that price their own calls. Zero from a
+  // provider that does not is "unknown", not "free", so it is not shown as a
+  // number that looks measured.
+  const money = cost > 0 ? ` · $${cost.toFixed(4)}` : '';
+  statsEl.textContent = runID
+    ? `${turns} turn${turns === 1 ? '' : 's'} · ${steps} step${steps === 1 ? '' : 's'}${money}`
+    : '';
+}
+
+function newConversation() {
+  runID = null;
+  log.replaceChildren();
+  statsEl.textContent = '';
+  warn('');
+  for (const b of runsEl.children) b.removeAttribute('aria-current');
+  $('input').focus();
+}
+
+async function loadModels() {
+  try {
+    const d = await (await api('/api/models')).json();
+    modelEl.replaceChildren();
+    for (const m of d.models) {
+      const o = document.createElement('option');
+      o.value = m.id;
+      // Price is shown but the list is not sorted by it. The cheapest
+      // tool-capable model on this gateway scored 3/6 in this project's own
+      // evals precisely because it answers from its weights instead of calling
+      // the tool — a price-ordered picker would lead straight to it.
+      const price = m.prompt_per_mtok > 0 ? `  $${m.prompt_per_mtok.toFixed(2)}/Mtok` : '';
+      o.textContent = m.id + price;
+      modelEl.append(o);
+    }
+    // The server's configured model, not whatever sorts first. Alphabetical
+    // order is not a ranking, and letting it decide means the opening turn of
+    // every conversation runs on a model nobody picked.
+    selectModel(d.configured);
+    if (d.warning) warn(d.warning);
+  } catch (e) { warn('Could not load the model list: ' + e.message); }
+}
+
+// EventSource cannot be used here: it only issues GET and cannot set headers,
+// and /api/chat is a POST behind a CSRF token because it spends money. So the
+// stream is read from the response body and framed by hand.
+async function send(text) {
+  if (busy) return;
+  busy = true; $('send').disabled = true;
+  warn('');
+  entry('prompt', text);
+
+  let answer = null, resp;
+  try {
+    resp = await api('/api/chat', {
+      method: 'POST',
+      body: JSON.stringify({ run_id: runID, message: text, model: modelEl.value || undefined }),
+    });
+  } catch (e) {
+    entry('tool_result', 'Could not reach ariadne: ' + e.message, 'is_error');
+    busy = false; $('send').disabled = false;
+    return;
+  }
+
+  if (!resp.ok) {
+    const { error } = await resp.json().catch(() => ({ error: 'request refused' }));
+    entry('tool_result', error, 'is_error');
+    busy = false; $('send').disabled = false;
+    return;
+  }
+
+  const reader = resp.body.getReader(), dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    // Events are separated by a blank line; a partial one stays in the buffer
+    // until the rest of it arrives.
+    let i;
+    while ((i = buf.indexOf('\n\n')) !== -1) {
+      const block = buf.slice(0, i); buf = buf.slice(i + 2);
+      let name = '', data = '';
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event: ')) name = line.slice(7);
+        else if (line.startsWith('data: ')) data = line.slice(6);
+      }
+      if (!name) continue;
+      let d = {};
+      try { d = JSON.parse(data); } catch {}
+
+      if (name === 'start') runID = d.run_id;
+      else if (name === 'tool') entry('tool_call', '→ ' + d.name);
+      else if (name === 'token') {
+        if (!answer) answer = entry('answer', '');
+        answer.textContent += d.text;
+        log.scrollTop = log.scrollHeight;
+      } else if (name === 'done') {
+        // The streamed text and the final answer are the same words; replace
+        // rather than append, so a provider that does not stream still shows one.
+        if (!answer) answer = entry('answer', '');
+        answer.textContent = d.answer;
+        stats(d.turns, d.steps, d.cost);
+        selectModel(d.model);
+      } else if (name === 'error') {
+        entry('tool_result', d.error, 'is_error');
+      }
+    }
+  }
+
+  busy = false; $('send').disabled = false;
+  loadRuns();
+}
+
+$('composer').onsubmit = e => {
+  e.preventDefault();
+  const t = $('input').value.trim();
+  if (!t) return;
+  $('input').value = '';
+  send(t);
+};
+$('input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
+});
+$('new').onclick = newConversation;
+
+loadModels();
+loadRuns();
+$('input').focus();
+</script>

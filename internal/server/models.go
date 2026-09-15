@@ -253,9 +253,14 @@ func containsStr(list []string, v string) bool {
 }
 
 type modelsResponse struct {
-	Models  []ModelRow `json:"models"`
-	Source  string     `json:"source"`
-	Warning string     `json:"warning,omitempty"`
+	Models []ModelRow `json:"models"`
+	Source string     `json:"source"`
+	// Configured is the model this process was started with. Without it a
+	// picker has no defensible default and falls back to whatever sorts first,
+	// which means the first turn of every conversation runs on a model nobody
+	// chose — and on this gateway the alphabet is not a ranking.
+	Configured string `json:"configured,omitempty"`
+	Warning    string `json:"warning,omitempty"`
 }
 
 // handleModels serves the picker.
@@ -273,8 +278,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(modelsResponse{
-		Models:  rows,
-		Source:  source,
-		Warning: warning,
+		Models:     rows,
+		Source:     source,
+		Configured: s.Models.Fallback,
+		Warning:    warning,
 	})
 }
