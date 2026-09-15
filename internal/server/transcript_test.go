@@ -181,7 +181,7 @@ func TestTranscriptDistinguishesCompactionNoticesFromPrompts(t *testing.T) {
 		Text: "[2 earlier messages have been dropped to stay within the context budget. What they contained:]\n- asked: hi\n- replied: hello",
 	})
 	st.Messages = append(st.Messages, llm.Message{
-		Role: llm.RoleAssistant,
+		Role:   llm.RoleAssistant,
 		Blocks: []llm.Block{{Type: llm.BlockText, Text: "Paris"}},
 	})
 	if err := s.Store.Save(st); err != nil {
