@@ -829,19 +829,19 @@ func cmdUI(args []string) int {
 			fmt.Fprintf(os.Stderr, "warning: trace unavailable for %s: %v\n", runID, err)
 			tw = nil
 		}
-		
+
 		workspaceDir := *workspace
 		if state != nil {
 			workspaceDir = resolveWorkspace(*workspace, state)
 		} else if workspaceDir == "" {
 			workspaceDir = defaultWorkspace
 		}
-		
+
 		budgetVal := *budget
 		if state != nil {
 			budgetVal = resolveBudget(*budget, state)
 		}
-		
+
 		agent := newAgentFor(agentOpts{
 			Key: key, Model: *model, BaseURL: *baseURL, RunID: runID,
 			MaxSteps: *maxSteps, Budget: budgetVal,

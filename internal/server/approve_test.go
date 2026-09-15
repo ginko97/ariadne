@@ -271,3 +271,72 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 	t.Fatal("condition never became true")
 }
+
+// The factory is handed the conversation's state, which is the whole point of
+// the signature: per-conversation settings live on the checkpoint, and a server
+// that built every agent from its own flags would override them.
+//
+// That already happened twice — f6854cf, where a resumed conversation adopted
+// the server's startup model, and 4a55078, where it adopted the server's
+// workspace. Both are the same shape: startup configuration silently winning
+// over what the conversation recorded.
+func TestAgentFactoryReceivesTheConversationsState(t *testing.T) {
+	store := &loop.Store{Dir: t.TempDir()}
+	fake := &llm.Fake{Responses: []llm.Response{endResponse("ok")}}
+
+	// A conversation that was started against a directory of its own.
+	st := loop.NewState("run_ws", "an earlier question")
+	st.Model = "test-model"
+	st.Workspace = "/repo/alpha"
+	if err := store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotWorkspace, gotRunID string
+	s := New(store,
+		func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
+			gotRunID = runID
+			if state != nil {
+				gotWorkspace = state.Workspace
+			}
+			return &loop.Agent{Provider: fake, Model: "test-model", MaxSteps: 5, Checkpoint: store.Save}, nil
+		},
+		func() string { return "run_unused" },
+	)
+	ts := httptest.NewServer(s.Routes())
+	defer ts.Close()
+
+	bodyOf(t, post(t, s, ts, `{"run_id":"run_ws","message":"next question"}`, nil))
+
+	if gotRunID != "run_ws" {
+		t.Errorf("factory got run id %q, want run_ws", gotRunID)
+	}
+	if gotWorkspace != "/repo/alpha" {
+		t.Errorf("factory saw workspace %q, want the one the conversation recorded", gotWorkspace)
+	}
+}
+
+// A fresh conversation has state too — built before the factory runs — so the
+// factory never has to guess which case it is in.
+func TestAgentFactoryReceivesStateForAFreshConversation(t *testing.T) {
+	store := &loop.Store{Dir: t.TempDir()}
+	fake := &llm.Fake{Responses: []llm.Response{endResponse("ok")}}
+
+	var gotTask string
+	s := New(store,
+		func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
+			if state != nil {
+				gotTask = state.Task
+			}
+			return &loop.Agent{Provider: fake, Model: "test-model", MaxSteps: 5, Checkpoint: store.Save}, nil
+		},
+		func() string { return "run_fresh" },
+	)
+	ts := httptest.NewServer(s.Routes())
+	defer ts.Close()
+
+	bodyOf(t, post(t, s, ts, `{"message":"the opening line"}`, nil))
+	if gotTask != "the opening line" {
+		t.Errorf("factory saw task %q, want the opening line", gotTask)
+	}
+}
