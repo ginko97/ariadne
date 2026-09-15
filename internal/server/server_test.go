@@ -30,13 +30,13 @@ func newTestServer(t *testing.T, responses ...llm.Response) (*Server, *httptest.
 
 	n := 0
 	s := New(store,
-		func(runID string, onDelta func(llm.Chunk)) *loop.Agent {
+		func(runID string, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
 			return &loop.Agent{
 				Provider:   fake,
 				Model:      "test-model",
 				MaxSteps:   5,
 				Checkpoint: store.Save,
-			}
+			}, nil
 		},
 		func() string { n++; return "run_test_" + string(rune('a'+n-1)) },
 	)
@@ -363,6 +363,38 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 			t.Errorf("status = %d, want 200 — a same-origin request was refused", resp.StatusCode)
 		}
 	})
+}
+
+// The factory's cleanup closes a trace file. A single-shot command defers that
+// to the end of main; a server has no such moment, so a leaked close is one
+// file handle per turn for the life of the process.
+func TestChatClosesWhatTheFactoryOpened(t *testing.T) {
+	store := &loop.Store{Dir: t.TempDir()}
+	fake := &llm.Fake{Responses: []llm.Response{endResponse("done"), endResponse("also done")}}
+
+	closed := 0
+	s := New(store,
+		func(runID string, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
+			return &loop.Agent{Provider: fake, Model: "m", MaxSteps: 5, Checkpoint: store.Save},
+				func() { closed++ }
+		},
+		func() string { return "run_cleanup" },
+	)
+	ts := httptest.NewServer(s.Routes())
+	defer ts.Close()
+
+	// Drained rather than discarded: the headers are flushed before the turn
+	// starts, so the client has a response in hand while the handler is still
+	// running. Reading to EOF is what waits for it.
+	bodyOf(t, post(t, s, ts, `{"message":"one"}`, nil))
+	if closed != 1 {
+		t.Fatalf("cleanup ran %d times after one turn, want 1", closed)
+	}
+
+	bodyOf(t, post(t, s, ts, `{"run_id":"run_cleanup","message":"two"}`, nil))
+	if closed != 2 {
+		t.Errorf("cleanup ran %d times after two turns, want 2", closed)
+	}
 }
 
 // Tool arguments arrive as fragments that are not valid JSON alone, and tool

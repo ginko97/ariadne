@@ -21,10 +21,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +36,7 @@ import (
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
 	"github.com/ginko97/ariadne/internal/memory"
+	"github.com/ginko97/ariadne/internal/server"
 	"github.com/ginko97/ariadne/internal/tool"
 	"github.com/ginko97/ariadne/internal/trace"
 )
@@ -41,8 +45,11 @@ const (
 	defaultModel   = "gemini-2.5-flash"
 	defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
 	runsDir        = "runs"
-	historyDir     = "eval/history"
-	workspaceDir   = "workspace"
+	// Loopback only, and the port is the only part an operator can change:
+	// a --port int cannot be spelled 0.0.0.0. Settled 2026-09-10.
+	defaultPort  = 7357
+	historyDir   = "eval/history"
+	workspaceDir = "workspace"
 	// defaultToolTimeout bounds one tool call from the command line, where the
 	// Agent's own default of 0 means unlimited. Same split as MaxSteps: a
 	// library caller decides for itself, a job gets a limit whether or not
@@ -81,6 +88,8 @@ func main() {
 		os.Exit(cmdResume(os.Args[2:]))
 	case "chat":
 		os.Exit(cmdChat(os.Args[2:]))
+	case "ui":
+		os.Exit(cmdUI(os.Args[2:]))
 	case "eval":
 		os.Exit(cmdEval(os.Args[2:]))
 	case "traces":
@@ -102,6 +111,7 @@ usage:
   ariadne run    [flags] <task>
   ariadne resume [flags] <run-id>
   ariadne chat   [flags] [run-id]        talk; with no id, the first line typed is the task
+  ariadne ui     [flags]                 serve the chat endpoint on loopback
   ariadne eval   [flags]                 score a task set, one row per model
   ariadne traces [flags] [text]          search the JSONL traces every run writes
 
@@ -545,6 +555,114 @@ func printAnswer(answer string, streamed bool) {
 	}
 }
 
+// cmdUI serves the chat endpoint on loopback.
+//
+// Deliberately without -approve and -remember. Both would put a browser
+// request in front of a control that can only answer on the server's console:
+// -approve would block an HTTP handler on a console read, and -remember force-
+// gates the remember tool behind exactly that approval, so the model would be
+// offered a tool whose every call is denied. The approval UI is a later phase,
+// and until it exists the honest configuration is not to offer either.
+func cmdUI(args []string) int {
+	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	port := fs.Int("port", envInt("ARIADNE_PORT", defaultPort), "loopback port to listen on (0: pick a free one)")
+	model := fs.String("model", envOr("ARIADNE_MODEL", defaultModel), "model id")
+	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
+	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
+	allow := fs.String("allow", "", "comma-separated tools a conversation may call (default: all)")
+	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
+	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")
+	httpTimeout := fs.Duration("http-timeout", defaultHTTPTimeout, "bound one provider request, body included (0: only the context)")
+
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if err := checkNames(newRegistry("").Defs(), splitList(*allow)); err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
+		return exitUsage
+	}
+
+	key, envName := apiKey(*baseURL)
+	if key == "" {
+		fmt.Fprintf(os.Stderr, "ariadne ui: no api key for %s — set %s in the environment or .env\n", *baseURL, envName)
+		return exitUsage
+	}
+
+	store := &loop.Store{Dir: runsDir}
+
+	// One agent per request. The trace writer is opened here and closed by the
+	// returned cleanup, because a server has no end-of-main to defer to.
+	newAgent := func(runID string, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
+		tw, err := trace.NewFileWriter(runsDir, runID)
+		if err != nil {
+			// A run that cannot be traced is still a run; say so and continue,
+			// the same trade closeTrace makes at the other end.
+			fmt.Fprintf(os.Stderr, "warning: trace unavailable for %s: %v\n", runID, err)
+			tw = nil
+		}
+		agent := newAgentFor(agentOpts{
+			Key: key, Model: *model, BaseURL: *baseURL, RunID: runID,
+			MaxSteps: *maxSteps, Budget: *budget,
+			ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
+			Allow:   splitList(*allow),
+			OnDelta: onDelta,
+			// Fails closed and says why. Unreachable while no tool is gated,
+			// and here anyway: a denial the operator cannot see is the correct
+			// answer when the only place to ask is a console the person on the
+			// other end of the socket is not looking at.
+			ApproveFn: func(_ context.Context, c llm.ToolCall) (bool, error) {
+				fmt.Fprintf(os.Stderr, "denied %s: no approval route over http yet\n", c.Name)
+				return false, nil
+			},
+			Store: store, Trace: tw,
+		})
+		if tw == nil {
+			return agent, nil
+		}
+		return agent, func() { closeTrace(tw) }
+	}
+
+	srv := server.New(store, newAgent, newRunID)
+
+	// Host is a constant, not a flag: the loopback guarantee is structural
+	// rather than something an operator can mistype into 0.0.0.0.
+	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(*port)))
+	if err != nil && *port != 0 {
+		// Taken ports are common and fatal for no good reason. Fall back and
+		// print where it actually landed rather than announcing a URL that was
+		// never bound.
+		fmt.Fprintf(os.Stderr, "port %d unavailable (%v), picking a free one\n", *port, err)
+		ln, err = net.Listen("tcp", "127.0.0.1:0")
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
+		return exitFail
+	}
+	defer ln.Close()
+
+	fmt.Fprintf(os.Stderr, "ariadne ui  http://%s  model=%s\n", ln.Addr(), *model)
+	fmt.Fprintf(os.Stderr, "csrf token: %s\n", srv.CSRFToken)
+	fmt.Fprintln(os.Stderr, "Ctrl-C to stop")
+
+	if err := http.Serve(ln, srv.Routes()); err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
+		return exitFail
+	}
+	return exitOK
+}
+
+// envInt reads an int from the environment, falling back when unset or
+// unparseable — a malformed ARIADNE_PORT should not stop the server starting.
+func envInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
 // systemPrompt is the standing instruction every run starts under.
 //
 // The second paragraph is the load-bearing one. A model given no system prompt
@@ -612,6 +730,18 @@ type agentOpts struct {
 	Allow   []string
 	Approve []string
 
+	// ApproveFn replaces the terminal prompt. The web path sets a denial,
+	// because approveOnTerminal reads os.Stdin — so a server launched from a
+	// terminal would let a browser request raise a y/N on the operator's
+	// console and block the HTTP handler until somebody typed there. Nil keeps
+	// the terminal prompt, which is what every CLI subcommand wants.
+	ApproveFn func(context.Context, llm.ToolCall) (bool, error)
+
+	// OnDelta redirects the token stream. The CLI prints to stderr; the server
+	// writes SSE into one request's ResponseWriter, so the sink cannot be
+	// decided once at construction. Setting it implies streaming.
+	OnDelta func(llm.Chunk)
+
 	Store *loop.Store
 	Trace *trace.Writer
 }
@@ -663,8 +793,16 @@ func newAgentFor(o agentOpts) *loop.Agent {
 	// and the stop switch are untouched — nothing about a run changes because
 	// somebody is watching it.
 	var provider llm.Provider = client
-	if o.Stream {
+	switch {
+	case o.OnDelta != nil:
+		provider = llm.Streaming{S: client, OnDelta: o.OnDelta}
+	case o.Stream:
 		provider = llm.Streaming{S: client, OnDelta: printDelta(os.Stderr)}
+	}
+
+	approveFn := o.ApproveFn
+	if approveFn == nil {
+		approveFn = approveOnTerminal(os.Stdin)
 	}
 
 	return &loop.Agent{
@@ -677,7 +815,7 @@ func newAgentFor(o agentOpts) *loop.Agent {
 		Allow:    allow,
 
 		RequireApproval: approve,
-		Approve:         approveOnTerminal(os.Stdin),
+		Approve:         approveFn,
 
 		RunTool:       reg.Call,
 		Checkpoint:    o.Store.Save,

@@ -93,7 +93,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	out := &sseWriter{w: w, f: flusher}
 	out.event("start", map[string]any{"run_id": runID})
 
-	agent := s.NewAgent(runID, deltaEvents(out))
+	agent, cleanup := s.NewAgent(runID, deltaEvents(out))
+	if cleanup != nil {
+		defer cleanup()
+	}
 
 	// r.Context() on purpose: a closed tab cancels the turn, the loop's guards
 	// see a cancelled context, and per-call checkpointing means what already

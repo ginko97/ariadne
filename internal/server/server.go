@@ -29,7 +29,12 @@ import (
 // request's ResponseWriter and is valid exactly as long as the handler is.
 // An Agent is a plain struct, so this costs a few allocations and buys the
 // guarantee that no two turns ever share a delta sink.
-type AgentFactory func(runID string, onDelta func(llm.Chunk)) *loop.Agent
+//
+// The second return closes whatever the agent opened — a trace file, in the
+// only implementation that matters. A single-shot command can defer that to
+// the end of main; a server cannot, because "the end" is when the process
+// stops and the handles accumulate one per turn until then. May be nil.
+type AgentFactory func(runID string, onDelta func(llm.Chunk)) (*loop.Agent, func())
 
 // Server holds what outlives a request: the checkpoint store, how to build an
 // agent, and which runs are busy.
