@@ -53,7 +53,7 @@ type Server struct {
 
 	// Models is the picker's source. Nil disables the endpoint rather than
 	// failing it, so a server can run without ever reaching the network.
-	Models *ModelCache
+	Models *llm.ModelCache
 
 	// CSRFToken gates every mutating request. Loopback binding is not
 	// protection on its own: any page the browser has open can POST to

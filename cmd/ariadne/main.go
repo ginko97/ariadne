@@ -128,6 +128,7 @@ flags:
   -http-timeout   bound one provider request, body included (default 5m0s)
 
 chat flags: same as run/resume, plus while chatting:
+  /models [text]  list tool-capable models, filtered by substring
   /model <id>     switch model starting next turn
 
 eval flags:
@@ -446,6 +447,8 @@ func cmdChat(args []string) int {
 	}
 
 	stdinReader := bufio.NewReader(os.Stdin)
+	// Built on first use: a chat that never asks for the list never fetches it.
+	var models *llm.ModelCache
 
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: startModel, BaseURL: endpoint, RunID: runID,
@@ -488,6 +491,17 @@ func cmdChat(args []string) int {
 		// makes "/modeled" a switch to the model "ed": the command silently
 		// reconfigures the conversation, and the 404 lands a turn later
 		// naming the provider rather than the typo.
+		if rest, ok := strings.CutPrefix(line, "/models"); ok &&
+			(rest == "" || strings.HasPrefix(rest, " ")) {
+			if models == nil {
+				models = llm.NewModelCache(*model)
+				if !strings.Contains(endpoint, "openrouter.ai") {
+					models.Unsupported = endpoint + " publishes no model list this can read"
+				}
+			}
+			listModels(models, strings.TrimSpace(rest))
+			continue
+		}
 		if line == "/model" {
 			current := agent.Model
 			if state != nil && state.Model != "" {
@@ -535,6 +549,49 @@ func cmdChat(args []string) int {
 		printAnswer(answer, *stream)
 	}
 	return exitOK
+}
+
+// listModels prints the catalogue the picker in the browser already has.
+//
+// Filtered rather than paged. The gateway offers several hundred tool-capable
+// models and a terminal that prints them all has told you nothing; a substring
+// is how anybody would look for one anyway. Without a filter it prints a count
+// and asks for one, rather than scrolling the answer off the screen.
+//
+// Price is shown and the list is not ordered by it. The cheapest tool-capable
+// model on this gateway scored 3/6 in this project's own evals because it
+// answers from its weights instead of calling the tool, so ordering by price
+// would recommend the model the repo already measured as the wrong pick.
+func listModels(cache *llm.ModelCache, filter string) {
+	rows, source, warning := cache.Get(context.Background())
+	if warning != "" {
+		fmt.Fprintf(os.Stderr, "! %s\n", warning)
+	}
+
+	var shown []llm.ModelRow
+	for _, r := range rows {
+		if filter == "" || strings.Contains(strings.ToLower(r.ID), strings.ToLower(filter)) {
+			shown = append(shown, r)
+		}
+	}
+
+	if filter == "" && len(rows) > 20 {
+		fmt.Fprintf(os.Stderr, "%d models (%s). Narrow it: /models claude, /models gpt, /models free\n",
+			len(rows), source)
+		return
+	}
+	if len(shown) == 0 {
+		fmt.Fprintf(os.Stderr, "no model id contains %q (%d available)\n", filter, len(rows))
+		return
+	}
+	for _, r := range shown {
+		price := "     —"
+		if r.PromptPerMTok > 0 {
+			price = fmt.Sprintf("%6.2f", r.PromptPerMTok)
+		}
+		fmt.Fprintf(os.Stderr, "  %-44s %s /Mtok\n", r.ID, price)
+	}
+	fmt.Fprintf(os.Stderr, "%d of %d (%s) — switch with /model <id>\n", len(shown), len(rows), source)
 }
 
 // chatTurn runs the agent with no new message — the first turn of a fresh
@@ -637,7 +694,7 @@ func cmdUI(args []string) int {
 	// are namespaced for it — so offering that catalogue while pointed at
 	// api.openai.com would fill the picker with ids the endpoint rejects. The
 	// answer is one model and a reason, not a longer list of wrong ones.
-	srv.Models = server.NewModelCache(*model)
+	srv.Models = llm.NewModelCache(*model)
 	if !strings.Contains(*baseURL, "openrouter.ai") {
 		srv.Models.Unsupported = fmt.Sprintf(
 			"%s does not publish a model list this can read; showing the configured model. "+
