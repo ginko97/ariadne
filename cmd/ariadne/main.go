@@ -127,9 +127,7 @@ flags:
   -tool-timeout   abandon a tool call that runs longer than this (default 1m0s)
   -http-timeout   bound one provider request, body included (default 5m0s)
 
-chat flags: same as run/resume, plus while chatting:
-  /models [text]  list tool-capable models, filtered by substring
-  /model <id>     switch model starting next turn
+chat flags: same as run/resume. While chatting, `+"`/help`"+` lists the commands.
 
 eval flags:
   -models         comma-separated model ids  (default: ARIADNE_MODEL)
@@ -573,6 +571,7 @@ func cmdChat(args []string) int {
 // One constant, so the two places that show it cannot disagree.
 const chatCommands = `commands:
   /models [text]  list tool-capable models, filtered by substring
+  /models all     list every one of them
   /model <id>     switch model starting next turn
   /model          show the current model
   /help           this list
@@ -597,6 +596,16 @@ func listModels(cache *llm.ModelCache, filter string) {
 		fmt.Fprintf(os.Stderr, "! %s\n", warning)
 	}
 
+	// "all" asks for the whole catalogue on purpose. Without it, the only way
+	// past the guard below was a filter that happens to match everything —
+	// "/models /" works here because every id on this gateway is namespaced,
+	// and would not on one whose ids are bare. A trick that depends on the
+	// shape of the data is not an interface.
+	all := strings.EqualFold(filter, "all")
+	if all {
+		filter = ""
+	}
+
 	var shown []llm.ModelRow
 	for _, r := range rows {
 		if filter == "" || strings.Contains(strings.ToLower(r.ID), strings.ToLower(filter)) {
@@ -604,8 +613,8 @@ func listModels(cache *llm.ModelCache, filter string) {
 		}
 	}
 
-	if filter == "" && len(rows) > 20 {
-		fmt.Fprintf(os.Stderr, "%d models (%s). Narrow it: /models claude, /models gpt, /models free\n",
+	if filter == "" && !all && len(rows) > 20 {
+		fmt.Fprintf(os.Stderr, "%d models (%s). Narrow it: /models claude, /models gpt — or /models all\n",
 			len(rows), source)
 		return
 	}
