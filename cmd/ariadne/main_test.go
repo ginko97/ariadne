@@ -119,7 +119,7 @@ func TestSplitList(t *testing.T) {
 }
 
 func TestCheckNamesRejectsUnknownTool(t *testing.T) {
-	defs := newRegistry("").Defs()
+	defs := newRegistry("", defaultWorkspace).Defs()
 
 	if err := checkNames(defs, []string{"calc"}, []string{"write_file"}); err != nil {
 		t.Errorf("known tools were rejected: %v", err)
@@ -234,11 +234,11 @@ func TestMemoryDoesNotWidenAnExplicitAllowList(t *testing.T) {
 }
 
 func TestCheckNamesWithoutMemoryRejectsRemember(t *testing.T) {
-	defs := newRegistry("").Defs()
+	defs := newRegistry("", defaultWorkspace).Defs()
 	if err := checkNames(defs, []string{"remember"}); err == nil {
 		t.Fatal("remember was accepted as valid tool name when memory was not requested")
 	}
-	defsWithMem := newRegistry("validate").Defs()
+	defsWithMem := newRegistry("validate", defaultWorkspace).Defs()
 	if err := checkNames(defsWithMem, []string{"remember"}); err != nil {
 		t.Fatalf("remember was rejected when memory was requested: %v", err)
 	}
@@ -514,4 +514,36 @@ func TestApproveOnTerminalFailsClosedOnNonTerminal(t *testing.T) {
 	if approved {
 		t.Error("non-terminal input must fail closed (deny)")
 	}
+}
+
+// A resumed run keeps the directory it was reading. Resuming against a
+// different one would leave every path the run remembers pointing at files it
+// never saw — the same class of silent redirection that resolveEndpoint and
+// resolveBudget exist to prevent.
+func TestResolveWorkspace(t *testing.T) {
+	t.Run("checkpoint wins when no flag is given", func(t *testing.T) {
+		st := &loop.State{Workspace: "/repo/alpha"}
+		if got := resolveWorkspace("", st); got != "/repo/alpha" {
+			t.Errorf("got %q, want the checkpoint's directory", got)
+		}
+	})
+
+	t.Run("an explicit flag overrides and is recorded", func(t *testing.T) {
+		st := &loop.State{Workspace: "/repo/alpha"}
+		if got := resolveWorkspace("/repo/beta", st); got != "/repo/beta" {
+			t.Errorf("got %q, want the flag", got)
+		}
+		// Recorded, or the next resume would silently go back to the old one —
+		// the bug resolveBudget was written to fix.
+		if st.Workspace != "/repo/beta" {
+			t.Errorf("State.Workspace = %q, want the override recorded", st.Workspace)
+		}
+	})
+
+	t.Run("a run from before this field falls back to the default", func(t *testing.T) {
+		st := &loop.State{}
+		if got := resolveWorkspace("", st); got != defaultWorkspace {
+			t.Errorf("got %q, want %q", got, defaultWorkspace)
+		}
+	})
 }

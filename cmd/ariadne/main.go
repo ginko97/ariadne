@@ -57,9 +57,9 @@ const (
 	runsDir                = "runs"
 	// Loopback only, and the port is the only part an operator can change:
 	// a --port int cannot be spelled 0.0.0.0. Settled 2026-09-10.
-	defaultPort  = 7357
-	historyDir   = "eval/history"
-	workspaceDir = "workspace"
+	defaultPort      = 7357
+	historyDir       = "eval/history"
+	defaultWorkspace = "workspace"
 	// defaultToolTimeout bounds one tool call from the command line, where the
 	// Agent's own default of 0 means unlimited. Same split as MaxSteps: a
 	// library caller decides for itself, a job gets a limit whether or not
@@ -70,7 +70,7 @@ const (
 	defaultHTTPTimeout = 300 * time.Second
 )
 
-// Outside workspaceDir on purpose: if the notes lived where the tools are
+// Outside the workspace on purpose: if the notes lived where the tools are
 // confined, write_file could rewrite them and every rule in internal/memory
 // would be decoration.
 var memoryFile = "MEMORY.md"
@@ -130,6 +130,7 @@ flags:
   -base-url       OpenAI-compatible endpoint (env ARIADNE_BASE_URL)
   -max-steps      ceiling on loop iterations (default 10)
   -allow          comma-separated tools this run may call (default: all)
+  -workspace      directory fetch and write_file are confined to (default workspace)
   -approve        tools needing a yes on the terminal before each call
   -context-budget compact the conversation past this many prompt tokens (0: never)
   -stream         print tokens and tool calls as they arrive
@@ -179,6 +180,7 @@ func cmdRun(args []string) int {
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
 	allow := fs.String("allow", "", "comma-separated tools this run may call (default: all)")
+	workspace := fs.String("workspace", defaultWorkspace, "directory fetch and write_file are confined to")
 	approve := fs.String("approve", "", "comma-separated tools that need a yes on the terminal before each call")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
@@ -204,7 +206,7 @@ func cmdRun(args []string) int {
 	if *remember {
 		rememberFor = "validate"
 	}
-	if err := checkNames(newRegistry(rememberFor).Defs(), splitList(*allow), splitList(*approve)); err != nil {
+	if err := checkNames(newRegistry(rememberFor, *workspace).Defs(), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne run: %v\n", err)
 		return exitUsage
 	}
@@ -248,9 +250,11 @@ func cmdRun(args []string) int {
 		MaxSteps: *maxSteps, Budget: *budget, Stream: *stream, Memory: *remember,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: splitList(*approve),
-		Store: store, Trace: tw,
+		Workspace: *workspace,
+		Store:     store, Trace: tw,
 	})
 	state.BaseURL = *baseURL
+	state.Workspace = *workspace
 	state.ContextBudget = *budget
 	state.Memory = *remember
 	fmt.Fprintf(os.Stderr, "run %s  model=%s\n", state.RunID, *model)
@@ -268,6 +272,7 @@ func cmdResume(args []string) int {
 	baseURL := fs.String("base-url", "", "OpenAI-compatible endpoint (defaults to endpoint from checkpoint)")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
 	allow := fs.String("allow", "", "narrow the tools this run may call; it can never widen the grant in the checkpoint")
+	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (defaults to the checkpoint's)")
 	approve := fs.String("approve", "", "add tools needing approval; a gate in the checkpoint cannot be dropped here")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
@@ -300,7 +305,7 @@ func cmdResume(args []string) int {
 	if mem {
 		rememberFor = "validate"
 	}
-	if err := checkNames(newRegistry(rememberFor).Defs(), splitList(*allow), splitList(*approve)); err != nil {
+	if err := checkNames(newRegistry(rememberFor, *workspace).Defs(), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
 		return exitUsage
 	}
@@ -332,6 +337,7 @@ func cmdResume(args []string) int {
 	// than it started on is a different job. The checkpoint's endpoint wins
 	// unless explicitly overridden on the command line.
 	budgetVal := resolveBudget(*budget, state)
+	workspaceDir := resolveWorkspace(*workspace, state)
 	// Memory turned on for a run that started without it. The checkpoint's
 	// system prompt wins on resume, so the notes have to be added to it here or
 	// the tool would be present with nothing behind it. Recorded, so the next
@@ -346,7 +352,8 @@ func cmdResume(args []string) int {
 		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: splitList(*approve),
-		Store: store, Trace: tw,
+		Workspace: workspaceDir,
+		Store:     store, Trace: tw,
 	})
 
 	fmt.Fprintf(os.Stderr, "resume %s  model=%s  from step %d (%d messages)\n",
@@ -374,6 +381,7 @@ func cmdChat(args []string) int {
 	baseURL := fs.String("base-url", "", "OpenAI-compatible endpoint (fresh: default "+defaultBaseURL+"; resumed: checkpoint's unless overridden)")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
 	allow := fs.String("allow", "", "comma-separated tools this run may call (resume can only narrow it)")
+	workspace := fs.String("workspace", defaultWorkspace, "directory fetch and write_file are confined to")
 	approve := fs.String("approve", "", "tools needing a yes on the terminal before each call (resume can only add)")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
@@ -411,7 +419,7 @@ func cmdChat(args []string) int {
 	if mem {
 		rememberFor = "validate"
 	}
-	if err := checkNames(newRegistry(rememberFor).Defs(), splitList(*allow), splitList(*approve)); err != nil {
+	if err := checkNames(newRegistry(rememberFor, *workspace).Defs(), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
 		return exitUsage
 	}
@@ -437,6 +445,14 @@ func cmdChat(args []string) int {
 	// decides what a fresh one starts with.
 	if *model == "" {
 		*model = defaultModelFor(endpoint)
+	}
+
+	// A resumed conversation keeps the directory it was reading, unless the
+	// flag says otherwise. A fresh one takes the flag, which defaults to
+	// "workspace" — so the common case is unchanged.
+	workspaceDir := *workspace
+	if resuming {
+		workspaceDir = resolveWorkspace(*workspace, state)
 	}
 
 	key, envName := apiKey(endpoint)
@@ -489,6 +505,7 @@ func cmdChat(args []string) int {
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: splitList(*approve),
 		ApproveFn: approveOnTerminalReader(os.Stdin, stdinReader),
+		Workspace: workspaceDir,
 		Store:     store, Trace: tw,
 	})
 
@@ -595,6 +612,7 @@ func cmdChat(args []string) int {
 			state.BaseURL = endpoint
 			state.ContextBudget = *budget
 			state.Memory = mem
+			state.Workspace = workspaceDir
 			fmt.Fprintf(os.Stderr, "chat %s  model=%s\n", state.RunID, agent.Model)
 			if err := chatTurn(agent, state, *stream); err != nil {
 				fmt.Fprintf(os.Stderr, "! %v\n", err)
@@ -732,6 +750,7 @@ func cmdUI(args []string) int {
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
 	allow := fs.String("allow", "", "comma-separated tools a conversation may call (default: all)")
+	workspace := fs.String("workspace", defaultWorkspace, "directory fetch and write_file are confined to")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
 	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")
 	httpTimeout := fs.Duration("http-timeout", defaultHTTPTimeout, "bound one provider request, body included (0: only the context)")
@@ -743,7 +762,7 @@ func cmdUI(args []string) int {
 	if *model == "" {
 		*model = defaultModelFor(*baseURL)
 	}
-	if err := checkNames(newRegistry("").Defs(), splitList(*allow)); err != nil {
+	if err := checkNames(newRegistry("", *workspace).Defs(), splitList(*allow)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
 		return exitUsage
 	}
@@ -863,7 +882,7 @@ task.`
 
 // newRegistry is the tool set every command shares.
 //
-// fetch and write_file are confined to workspaceDir. fetch reads documents
+// fetch and write_file are confined to the workspace root passed in. fetch reads documents
 // somebody else may have written, which is the point: untrusted text has to be
 // able to enter the conversation before anything can be said about what happens
 // when it does.
@@ -871,11 +890,11 @@ task.`
 // remember is added only when a run asks for it. It is the one tool whose
 // effect outlives the run, so it is not something to have switched on by
 // default — see internal/memory.
-func newRegistry(rememberFor string) *tool.Registry {
+func newRegistry(rememberFor, workspace string) *tool.Registry {
 	tools := []tool.Tool{
 		tool.Calc{},
-		tool.NewFetch(workspaceDir),
-		tool.NewWriteFile(workspaceDir),
+		tool.NewFetch(workspace),
+		tool.NewWriteFile(workspace),
 	}
 	if rememberFor != "" {
 		tools = append(tools, tool.NewRemember(memory.Store{Path: memoryFile}, rememberFor))
@@ -919,6 +938,11 @@ type agentOpts struct {
 	// decided once at construction. Setting it implies streaming.
 	OnDelta func(llm.Chunk)
 
+	// Workspace is the directory fetch and write_file are confined to. Carried
+	// rather than read from a const because it is now an operator's choice, and
+	// because a resumed run has to be given the same one it started with.
+	Workspace string
+
 	Store *loop.Store
 	Trace *trace.Writer
 }
@@ -944,7 +968,7 @@ func newAgentFor(o agentOpts) *loop.Agent {
 			approve = append(append([]string{}, approve...), "remember")
 		}
 	}
-	reg := newRegistry(rememberFor)
+	reg := newRegistry(rememberFor, o.Workspace)
 	client := llm.NewOpenAI(o.Key,
 		llm.WithBaseURL(o.BaseURL),
 		// One request, including reading the body. A big enough conversation
@@ -1650,6 +1674,25 @@ func resolveEndpoint(flag string, st *loop.State) string {
 		return st.BaseURL
 	}
 	return envOr("ARIADNE_BASE_URL", defaultBaseURL)
+}
+
+// resolveWorkspace picks the directory a resumed run's file tools are confined
+// to, recording an explicit override.
+//
+// The checkpoint wins by default, for the reason every other resume field does:
+// a run that read one repository and resumes against another has every path it
+// remembers pointing at files that are not the ones it saw. A flag is the
+// operator saying otherwise, and that belongs on the state too, because the
+// rest of the run really does happen elsewhere.
+func resolveWorkspace(flag string, st *loop.State) string {
+	if flag != "" {
+		st.Workspace = flag
+		return flag
+	}
+	if st.Workspace != "" {
+		return st.Workspace
+	}
+	return defaultWorkspace
 }
 
 // resolveBudget picks the context budget for a resumed run, recording an

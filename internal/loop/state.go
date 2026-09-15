@@ -26,6 +26,13 @@ type State struct {
 	// that finished on a different model than it started on is a different job,
 	// and evals need to know which model produced a trace.
 	Model string `json:"model,omitempty"`
+	// Workspace is the directory this run's file tools were confined to.
+	//
+	// Recorded for the same reason as BaseURL: a resumed run must make the same
+	// decision the original did. Resuming a run that read one repository against
+	// a different directory would silently point every path it remembers at
+	// files that are not the ones it saw.
+	Workspace string `json:"workspace,omitempty"`
 	// BaseURL is recorded so resume reaches the same provider endpoint rather
 	// than silently defaulting to Gemini and failing with an incompatible model.
 	BaseURL string `json:"base_url,omitempty"`
