@@ -166,6 +166,20 @@ func missingCalls(want []string, s *loop.State) []string {
 	}
 	called := map[string]bool{}
 	if s != nil {
+		if len(s.Messages) > 0 && len(s.Messages[0].Blocks) > 1 {
+			digest := s.Messages[0].Blocks[1]
+			if digest.Type == llm.BlockText {
+				for _, line := range strings.Split(digest.Text, "\n") {
+					if strings.HasPrefix(line, "- ") && !strings.HasPrefix(line, "- asked:") && !strings.HasPrefix(line, "- replied:") {
+						namePart := strings.TrimPrefix(line, "- ")
+						if idx := strings.IndexByte(namePart, '('); idx > 0 {
+							called[namePart[:idx]] = true
+						}
+					}
+				}
+			}
+		}
+
 		for _, m := range s.Messages {
 			for _, b := range m.Blocks {
 				if b.Type == llm.BlockToolUse {
