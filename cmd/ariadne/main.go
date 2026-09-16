@@ -904,14 +904,7 @@ func cmdUI(args []string) int {
 			budgetVal = resolveBudget(*budget, state)
 		}
 
-		endpoint := *baseURL
-		endpointKey := key
-		if state != nil && state.BaseURL != "" && state.BaseURL != *baseURL {
-			endpoint = state.BaseURL
-			if k, _ := apiKey(endpoint); k != "" {
-				endpointKey = k
-			}
-		}
+		endpoint, endpointKey := conversationEndpoint(*baseURL, key, state)
 
 		agent := newAgentFor(agentOpts{
 			Key: endpointKey, Model: *model, BaseURL: endpoint, RunID: runID,
@@ -1935,6 +1928,30 @@ func checkResumeGrants(mem bool, allowFlag []string, st *loop.State) error {
 		return errors.New("the checkpoint's allow-list has no remember, and resume cannot widen it")
 	}
 	return nil
+}
+
+// conversationEndpoint picks where a UI conversation's requests go, and with
+// which key.
+//
+// A conversation recorded against another endpoint keeps it, the same rule
+// resume follows. It takes that endpoint's key or none, never the server's:
+// d9e9778 fell back to the server's key when the right one was unset, which
+// sent an OpenRouter key to api.x.ai for a conversation recorded there with no
+// XAI_API_KEY. With no key the turn fails with the provider's 401, shown in the
+// page, and nothing is sent anywhere it should not go.
+//
+// Unlike resume, an explicit -base-url does not override the recorded
+// endpoint: the server cannot tell a flag from its default, and one server
+// holds many conversations that were not all started against it.
+func conversationEndpoint(serverURL, serverKey string, st *loop.State) (url, key string) {
+	if st == nil || st.BaseURL == "" || st.BaseURL == serverURL {
+		return serverURL, serverKey
+	}
+	k, envName := apiKey(st.BaseURL)
+	if k == "" {
+		fmt.Fprintf(os.Stderr, "warning: a conversation uses %s and there is no key for it (set %s); its turns will fail\n", st.BaseURL, envName)
+	}
+	return st.BaseURL, k
 }
 
 // resolveEndpoint picks the provider for a resumed run, recording an explicit

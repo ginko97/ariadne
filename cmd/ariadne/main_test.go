@@ -768,3 +768,35 @@ func TestAgentsRedactTheProvidersKey(t *testing.T) {
 		t.Errorf("the key survived the agent's redactor: %s", got)
 	}
 }
+
+// A conversation recorded against another endpoint takes that endpoint's key
+// or none. d9e9778 fell back to the server's, which would have sent an
+// OpenRouter key to api.x.ai for a conversation recorded there with no
+// XAI_API_KEY set.
+func TestConversationEndpointNeverLendsTheServersKey(t *testing.T) {
+	t.Setenv("ARIADNE_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-server")
+	t.Setenv("XAI_API_KEY", "")
+
+	st := &loop.State{BaseURL: "https://api.x.ai/v1"}
+	url, key := conversationEndpoint("https://openrouter.ai/api/v1", "sk-or-server", st)
+	if url != "https://api.x.ai/v1" {
+		t.Errorf("url = %q, want the conversation's endpoint", url)
+	}
+	if key == "sk-or-server" {
+		t.Fatal("the OpenRouter key would be sent to api.x.ai")
+	}
+
+	// With its own key set, the conversation uses it.
+	t.Setenv("XAI_API_KEY", "xai-its-own")
+	if _, key := conversationEndpoint("https://openrouter.ai/api/v1", "sk-or-server", st); key != "xai-its-own" {
+		t.Errorf("key = %q, want the endpoint's own key", key)
+	}
+
+	// Same endpoint, or none recorded: the server's key is the right one.
+	for _, s := range []*loop.State{nil, {}, {BaseURL: "https://openrouter.ai/api/v1"}} {
+		if u, k := conversationEndpoint("https://openrouter.ai/api/v1", "sk-or-server", s); k != "sk-or-server" || u != "https://openrouter.ai/api/v1" {
+			t.Errorf("state %+v: got %q %q, want the server's endpoint and key", s, u, k)
+		}
+	}
+}
