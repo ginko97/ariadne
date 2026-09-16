@@ -5,9 +5,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/ginko97/ariadne/internal/tool"
+)
+
+// Separator joins a server name to the tools it offers: "fs" offering
+// "write_file" is the tool "fs__write_file".
+//
+// Every MCP tool is prefixed, not only ones that collide. The reference
+// filesystem server offers write_file, which a built-in already has; prefixing
+// on collision alone would mean a built-in added later silently renames an MCP
+// tool, and every -approve list naming it would stop matching. Dots are not
+// allowed in tool names by OpenAI-compatible APIs, and "__" is the convention
+// other MCP clients already use.
+const Separator = "__"
+
+var (
+	serverName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	// toolName is what OpenAI-compatible endpoints accept. A name outside it
+	// is refused at connect, naming the server and tool, rather than by the
+	// provider as a 400 on the first turn that names neither.
+	toolName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 )
 
 // Config is the file that says which MCP servers to start.
@@ -49,6 +70,13 @@ func LoadConfig(path string) (*Config, error) {
 	for name, s := range c.Servers {
 		if s.Command == "" {
 			return nil, fmt.Errorf("mcp: server %q has no command", name)
+		}
+		// The name becomes the prefix of every tool the server offers, so it has
+		// to be legal inside a tool name, and it cannot contain the separator or
+		// "a__b" offering "c" and "a" offering "b__c" would be the same tool.
+		if !serverName.MatchString(name) || strings.Contains(name, Separator) {
+			return nil, fmt.Errorf("mcp: server name %q must be letters, digits, _ or - and not contain %q, "+
+				"because it prefixes every tool the server offers", name, Separator)
 		}
 	}
 	return &c, nil
@@ -97,6 +125,18 @@ func Connect(ctx context.Context, cfg *Config) (tools []tool.Tool, closeAll func
 			closeAll()
 			return nil, func() {}, fmt.Errorf("mcp: server %q: %w", name, err)
 		}
+		for _, tl := range ts {
+			rt, ok := tl.(*remoteTool)
+			if !ok {
+				continue
+			}
+			rt.name = name + Separator + rt.remote
+			if !toolName.MatchString(rt.name) {
+				closeAll()
+				return nil, func() {}, fmt.Errorf("mcp: server %q: tool %q becomes %q, which is not a legal tool name "+
+					"(letters, digits, _ or -, at most 64); shorten the server name", name, rt.remote, rt.name)
+			}
+		}
 		tools = append(tools, ts...)
 	}
 	return tools, closeAll, nil
@@ -120,7 +160,7 @@ func CheckCollisions(local []tool.Tool, remote []tool.Tool) error {
 		switch {
 		case have[t.Name()]:
 			return fmt.Errorf("mcp: a server offers %q, which is already a built-in tool; "+
-				"rename it on the server or disable that server", t.Name())
+				"rename that server in the config or disable it", t.Name())
 		case seen[t.Name()]:
 			return fmt.Errorf("mcp: two servers both offer %q; disable one of them", t.Name())
 		}

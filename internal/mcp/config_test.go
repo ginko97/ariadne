@@ -111,3 +111,19 @@ func TestCheckCollisionsAllowsDistinctNames(t *testing.T) {
 		t.Errorf("distinct names were refused: %v", err)
 	}
 }
+
+// A server name becomes the prefix of every tool it offers, so it is refused at
+// load when it could not be part of a tool name, or when it contains the
+// separator and two different server/tool pairs could produce one name.
+func TestLoadConfigRejectsServerNamesThatCannotPrefixATool(t *testing.T) {
+	for _, name := range []string{"file.system", "my server", "a__b"} {
+		p := writeConfig(t, `{"mcpServers": {"`+name+`": {"command": "x"}}}`)
+		if _, err := LoadConfig(p); err == nil {
+			t.Errorf("server name %q was accepted", name)
+		}
+	}
+	p := writeConfig(t, `{"mcpServers": {"fs-docs_2": {"command": "x"}}}`)
+	if _, err := LoadConfig(p); err != nil {
+		t.Errorf("a legal server name was refused: %v", err)
+	}
+}

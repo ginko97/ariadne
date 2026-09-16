@@ -70,6 +70,7 @@ func (s *Server) Tools(ctx context.Context) ([]tool.Tool, error) {
 		out = append(out, &remoteTool{
 			session:     s.session,
 			name:        t.Name,
+			remote:      t.Name,
 			description: t.Description,
 			schema:      schema,
 		})
@@ -79,8 +80,12 @@ func (s *Server) Tools(ctx context.Context) ([]tool.Tool, error) {
 
 // remoteTool forwards one named tool to the MCP session.
 type remoteTool struct {
-	session     *mcpsdk.ClientSession
+	session *mcpsdk.ClientSession
+	// name is what the model and the operator see; remote is what the server
+	// calls it. They start equal, and Connect prefixes name with the server
+	// the tool came from.
 	name        string
+	remote      string
 	description string
 	schema      json.RawMessage
 }
@@ -105,7 +110,7 @@ func (r *remoteTool) Call(ctx context.Context, callID string, args json.RawMessa
 	// Arguments is `any` that must marshal to JSON, so raw JSON passes through
 	// untouched — no map[string]any round trip turning ints into float64s.
 	res, err := r.session.CallTool(ctx, &mcpsdk.CallToolParams{
-		Name:      r.name,
+		Name:      r.remote,
 		Arguments: args,
 	})
 	if err != nil {

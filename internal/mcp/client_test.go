@@ -145,3 +145,38 @@ func TestRemoteResultsAreUntrusted(t *testing.T) {
 		t.Error("an MCP result came back trusted; the loop will not fence it")
 	}
 }
+
+// Connect names every tool <server>__<tool>, and a call under that name still
+// reaches the server under the name it registered.
+//
+// The second half is the one a rename breaks: the prefixed name is only what the
+// model and the operator see, and sending it to the server gets "unknown tool".
+func TestConnectPrefixesToolsWithTheServerName(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	cfg := &mcp.Config{Servers: map[string]mcp.ServerSpec{
+		"text": {Command: "go", Args: []string{"run", "./testdata/echoserver"}},
+	}}
+	tools, closeAll, err := mcp.Connect(ctx, cfg)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer closeAll()
+
+	var names []string
+	for _, tl := range tools {
+		names = append(names, tl.Name())
+	}
+	if got, want := strings.Join(names, ","), "text__echo,text__upper"; got != want {
+		t.Fatalf("tool names = %s, want %s", got, want)
+	}
+
+	res, err := tool.New(tools...).Call(ctx, llmToolCall("call_p", "text__upper", `{"text":"hello"}`))
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if res.IsError || res.Content != "HELLO" {
+		t.Errorf("prefixed call = %+v, want HELLO from the server's own upper", res)
+	}
+}

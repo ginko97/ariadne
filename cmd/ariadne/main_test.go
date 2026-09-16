@@ -629,3 +629,50 @@ func TestRetryMessageNamesTheCause(t *testing.T) {
 		}
 	}
 }
+
+// Every MCP tool is gated unless trusted, so a tool nobody thought to list —
+// the fourth way a filesystem server changes a file, or one a server upgrade
+// adds — arrives needing a yes rather than running unasked.
+func TestGateMCPGatesEveryRemoteToolNotTrusted(t *testing.T) {
+	remote := []tool.Tool{
+		remoteStub("fs__read_text_file"), remoteStub("fs__write_file"),
+		remoteStub("fs__edit_file"), remoteStub("fs__move_file"),
+	}
+
+	got, err := gateMCP([]string{"write_file"}, []string{"fs__read_text_file"}, remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "write_file,fs__write_file,fs__edit_file,fs__move_file"
+	if strings.Join(got, ",") != want {
+		t.Errorf("gated = %v, want %s", got, want)
+	}
+
+	// No MCP servers: -approve passes through untouched.
+	if got, _ := gateMCP([]string{"write_file"}, nil, nil); strings.Join(got, ",") != "write_file" {
+		t.Errorf("without MCP, gated = %v, want just write_file", got)
+	}
+}
+
+func TestGateMCPRefusesContradictionsAndBuiltins(t *testing.T) {
+	remote := []tool.Tool{remoteStub("fs__write_file")}
+	for _, c := range []struct {
+		name           string
+		approve, trust []string
+	}{
+		{"a built-in cannot be trusted", nil, []string{"write_file"}},
+		{"an unknown name cannot be trusted", nil, []string{"fs__wirte_file"}},
+		{"both approved and trusted", []string{"fs__write_file"}, []string{"fs__write_file"}},
+	} {
+		if _, err := gateMCP(c.approve, c.trust, remote); err == nil {
+			t.Errorf("%s: accepted", c.name)
+		}
+	}
+
+	// A misspelt MCP tool is told it does not exist and shown what does, not
+	// told that built-ins cannot be trusted, which is true and beside the point.
+	_, err := gateMCP(nil, []string{"fs__wirte_file"}, remote)
+	if err == nil || !strings.Contains(err.Error(), "available: fs__write_file") {
+		t.Errorf("typo error = %v, want one listing the available MCP tools", err)
+	}
+}

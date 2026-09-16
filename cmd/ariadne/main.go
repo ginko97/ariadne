@@ -144,6 +144,9 @@ flags:
   -tool-timeout   abandon a tool call that runs longer than this (default 1m0s)
   -http-timeout   bound one provider request, body included (default 5m0s)
   -mcp-config     JSON file listing MCP servers to start (env ARIADNE_MCP_CONFIG)
+                  each server's tools are named <server>__<tool>, and every one
+                  asks for approval unless named in -trust
+  -trust          MCP tools that run without approval, e.g. fs__read_text_file
 
 chat flags: same as run/resume. While chatting, ` + "`/help`" + ` lists the commands.
 
@@ -192,6 +195,7 @@ func cmdRun(args []string) int {
 	workspace := fs.String("workspace", defaultWorkspace, "directory fetch and write_file are confined to")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "comma-separated tools that need a yes on the terminal before each call")
+	trust := fs.String("trust", "", "MCP tools that run without approval; every other MCP tool asks first")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
 	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
@@ -254,6 +258,11 @@ func cmdRun(args []string) int {
 		fmt.Fprintf(os.Stderr, "ariadne run: %v\n", err)
 		return exitUsage
 	}
+	gated, err := gateMCP(splitList(*approve), splitList(*trust), mcpTools)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne run: %v\n", err)
+		return exitUsage
+	}
 
 	store := &loop.Store{Dir: runsDir}
 	state := loop.NewState(newRunID(), task)
@@ -269,7 +278,7 @@ func cmdRun(args []string) int {
 		Key: key, Model: *model, BaseURL: *baseURL, RunID: state.RunID,
 		MaxSteps: *maxSteps, Budget: *budget, Stream: *stream, Memory: *remember,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
-		Allow: splitList(*allow), Approve: splitList(*approve),
+		Allow: splitList(*allow), Approve: gated,
 		Workspace: *workspace,
 		MCPTools:  mcpTools,
 		Store:     store, Trace: tw,
@@ -296,6 +305,7 @@ func cmdResume(args []string) int {
 	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (defaults to the checkpoint's)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "add tools needing approval; a gate in the checkpoint cannot be dropped here")
+	trust := fs.String("trust", "", "MCP tools that run without approval; every other MCP tool asks first")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
 	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
@@ -370,6 +380,11 @@ func cmdResume(args []string) int {
 		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
 		return exitUsage
 	}
+	gated, err := gateMCP(splitList(*approve), splitList(*trust), mcpTools)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
+		return exitUsage
+	}
 	// Memory turned on for a run that started without it. The checkpoint's
 	// system prompt wins on resume, so the notes have to be added to it here or
 	// the tool would be present with nothing behind it. Recorded, so the next
@@ -383,7 +398,7 @@ func cmdResume(args []string) int {
 		Key: key, Model: state.Model, BaseURL: endpoint, RunID: state.RunID,
 		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
-		Allow: splitList(*allow), Approve: splitList(*approve),
+		Allow: splitList(*allow), Approve: gated,
 		Workspace: workspaceDir,
 		MCPTools:  mcpTools,
 		Store:     store, Trace: tw,
@@ -417,6 +432,7 @@ func cmdChat(args []string) int {
 	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (fresh: default workspace; resumed: checkpoint's unless overridden)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "tools needing a yes on the terminal before each call (resume can only add)")
+	trust := fs.String("trust", "", "MCP tools that run without approval; every other MCP tool asks first")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
 	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
@@ -503,6 +519,11 @@ func cmdChat(args []string) int {
 		fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
 		return exitUsage
 	}
+	gated, err := gateMCP(splitList(*approve), splitList(*trust), mcpTools)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
+		return exitUsage
+	}
 
 	key, envName := apiKey(endpoint)
 	if key == "" {
@@ -552,7 +573,7 @@ func cmdChat(args []string) int {
 		Key: key, Model: startModel, BaseURL: endpoint, RunID: runID,
 		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
-		Allow: splitList(*allow), Approve: splitList(*approve),
+		Allow: splitList(*allow), Approve: gated,
 		ApproveFn: approveOnTerminalReader(os.Stdin, stdinReader),
 		Workspace: workspaceDir,
 		MCPTools:  mcpTools,
@@ -801,6 +822,7 @@ func cmdUI(args []string) int {
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
 	allow := fs.String("allow", "", "comma-separated tools a conversation may call (default: all)")
 	approve := fs.String("approve", "", "tools needing approval in the browser before each call")
+	trust := fs.String("trust", "", "MCP tools that run without approval; every other MCP tool asks first")
 	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (fresh: default workspace; resumed: checkpoint's unless overridden)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
@@ -828,6 +850,11 @@ func cmdUI(args []string) int {
 	// server provides, and checking against the local registry alone made an
 	// MCP tool impossible to gate or grant.
 	if err := checkNames(withRemote(newRegistry("", *workspace).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
+		return exitUsage
+	}
+	gated, err := gateMCP(splitList(*approve), splitList(*trust), mcpTools)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
 		return exitUsage
 	}
@@ -871,7 +898,7 @@ func cmdUI(args []string) int {
 			Workspace: workspaceDir,
 			MCPTools:  mcpTools,
 			OnDelta:   onDelta,
-			Approve:   splitList(*approve),
+			Approve:   gated,
 			// No ApproveFn: internal/server replaces Agent.Approve per request
 			// with one that asks over the stream that request is holding, which
 			// is a writer only the handler has. A denier here would be silently
@@ -1182,6 +1209,49 @@ func retryMessage(status int, delay time.Duration) string {
 	default:
 		return fmt.Sprintf("provider error (http %d), retrying in %s", status, delay)
 	}
+}
+
+// gateMCP returns the tools that need approval: those named in -approve, and
+// every MCP tool not named in -trust.
+//
+// Default-gated because a name-listed -approve only covers the tools somebody
+// thought of. The reference filesystem server has four ways to change a file,
+// and an upgrade can add a fifth; under this rule the fifth arrives gated.
+// Built-ins stay opt-in: this project wrote them and their privileges are the
+// ones the postmortem measured.
+//
+// -trust names only MCP tools. Trusting a built-in would read as widening a
+// gate that was never there, and a name in both lists is a contradiction the
+// operator resolves, not one decided here by precedence.
+func gateMCP(approve, trust []string, remote []tool.Tool) ([]string, error) {
+	isRemote := make(map[string]bool, len(remote))
+	for _, r := range remote {
+		isRemote[r.Name()] = true
+	}
+	trusted := make(map[string]bool, len(trust))
+	for _, n := range trust {
+		if !isRemote[n] {
+			if !strings.Contains(n, mcp.Separator) {
+				return nil, fmt.Errorf("-trust %q: only MCP tools can be trusted; built-in tools are gated with -approve", n)
+			}
+			names := make([]string, 0, len(remote))
+			for _, r := range remote {
+				names = append(names, r.Name())
+			}
+			return nil, fmt.Errorf("-trust %q: no MCP server offers that tool (available: %s)", n, strings.Join(names, ", "))
+		}
+		if contains(approve, n) {
+			return nil, fmt.Errorf("%q is in both -approve and -trust", n)
+		}
+		trusted[n] = true
+	}
+	out := append([]string(nil), approve...)
+	for _, r := range remote {
+		if !trusted[r.Name()] && !contains(out, r.Name()) {
+			out = append(out, r.Name())
+		}
+	}
+	return out, nil
 }
 
 // withRemote adds the tools MCP servers offer to the local definitions, so a
