@@ -116,9 +116,18 @@ func (r *remoteTool) Call(ctx context.Context, callID string, args json.RawMessa
 
 	// IsError means the tool ran and reported failure — recoverable, the model
 	// sees it. That is what ToolResult.IsError exists to express.
+	//
+	// Untrusted always. An MCP server is somebody else's code, and what it
+	// returns is usually somebody else's content besides — a file, a page, an
+	// issue body. Leaving this unset meant the fence the system prompt tells the
+	// model to look for was never drawn around any of it: a filesystem server
+	// reading invoice-2291.html delivered the injection bare, where fetch
+	// reading the same file fences it. Per-server trust would be a config
+	// option, and nothing yet has earned one.
 	return llm.ToolResult{
-		Content: flattenText(res.Content),
-		IsError: res.IsError,
+		Content:   flattenText(res.Content),
+		IsError:   res.IsError,
+		Untrusted: true,
 	}, nil
 }
 

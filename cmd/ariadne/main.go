@@ -216,10 +216,6 @@ func cmdRun(args []string) int {
 	if *remember {
 		rememberFor = "validate"
 	}
-	if err := checkNames(newRegistry(rememberFor, *workspace).Defs(), splitList(*allow), splitList(*approve)); err != nil {
-		fmt.Fprintf(os.Stderr, "ariadne run: %v\n", err)
-		return exitUsage
-	}
 
 	// An explicit allow-list is the operator's sentence, and this project
 	// refuses to widen one everywhere else — resume can narrow a grant and
@@ -251,6 +247,13 @@ func cmdRun(args []string) int {
 		return exitUsage
 	}
 	defer closeMCP()
+	// After connecting, not before: -allow and -approve can name a tool an MCP
+	// server provides, and checking against the local registry alone made an
+	// MCP tool impossible to gate or grant.
+	if err := checkNames(withRemote(newRegistry(rememberFor, *workspace).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne run: %v\n", err)
+		return exitUsage
+	}
 
 	store := &loop.Store{Dir: runsDir}
 	state := loop.NewState(newRunID(), task)
@@ -324,10 +327,6 @@ func cmdResume(args []string) int {
 	if mem {
 		rememberFor = "validate"
 	}
-	if err := checkNames(newRegistry(rememberFor, *workspace).Defs(), splitList(*allow), splitList(*approve)); err != nil {
-		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
-		return exitUsage
-	}
 
 	if err := checkResumeGrants(mem, splitList(*allow), state); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
@@ -364,6 +363,13 @@ func cmdResume(args []string) int {
 		return exitUsage
 	}
 	defer closeMCP()
+	// After connecting, not before: -allow and -approve can name a tool an MCP
+	// server provides, and checking against the local registry alone made an
+	// MCP tool impossible to gate or grant.
+	if err := checkNames(withRemote(newRegistry(rememberFor, *workspace).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
+		return exitUsage
+	}
 	// Memory turned on for a run that started without it. The checkpoint's
 	// system prompt wins on resume, so the notes have to be added to it here or
 	// the tool would be present with nothing behind it. Recorded, so the next
@@ -447,10 +453,6 @@ func cmdChat(args []string) int {
 	if mem {
 		rememberFor = "validate"
 	}
-	if err := checkNames(newRegistry(rememberFor, *workspace).Defs(), splitList(*allow), splitList(*approve)); err != nil {
-		fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
-		return exitUsage
-	}
 	if resuming {
 		if err := checkResumeGrants(mem, splitList(*allow), state); err != nil {
 			fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
@@ -494,6 +496,13 @@ func cmdChat(args []string) int {
 		return exitUsage
 	}
 	defer closeMCP()
+	// After connecting, not before: -allow and -approve can name a tool an MCP
+	// server provides, and checking against the local registry alone made an
+	// MCP tool impossible to gate or grant.
+	if err := checkNames(withRemote(newRegistry(rememberFor, *workspace).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
+		return exitUsage
+	}
 
 	key, envName := apiKey(endpoint)
 	if key == "" {
@@ -805,10 +814,6 @@ func cmdUI(args []string) int {
 	if *model == "" {
 		*model = defaultModelFor(*baseURL)
 	}
-	if err := checkNames(newRegistry("", *workspace).Defs(), splitList(*allow), splitList(*approve)); err != nil {
-		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
-		return exitUsage
-	}
 
 	// For the life of the server, not per request: a subprocess started and
 	// stopped around every turn would pay its handshake each time, and the
@@ -819,6 +824,13 @@ func cmdUI(args []string) int {
 		return exitUsage
 	}
 	defer closeMCP()
+	// After connecting, not before: -allow and -approve can name a tool an MCP
+	// server provides, and checking against the local registry alone made an
+	// MCP tool impossible to gate or grant.
+	if err := checkNames(withRemote(newRegistry("", *workspace).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
+		return exitUsage
+	}
 
 	key, envName := apiKey(*baseURL)
 	if key == "" {
@@ -1090,7 +1102,7 @@ func newAgentFor(o agentOpts) *loop.Agent {
 				LatencyMS: delay.Milliseconds(),
 				IsError:   true,
 			})
-			fmt.Fprintf(os.Stderr, "rate limited (http %d), retrying in %s\n", status, delay)
+			fmt.Fprintln(os.Stderr, retryMessage(status, delay))
 		}),
 	)
 
@@ -1153,6 +1165,33 @@ func checkNames(defs []llm.ToolDef, lists ...[]string) error {
 		}
 	}
 	return nil
+}
+
+// retryMessage says why a provider call is being retried.
+//
+// It used to say "rate limited" for every retry, including status 0 (no
+// response at all: a dead endpoint or a dropped network) and 5xx. Somebody
+// watching "rate limited" waits it out; somebody watching "unreachable" checks
+// -base-url. Only one of those fixes a typo in a URL.
+func retryMessage(status int, delay time.Duration) string {
+	switch {
+	case status == 0:
+		return fmt.Sprintf("provider unreachable, retrying in %s", delay)
+	case status == http.StatusTooManyRequests:
+		return fmt.Sprintf("rate limited (http %d), retrying in %s", status, delay)
+	default:
+		return fmt.Sprintf("provider error (http %d), retrying in %s", status, delay)
+	}
+}
+
+// withRemote adds the tools MCP servers offer to the local definitions, so a
+// name check sees everything a run could actually call.
+func withRemote(local []llm.ToolDef, remote []tool.Tool) []llm.ToolDef {
+	out := append([]llm.ToolDef(nil), local...)
+	for _, r := range remote {
+		out = append(out, llm.ToolDef{Name: r.Name()})
+	}
+	return out
 }
 
 // splitList parses a comma-separated flag. An empty flag yields nil, which is

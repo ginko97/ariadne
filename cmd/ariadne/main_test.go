@@ -9,10 +9,12 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
 	"github.com/ginko97/ariadne/internal/memory"
+	"github.com/ginko97/ariadne/internal/tool"
 	"github.com/ginko97/ariadne/internal/trace"
 )
 
@@ -576,6 +578,54 @@ func TestUsageNamesEveryFlag(t *testing.T) {
 	for name := range seen {
 		if !regexp.MustCompile(`(?m)^\s+-` + regexp.QuoteMeta(name) + `\s`).MatchString(usageText) {
 			t.Errorf("-%s is registered but --help never mentions it", name)
+		}
+	}
+}
+
+// remoteStub is a tool as an MCP server would present it: known only by name
+// until connected. Nothing here calls it.
+type remoteStub string
+
+func (r remoteStub) Name() string          { return string(r) }
+func (remoteStub) Description() string     { return "" }
+func (remoteStub) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (remoteStub) Call(context.Context, string, json.RawMessage) (llm.ToolResult, error) {
+	return llm.ToolResult{}, nil
+}
+
+// -allow and -approve can name a tool an MCP server provides.
+//
+// They could not: every command checked the names against the local registry
+// before connecting, so `-approve write_file` against a filesystem server's
+// write tool exited "unknown tool" and the only way to run with that server
+// was ungated. The gate the postmortem measured did not reach any MCP tool.
+func TestNameCheckSeesRemoteTools(t *testing.T) {
+	local := newRegistry("", t.TempDir()).Defs()
+	remote := []tool.Tool{remoteStub("read_text_file"), remoteStub("edit_file")}
+
+	if err := checkNames(local, nil, []string{"edit_file"}); err == nil {
+		t.Fatal("precondition: the local registry alone should not know edit_file")
+	}
+	if err := checkNames(withRemote(local, remote), []string{"calc", "read_text_file"}, []string{"edit_file"}); err != nil {
+		t.Errorf("an MCP tool could not be granted or gated: %v", err)
+	}
+	// And a typo is still a typo.
+	if err := checkNames(withRemote(local, remote), nil, []string{"edit_fiel"}); err == nil {
+		t.Error("a misspelt tool passed once remote tools were included")
+	}
+}
+
+func TestRetryMessageNamesTheCause(t *testing.T) {
+	for _, c := range []struct {
+		status int
+		want   string
+	}{
+		{0, "provider unreachable"},
+		{429, "rate limited"},
+		{503, "provider error (http 503)"},
+	} {
+		if got := retryMessage(c.status, time.Second); !strings.HasPrefix(got, c.want) {
+			t.Errorf("retryMessage(%d) = %q, want prefix %q", c.status, got, c.want)
 		}
 	}
 }
