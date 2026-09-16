@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -22,6 +23,7 @@ const (
 	openRouterModelsURL = "https://openrouter.ai/api/v1/models"
 	modelsTTL           = 24 * time.Hour
 	modelsTimeout       = 10 * time.Second
+	maxModelsBytes      = 32 << 20
 )
 
 // ModelRow is one row of the picker: what to choose between models on.
@@ -191,7 +193,10 @@ func (m *ModelCache) fetch(ctx context.Context) ([]ModelRow, error) {
 	}
 	client := m.Client
 	if client == nil {
-		client = http.DefaultClient
+		// Not http.DefaultClient: that is shared, mutable process state any
+		// package can reconfigure. NewModelCache always sets one; this only
+		// catches a ModelCache built as a literal.
+		client = &http.Client{Timeout: timeout}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -203,7 +208,9 @@ func (m *ModelCache) fetch(ctx context.Context) ([]ModelRow, error) {
 	}
 
 	var w wireModels
-	if err := json.NewDecoder(resp.Body).Decode(&w); err != nil {
+	// Bounded like the completion body. OpenRouter's full list is a couple of
+	// megabytes; a response ten times that is not a model list.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxModelsBytes)).Decode(&w); err != nil {
 		return nil, fmt.Errorf("models: decode: %w", err)
 	}
 

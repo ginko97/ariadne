@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -237,5 +238,31 @@ func TestModelsFailureCooldownPreventsHammeringUpstream(t *testing.T) {
 	_, _, _ = m.Get(context.Background())
 	if hits.Load() != 2 {
 		t.Errorf("hits = %d after cooldown expired, want 2", hits.Load())
+	}
+}
+
+// poisonTransport fails any request it sees, so a test can prove a client is
+// not the one being used.
+type poisonTransport struct{}
+
+func (poisonTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("http.DefaultClient was used")
+}
+
+// A ModelCache built as a literal, with no Client, does not fall back to
+// http.DefaultClient — shared process state that any imported package can
+// reconfigure. Proved by poisoning it for the duration: the fetch still works.
+// Not parallel-safe, and nothing in this package runs in parallel.
+func TestModelsNeverUsesTheDefaultClient(t *testing.T) {
+	ts, _ := upstream(t, modelsFixture, http.StatusOK)
+
+	saved := http.DefaultClient
+	http.DefaultClient = &http.Client{Transport: poisonTransport{}}
+	t.Cleanup(func() { http.DefaultClient = saved })
+
+	m := &ModelCache{URL: ts.URL, TTL: time.Minute, Fallback: "configured/model"}
+	rows, source, warning := m.Get(context.Background())
+	if source != "live" || len(rows) == 0 {
+		t.Errorf("source=%q rows=%d warning=%q; want a live fetch without the default client", source, len(rows), warning)
 	}
 }

@@ -37,6 +37,11 @@ const (
 	// step, with nothing on the command line having asked for that.
 	maxTotalBackoff  = 90 * time.Second
 	maxErrBodyLength = 512
+
+	// maxResponseBytes caps a non-streaming completion body. A long answer is
+	// hundreds of kilobytes of JSON; sixteen megabytes is room for any real one
+	// and nowhere near enough to matter if something that is not one arrives.
+	maxResponseBytes = 16 << 20
 )
 
 // OpenAI speaks the OpenAI chat-completions protocol. That protocol is a de
@@ -247,11 +252,23 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
 
 		// ReadAll consumes to EOF, which is the drain: the connection goes back
 		// to the pool reusable without a separate io.Copy.
-		body, readErr := io.ReadAll(resp.Body)
+		//
+		// Bounded, one byte past the cap so "exactly at the limit" and "over it"
+		// are distinguishable. Unbounded, a misbehaving gateway or a proxy
+		// returning something that is not a completion could hold the whole of
+		// it in memory; the timeout bounds how long, not how much.
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 		resp.Body.Close()
 
 		if readErr != nil {
 			return Response{}, fmt.Errorf("openai: read response: %w", readErr)
+		}
+		if len(body) > maxResponseBytes {
+			// Not retried: the same request gets the same oversized answer, and a
+			// truncated body fed to fromWire would fail as "malformed JSON", naming
+			// the symptom instead of the cause.
+			return Response{}, fmt.Errorf("openai: %s: response exceeds %d MB; refusing to read the rest",
+				resp.Status, maxResponseBytes>>20)
 		}
 
 		if isRetryableStatus(resp.StatusCode) && attempt < maxRetries {

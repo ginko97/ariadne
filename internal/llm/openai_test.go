@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -472,5 +473,27 @@ func TestFromWireLeavesWhoAnsweredEmptyWhenUnreported(t *testing.T) {
 	}
 	if resp.Model != "" || resp.Provider != "" {
 		t.Errorf("Model=%q Provider=%q, want both empty", resp.Model, resp.Provider)
+	}
+}
+
+// A body past the cap is refused, named as too large, and not retried.
+//
+// Named, because the alternative failure is worse than it looks: a truncated
+// body reaching fromWire fails as malformed JSON, which sends somebody looking
+// at the parser. Not retried, because the same request gets the same answer.
+func TestCompleteRefusesAnOversizedBody(t *testing.T) {
+	huge := bytes.Repeat([]byte("x"), maxResponseBytes+1)
+	rt := &RecordedTransport{Responses: [][]byte{huge, huge}}
+	o := NewOpenAI("k", WithBaseURL("https://api.test.example/v1"), WithHTTPClient(&http.Client{Transport: rt}))
+
+	_, err := o.Complete(context.Background(), Request{
+		Model:    "m",
+		Messages: []Message{{Role: RoleUser, Blocks: []Block{{Type: BlockText, Text: "hi"}}}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("err = %v, want one naming the size", err)
+	}
+	if n := len(rt.Requests); n != 1 {
+		t.Errorf("made %d requests, want 1", n)
 	}
 }
