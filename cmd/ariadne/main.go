@@ -1197,6 +1197,7 @@ func newAgentFor(o agentOpts) *loop.Agent {
 
 		RequireApproval: approve,
 		Approve:         approveFn,
+		Redact:          redactSecrets(os.Getenv),
 
 		RunTool:       reg.Call,
 		Checkpoint:    o.Store.Save,
@@ -1245,6 +1246,34 @@ func retryMessage(status int, delay time.Duration) string {
 	default:
 		return fmt.Sprintf("provider error (http %d), retrying in %s", status, delay)
 	}
+}
+
+// secretEnvNames are the variables this process holds credentials in: the
+// ones apiKey reads, which dotenv.Load fills from .env.
+var secretEnvNames = []string{"ARIADNE_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY"}
+
+// minRedactLen keeps a short or placeholder value from redacting ordinary
+// text: a key set to "x" would otherwise blank every x in every result.
+const minRedactLen = 12
+
+// redactSecrets returns the Agent.Redact function for this process's own keys.
+//
+// The values are read once, when the agent is built, so a result is scrubbed
+// of exactly the keys this run could have leaked. Each is replaced by a label
+// naming the variable, so the model can say what it found without repeating
+// it, and a person reading the trace knows a key was there.
+func redactSecrets(getenv func(string) string) func(string) string {
+	var pairs []string
+	for _, name := range secretEnvNames {
+		if v := strings.TrimSpace(getenv(name)); len(v) >= minRedactLen {
+			pairs = append(pairs, v, "[REDACTED "+name+"]")
+		}
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	r := strings.NewReplacer(pairs...)
+	return r.Replace
 }
 
 // gateMCP returns the tools that need approval: those named in -approve, and

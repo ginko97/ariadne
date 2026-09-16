@@ -720,3 +720,51 @@ func TestExecIsAlwaysGated(t *testing.T) {
 		}
 	}
 }
+
+// The process's own keys are replaced with a label naming the variable; values
+// too short to be a key are left alone, so a placeholder cannot blank ordinary
+// text; and with no keys set there is nothing to do.
+func TestRedactSecretsUsesThisProcesssKeys(t *testing.T) {
+	env := map[string]string{
+		"OPENROUTER_API_KEY": "sk-or-v1-abcdefghijklmnop",
+		"GEMINI_API_KEY":     "x",
+		"UNRELATED":          "sk-not-ours-abcdefghijk",
+	}
+	r := redactSecrets(func(k string) string { return env[k] })
+	if r == nil {
+		t.Fatal("no redactor with a key set")
+	}
+	got := r("key=sk-or-v1-abcdefghijklmnop, other=sk-not-ours-abcdefghijk, text with x in it")
+	if strings.Contains(got, "sk-or-v1-abcdefghijklmnop") {
+		t.Errorf("own key survived: %s", got)
+	}
+	if !strings.Contains(got, "[REDACTED OPENROUTER_API_KEY]") {
+		t.Errorf("no label naming the variable: %s", got)
+	}
+	if !strings.Contains(got, "text with x in it") {
+		t.Errorf("a one-character placeholder redacted ordinary text: %s", got)
+	}
+	if !strings.Contains(got, "sk-not-ours-abcdefghijk") {
+		t.Errorf("a value not held by this process was touched: %s", got)
+	}
+
+	if redactSecrets(func(string) string { return "" }) != nil {
+		t.Error("a redactor was built with no keys to redact")
+	}
+}
+
+// Every agent the commands build carries the redactor, so no command can offer
+// exec, fetch or an MCP tool with the process's key readable in the output.
+func TestAgentsRedactTheProvidersKey(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-v1-wired-into-every-agent")
+	a := newAgentFor(agentOpts{
+		Key: "k", Model: "m", BaseURL: "https://example.test/v1", RunID: "run_test",
+		MaxSteps: 5, Exec: true, Store: &loop.Store{Dir: t.TempDir()},
+	})
+	if a.Redact == nil {
+		t.Fatal("the agent has no redactor")
+	}
+	if got := a.Redact("OPENROUTER_API_KEY=sk-or-v1-wired-into-every-agent"); strings.Contains(got, "wired-into") {
+		t.Errorf("the key survived the agent's redactor: %s", got)
+	}
+}

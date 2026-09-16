@@ -55,11 +55,13 @@ var _ Tool = Exec{}
 func (Exec) Name() string { return "exec" }
 
 func (Exec) Description() string {
-	return "Run a program with arguments, in the workspace directory. argv[0] is " +
-		"the program, found on PATH; there is no shell, so pipes, redirection, " +
-		"globs and built-in commands like dir or cd do not work unless you run a " +
-		"shell program explicitly. Every call is shown to the operator for " +
-		"approval before it runs. Output is stdout and stderr combined, capped."
+	return "Run a program with arguments. It starts in the workspace directory but " +
+		"is NOT confined to it: the program can read and write anywhere the user " +
+		"running this agent can, unlike fetch and write_file. argv[0] is the program, " +
+		"found on PATH; there is no shell, so pipes, redirection, globs and built-in " +
+		"commands like dir or cd do not work unless you run a shell program " +
+		"explicitly. Every call is shown to the operator for approval before it " +
+		"runs. Output is stdout and stderr combined, capped."
 }
 
 func (Exec) Schema() json.RawMessage {

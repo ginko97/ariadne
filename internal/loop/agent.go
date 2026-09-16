@@ -85,6 +85,21 @@ type Agent struct {
 	// continuing would mean guessing on the operator's behalf.
 	Approve func(ctx context.Context, call llm.ToolCall) (bool, error)
 
+	// Redact, if set, rewrites every tool result before anything else sees it:
+	// the fence, the trace, the checkpoint, and the model.
+	//
+	// It exists for the secrets this process itself holds. exec is not confined,
+	// so an approved `type ..\.env` returns the provider key as tool output, and
+	// from there it goes to the provider in the next request and to disk in
+	// plain text. Applied here rather than in a tool because the leak is not
+	// exec's: fetch of a file in the workspace, or an MCP server, returns the
+	// same bytes the same way.
+	//
+	// A string match, and that is its limit: a program that encodes the key
+	// before printing it gets past. It stops the plain read, accidental or
+	// injected, which is the one that needs no cleverness.
+	Redact func(string) string
+
 	BaseURL string
 	Tools   []llm.ToolDef
 	RunTool ToolRunner
@@ -472,6 +487,9 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 func (a *Agent) runOne(ctx context.Context, s *State, i int, c llm.ToolCall, mu *sync.Mutex) error {
 	toolStarted := time.Now()
 	res, err := a.callTool(ctx, c)
+	if a.Redact != nil {
+		res.Content = a.Redact(res.Content)
+	}
 	content := res.Content
 	if res.Untrusted {
 		content = fence(c.Name, res.Content)
@@ -490,6 +508,9 @@ func (a *Agent) runOne(ctx context.Context, s *State, i int, c llm.ToolCall, mu 
 			return ctxErr
 		}
 		b.Content = err.Error()
+		if a.Redact != nil {
+			b.Content = a.Redact(b.Content)
+		}
 		b.IsError = true
 	}
 
