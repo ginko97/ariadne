@@ -380,7 +380,7 @@ func cmdResume(args []string) int {
 	// After connecting, not before: -allow and -approve can name a tool an MCP
 	// server provides, and checking against the local registry alone made an
 	// MCP tool impossible to gate or grant.
-	if err := checkNames(withRemote(newRegistry(rememberFor, *workspace, *allowExec).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
+	if err := checkNames(withRemote(newRegistry(rememberFor, workspaceDir, *allowExec).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
 		return exitUsage
 	}
@@ -520,7 +520,7 @@ func cmdChat(args []string) int {
 	// After connecting, not before: -allow and -approve can name a tool an MCP
 	// server provides, and checking against the local registry alone made an
 	// MCP tool impossible to gate or grant.
-	if err := checkNames(withRemote(newRegistry(rememberFor, *workspace, *allowExec).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
+	if err := checkNames(withRemote(newRegistry(rememberFor, workspaceDir, *allowExec).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
 		return exitUsage
 	}
@@ -843,10 +843,15 @@ func cmdUI(args []string) int {
 		*model = defaultModelFor(*baseURL)
 	}
 
+	workspaceDir := *workspace
+	if workspaceDir == "" {
+		workspaceDir = defaultWorkspace
+	}
+
 	// For the life of the server, not per request: a subprocess started and
 	// stopped around every turn would pay its handshake each time, and the
 	// agent factory has no moment to close one.
-	mcpTools, closeMCP, err := connectMCP(context.Background(), *mcpConfig, "", *workspace)
+	mcpTools, closeMCP, err := connectMCP(context.Background(), *mcpConfig, "", workspaceDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
 		return exitUsage
@@ -855,7 +860,7 @@ func cmdUI(args []string) int {
 	// After connecting, not before: -allow and -approve can name a tool an MCP
 	// server provides, and checking against the local registry alone made an
 	// MCP tool impossible to gate or grant.
-	if err := checkNames(withRemote(newRegistry("", *workspace, *allowExec).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
+	if err := checkNames(withRemote(newRegistry("", workspaceDir, *allowExec).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
 		return exitUsage
 	}
@@ -890,14 +895,26 @@ func cmdUI(args []string) int {
 		} else if workspaceDir == "" {
 			workspaceDir = defaultWorkspace
 		}
+		if state != nil && state.Workspace == "" {
+			state.Workspace = workspaceDir
+		}
 
 		budgetVal := *budget
 		if state != nil {
 			budgetVal = resolveBudget(*budget, state)
 		}
 
+		endpoint := *baseURL
+		endpointKey := key
+		if state != nil && state.BaseURL != "" && state.BaseURL != *baseURL {
+			endpoint = state.BaseURL
+			if k, _ := apiKey(endpoint); k != "" {
+				endpointKey = k
+			}
+		}
+
 		agent := newAgentFor(agentOpts{
-			Key: key, Model: *model, BaseURL: *baseURL, RunID: runID,
+			Key: endpointKey, Model: *model, BaseURL: endpoint, RunID: runID,
 			MaxSteps: *maxSteps, Budget: budgetVal, Exec: *allowExec,
 			ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 			Allow:     splitList(*allow),
@@ -1925,6 +1942,7 @@ func resolveWorkspace(flag string, st *loop.State) string {
 	if st.Workspace != "" {
 		return st.Workspace
 	}
+	st.Workspace = defaultWorkspace
 	return defaultWorkspace
 }
 

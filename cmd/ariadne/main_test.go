@@ -548,6 +548,9 @@ func TestResolveWorkspace(t *testing.T) {
 		if got := resolveWorkspace("", st); got != defaultWorkspace {
 			t.Errorf("got %q, want %q", got, defaultWorkspace)
 		}
+		if st.Workspace != defaultWorkspace {
+			t.Errorf("st.Workspace = %q, want recorded default %q", st.Workspace, defaultWorkspace)
+		}
 	})
 }
 
