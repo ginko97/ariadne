@@ -32,6 +32,27 @@ step. Writes are atomic: temp file, `Sync`, then `rename`. `rename` is atomic ov
 existing file so a reader never sees a partial checkpoint, and the `Sync` is what stops a
 power cut leaving a perfectly-renamed empty one.
 
+```mermaid
+sequenceDiagram
+    participant L as loop
+    participant P as provider
+    participant T as tools
+    participant D as checkpoint on disk
+    L->>P: the conversation so far
+    P-->>L: two tool calls, each with a call ID
+    L->>D: write: calls requested, none run
+    L->>T: call 1
+    T-->>L: result 1
+    L->>D: write: result 1 recorded
+    Note over L,D: kill -9 here, before call 2
+    D-->>L: resume loads the checkpoint
+    Note over L: call 1 has a result, call 2 does not
+    L->>T: call 2 only, same call ID
+    T-->>L: result 2
+    L->>D: write: result 2 recorded
+    L->>P: the conversation, now complete
+```
+
 ### Why resume does not ask the model again
 
 Resume finishes any half-executed batch **from the conversation itself** before making a
@@ -142,6 +163,40 @@ Four controls went in afterwards, each measured against the same fixture:
 | `-allow calc,fetch` | refuses unlisted tools at the loop; a grant can never be widened on resume | nothing |
 | `-approve write_file` | asks per call, with the arguments in view; denies when there is no terminal and when there is no approver | a human being there |
 | MCP default gate, `-exec` | every MCP tool asks unless `-trust`ed; `exec` always asks, gets an environment allow-list, and ariadne's own API keys are redacted from every tool result. `exec` is **not** confined: an approved program can open any file you can, `.env` included, and only those four keys are redacted | a human being there |
+
+```mermaid
+flowchart TD
+    M["model asks for a tool call"] --> A{"allowed? no -allow means every tool"}
+    A -- no --> D["denied; the model is told why"]
+    A -- yes --> G{"needs approval?"}
+    G -- "yes: -approve, every MCP tool unless -trust, exec always" --> P["card in the terminal or browser"]
+    P -- "deny, no answer, tab closed" --> D
+    P -- approve --> T{"which tool"}
+    G -- no --> T
+    T -- "fetch, write_file" --> R["os.Root: cannot leave the workspace"]
+    T -- "MCP tool" --> S["confined only by the server's own arguments"]
+    T -- exec --> X["NOT confined: runs as you, env allow-list, timeout, 64 KB cap"]
+    R --> RD["ariadne's own API keys redacted"]
+    S --> RD
+    X --> RD
+    RD --> F["untrusted output fenced as data"]
+    F --> OUT["trace, checkpoint, and the next request to the provider"]
+```
+
+Every call ends in the same box. Whatever a tool returns is written to disk and sent to the
+provider on the next turn, so approving a read approves sending what it reads.
+
+### What `exec` can reach
+
+`exec` starts in the workspace and is not confined to it. It runs a program as the user
+running ariadne, and that program opens whatever files it likes: `..\.env`, `~/.ssh`, a
+document in another folder. The approval card is the control, and the card shows the full
+argv — including a `python -c` script, which is a shell in all but name. Redaction covers
+ariadne's own four API keys and nothing else.
+
+If a task only needs to read and edit files, leave `-exec` off and give it a filesystem MCP
+server pointed at the directory instead; that server confines itself. Turn `exec` on for
+the part that has to run something, like `go test`.
 
 The sandbox is there because the first version was **not** one. Confinement was lexical —
 clean the path, resolve symlinks, check the prefix — and a Windows directory junction,
@@ -288,6 +343,8 @@ ariadne run -stream -allow calc,fetch -approve write_file "..."
 ariadne run -context-budget 8000 -remember "..."
 ariadne resume <run-id>
 ariadne run -workspace ~/code/project "..."   # point the file tools somewhere
+ariadne chat -exec -workspace ~/code/project  # let it run programs; every call asks
+ariadne chat -mcp-config mcp.json -trust fs__read_text_file   # MCP tools; reads skip the card
 ariadne eval   -models a,b -min-pass-rate 0.9
 ariadne traces --stats
 ariadne traces --kind tool_denied,approval
@@ -296,6 +353,18 @@ ariadne traces --kind tool_denied,approval
 `ariadne -h` lists every flag. The ones worth knowing: `-model` and `-base-url` pick the
 provider, `-max-steps` and `-context-budget` bound the run, `-allow` and `-approve` bound
 what it may do, and `-tool-timeout` / `-http-timeout` bound how long it may wait.
+
+`-mcp-config` takes the `mcpServers` file other MCP clients already use. Each server's
+tools are named `<server>__<tool>`, and every one asks for approval unless listed in
+`-trust`:
+
+```json
+{
+  "mcpServers": {
+    "fs": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/me/code/project"]}
+  }
+}
+```
 
 The answer goes to stdout and everything else to stderr, so `ariadne run "..." >
 answer.txt` leaves you with the answer and nothing else. The one exception is a streamed
