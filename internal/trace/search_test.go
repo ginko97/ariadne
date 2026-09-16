@@ -301,9 +301,6 @@ func TestSummariseResumedRunDoesNotInflateSteps(t *testing.T) {
 	if st.Steps != 3 {
 		t.Errorf("Steps = %d, want 3 (cumulative steps were double-counted across segments)", st.Steps)
 	}
-	if len(st.Failed) != 0 {
-		t.Errorf("Failed = %v, want 0 (cleanly resumed run was falsely marked failed)", st.Failed)
-	}
 }
 
 // Free-text query must match CallID, so searching for a specific call finds
@@ -319,5 +316,39 @@ func TestSearchMatchesCallID(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Fatalf("got %d matches, want 1 for call_id search", len(got))
+	}
+}
+
+// A resumed run appends segments to one trace, and the last segment is the
+// run's result: an earlier failure that a later resume finished is not a
+// failure, and a later failure is one whatever came before it. A run that
+// started a segment and never ended it is incomplete, and only that.
+func TestSummariseLastSegmentDecidesFailure(t *testing.T) {
+	endOK := `{"run_id":"r","seq":3,"kind":"run_end","step":2}`
+	endErr := `{"run_id":"r","seq":3,"kind":"run_end","step":2,"error":"context canceled"}`
+
+	for _, c := range []struct {
+		name                   string
+		events                 []string
+		wantFailed, wantIncomp bool
+	}{
+		{"failed then resumed cleanly", []string{evStart, endErr, evStart, endOK}, false, false},
+		{"succeeded then failed on resume", []string{evStart, endOK, evStart, endErr}, true, false},
+		{"failed then crashed mid-resume", []string{evStart, endErr, evStart}, false, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeTrace(t, dir, "run_20260101T000000_seg", c.events...)
+			st, err := Summarise(dir, Query{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(st.Failed) == 1; got != c.wantFailed {
+				t.Errorf("Failed = %v, want failed=%v", st.Failed, c.wantFailed)
+			}
+			if got := len(st.Incomplete) == 1; got != c.wantIncomp {
+				t.Errorf("Incomplete = %v, want incomplete=%v", st.Incomplete, c.wantIncomp)
+			}
+		})
 	}
 }
