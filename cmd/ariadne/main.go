@@ -115,8 +115,13 @@ func main() {
 	}
 }
 
-func usage() {
-	fmt.Fprint(os.Stderr, `ariadne — an agent runtime where a run is a job
+func usage() { fmt.Fprint(os.Stderr, usageText) }
+
+// usageText is checked against every flag the commands register by
+// TestUsageNamesEveryFlag. It is hand-written, and it drifted: -mcp-config
+// shipped in 0ec4602 with no line here, the same way the README once omitted
+// chat and ui entirely.
+const usageText = `ariadne — an agent runtime where a run is a job
 
 usage:
   ariadne run    [flags] <task>
@@ -132,14 +137,18 @@ flags:
   -max-steps      ceiling on loop iterations (default 10)
   -allow          comma-separated tools this run may call (default: all)
   -workspace      directory fetch and write_file are confined to (default workspace)
-  -approve        tools needing a yes on the terminal before each call
+  -approve        tools needing a yes before each call (terminal; the browser under ui)
   -context-budget compact the conversation past this many prompt tokens (0: never)
   -stream         print tokens and tool calls as they arrive
   -remember       let the run read and append to MEMORY.md (off by default)
   -tool-timeout   abandon a tool call that runs longer than this (default 1m0s)
   -http-timeout   bound one provider request, body included (default 5m0s)
+  -mcp-config     JSON file listing MCP servers to start (env ARIADNE_MCP_CONFIG)
 
-chat flags: same as run/resume. While chatting, `+"`/help`"+` lists the commands.
+chat flags: same as run/resume. While chatting, ` + "`/help`" + ` lists the commands.
+
+ui flags: the same, without -stream and -remember, plus
+  -port           loopback port to listen on (default 7357, 0: any free; env ARIADNE_PORT)
 
 eval flags:
   -models         comma-separated model ids  (default: ARIADNE_MODEL)
@@ -158,8 +167,7 @@ traces flags (must come before the search text):
 environment:
   ARIADNE_API_KEY   api key; falls back to GEMINI_API_KEY, then OPENROUTER_API_KEY
                     .env in the repo root is read if present
-`)
-}
+`
 
 // defaultModelFor picks a model that belongs to the endpoint being used.
 //

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -546,4 +547,35 @@ func TestResolveWorkspace(t *testing.T) {
 			t.Errorf("got %q, want %q", got, defaultWorkspace)
 		}
 	})
+}
+
+// Every flag a command registers is named in --help.
+//
+// The usage text is a hand-written const and the flags are registered inside
+// each cmd function, so nothing but this keeps the two in step. They had not
+// been: -mcp-config shipped in 0ec4602 and -port in the ui work with neither
+// in the usage block, which leaves a whole capability invisible to anyone who
+// reads --help instead of the source.
+//
+// Reading main.go is deliberate. The flag sets are built inside functions that
+// need a provider and a store to run, and registering them elsewhere just so a
+// test could list them would be the tail wagging the dog.
+func TestUsageNamesEveryFlag(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := regexp.MustCompile(`fs\.(?:String|Int|Bool|Duration|Float64)\("([a-z][a-z-]*)"`)
+	seen := map[string]bool{}
+	for _, m := range re.FindAllStringSubmatch(string(src), -1) {
+		seen[m[1]] = true
+	}
+	if len(seen) < 10 {
+		t.Fatalf("found only %d flags in main.go; the pattern has stopped matching how flags are registered", len(seen))
+	}
+	for name := range seen {
+		if !regexp.MustCompile(`(?m)^\s+-` + regexp.QuoteMeta(name) + `\s`).MatchString(usageText) {
+			t.Errorf("-%s is registered but --help never mentions it", name)
+		}
+	}
 }
