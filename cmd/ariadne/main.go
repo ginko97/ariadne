@@ -141,6 +141,8 @@ flags:
   -context-budget compact the conversation past this many prompt tokens (0: never)
   -stream         print tokens and tool calls as they arrive
   -remember       let the run read and append to MEMORY.md (off by default)
+  -exec           offer exec: run a program (argv, no shell) in the workspace;
+                  every call asks, and no flag exempts it (off by default)
   -tool-timeout   abandon a tool call that runs longer than this (default 1m0s)
   -http-timeout   bound one provider request, body included (default 5m0s)
   -mcp-config     JSON file listing MCP servers to start (env ARIADNE_MCP_CONFIG)
@@ -196,6 +198,7 @@ func cmdRun(args []string) int {
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "comma-separated tools that need a yes on the terminal before each call")
 	trust := fs.String("trust", "", "MCP tools that run without approval; every other MCP tool asks first")
+	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
 	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
@@ -254,7 +257,7 @@ func cmdRun(args []string) int {
 	// After connecting, not before: -allow and -approve can name a tool an MCP
 	// server provides, and checking against the local registry alone made an
 	// MCP tool impossible to gate or grant.
-	if err := checkNames(withRemote(newRegistry(rememberFor, *workspace).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
+	if err := checkNames(withRemote(newRegistry(rememberFor, *workspace, *allowExec).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne run: %v\n", err)
 		return exitUsage
 	}
@@ -276,7 +279,7 @@ func cmdRun(args []string) int {
 
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: *model, BaseURL: *baseURL, RunID: state.RunID,
-		MaxSteps: *maxSteps, Budget: *budget, Stream: *stream, Memory: *remember,
+		MaxSteps: *maxSteps, Budget: *budget, Stream: *stream, Memory: *remember, Exec: *allowExec,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: gated,
 		Workspace: *workspace,
@@ -306,6 +309,7 @@ func cmdResume(args []string) int {
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "add tools needing approval; a gate in the checkpoint cannot be dropped here")
 	trust := fs.String("trust", "", "MCP tools that run without approval; every other MCP tool asks first")
+	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
 	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
@@ -376,7 +380,7 @@ func cmdResume(args []string) int {
 	// After connecting, not before: -allow and -approve can name a tool an MCP
 	// server provides, and checking against the local registry alone made an
 	// MCP tool impossible to gate or grant.
-	if err := checkNames(withRemote(newRegistry(rememberFor, *workspace).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
+	if err := checkNames(withRemote(newRegistry(rememberFor, *workspace, *allowExec).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
 		return exitUsage
 	}
@@ -396,7 +400,7 @@ func cmdResume(args []string) int {
 	}
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: state.Model, BaseURL: endpoint, RunID: state.RunID,
-		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem,
+		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem, Exec: *allowExec,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: gated,
 		Workspace: workspaceDir,
@@ -433,6 +437,7 @@ func cmdChat(args []string) int {
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "tools needing a yes on the terminal before each call (resume can only add)")
 	trust := fs.String("trust", "", "MCP tools that run without approval; every other MCP tool asks first")
+	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
 	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
@@ -515,7 +520,7 @@ func cmdChat(args []string) int {
 	// After connecting, not before: -allow and -approve can name a tool an MCP
 	// server provides, and checking against the local registry alone made an
 	// MCP tool impossible to gate or grant.
-	if err := checkNames(withRemote(newRegistry(rememberFor, *workspace).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
+	if err := checkNames(withRemote(newRegistry(rememberFor, *workspace, *allowExec).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
 		return exitUsage
 	}
@@ -571,7 +576,7 @@ func cmdChat(args []string) int {
 
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: startModel, BaseURL: endpoint, RunID: runID,
-		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem,
+		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem, Exec: *allowExec,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: gated,
 		ApproveFn: approveOnTerminalReader(os.Stdin, stdinReader),
@@ -823,6 +828,7 @@ func cmdUI(args []string) int {
 	allow := fs.String("allow", "", "comma-separated tools a conversation may call (default: all)")
 	approve := fs.String("approve", "", "tools needing approval in the browser before each call")
 	trust := fs.String("trust", "", "MCP tools that run without approval; every other MCP tool asks first")
+	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
 	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (fresh: default workspace; resumed: checkpoint's unless overridden)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
@@ -849,7 +855,7 @@ func cmdUI(args []string) int {
 	// After connecting, not before: -allow and -approve can name a tool an MCP
 	// server provides, and checking against the local registry alone made an
 	// MCP tool impossible to gate or grant.
-	if err := checkNames(withRemote(newRegistry("", *workspace).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
+	if err := checkNames(withRemote(newRegistry("", *workspace, *allowExec).Defs(), mcpTools), splitList(*allow), splitList(*approve)); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
 		return exitUsage
 	}
@@ -892,7 +898,7 @@ func cmdUI(args []string) int {
 
 		agent := newAgentFor(agentOpts{
 			Key: key, Model: *model, BaseURL: *baseURL, RunID: runID,
-			MaxSteps: *maxSteps, Budget: budgetVal,
+			MaxSteps: *maxSteps, Budget: budgetVal, Exec: *allowExec,
 			ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 			Allow:     splitList(*allow),
 			Workspace: workspaceDir,
@@ -995,14 +1001,14 @@ task.`
 // remember is added only when a run asks for it. It is the one tool whose
 // effect outlives the run, so it is not something to have switched on by
 // default — see internal/memory.
-func newRegistry(rememberFor, workspace string, remote ...tool.Tool) *tool.Registry {
-	tools := localTools(rememberFor, workspace)
+func newRegistry(rememberFor, workspace string, withExec bool, remote ...tool.Tool) *tool.Registry {
+	tools := localTools(rememberFor, workspace, withExec)
 	return tool.New(append(tools, remote...)...)
 }
 
 // localTools is the set this binary implements itself, separated so the MCP
 // wiring can ask what the names already are before adding to them.
-func localTools(rememberFor, workspace string) []tool.Tool {
+func localTools(rememberFor, workspace string, withExec bool) []tool.Tool {
 	tools := []tool.Tool{
 		tool.Calc{},
 		tool.NewFetch(workspace),
@@ -1010,6 +1016,9 @@ func localTools(rememberFor, workspace string) []tool.Tool {
 	}
 	if rememberFor != "" {
 		tools = append(tools, tool.NewRemember(memory.Store{Path: memoryFile}, rememberFor))
+	}
+	if withExec {
+		tools = append(tools, tool.NewExec(workspace))
 	}
 	return tools
 }
@@ -1034,7 +1043,7 @@ func connectMCP(ctx context.Context, path, rememberFor, workspace string) ([]too
 	if err != nil {
 		return nil, func() {}, err
 	}
-	if err := mcp.CheckCollisions(localTools(rememberFor, workspace), remote); err != nil {
+	if err := mcp.CheckCollisions(localTools(rememberFor, workspace, true), remote); err != nil {
 		closeAll()
 		return nil, func() {}, err
 	}
@@ -1061,6 +1070,9 @@ type agentOpts struct {
 	// prepended to the prompt. Splitting them would allow a run that writes
 	// memory it cannot read, or reads memory it cannot correct.
 	Memory bool
+	// Exec offers the exec tool and forces it into the approval list. Unlike
+	// Approve, nothing the operator passes can take it back out.
+	Exec bool
 
 	Allow   []string
 	Approve []string
@@ -1112,7 +1124,14 @@ func newAgentFor(o agentOpts) *loop.Agent {
 			approve = append(append([]string{}, approve...), "remember")
 		}
 	}
-	reg := newRegistry(rememberFor, o.Workspace, o.MCPTools...)
+	if o.Exec && !contains(approve, "exec") {
+		// Forced, like remember, and further: remember is gated because a bad
+		// note outlives the run, exec because a bad command does not need to.
+		// A run with nobody to ask gets every call denied, which is the point —
+		// there is no unattended mode for running programs the model chose.
+		approve = append(append([]string{}, approve...), "exec")
+	}
+	reg := newRegistry(rememberFor, o.Workspace, o.Exec, o.MCPTools...)
 	client := llm.NewOpenAI(o.Key,
 		llm.WithBaseURL(o.BaseURL),
 		// One request, including reading the body. A big enough conversation

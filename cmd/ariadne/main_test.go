@@ -122,7 +122,7 @@ func TestSplitList(t *testing.T) {
 }
 
 func TestCheckNamesRejectsUnknownTool(t *testing.T) {
-	defs := newRegistry("", defaultWorkspace).Defs()
+	defs := newRegistry("", defaultWorkspace, false).Defs()
 
 	if err := checkNames(defs, []string{"calc"}, []string{"write_file"}); err != nil {
 		t.Errorf("known tools were rejected: %v", err)
@@ -237,11 +237,11 @@ func TestMemoryDoesNotWidenAnExplicitAllowList(t *testing.T) {
 }
 
 func TestCheckNamesWithoutMemoryRejectsRemember(t *testing.T) {
-	defs := newRegistry("", defaultWorkspace).Defs()
+	defs := newRegistry("", defaultWorkspace, false).Defs()
 	if err := checkNames(defs, []string{"remember"}); err == nil {
 		t.Fatal("remember was accepted as valid tool name when memory was not requested")
 	}
-	defsWithMem := newRegistry("validate", defaultWorkspace).Defs()
+	defsWithMem := newRegistry("validate", defaultWorkspace, false).Defs()
 	if err := checkNames(defsWithMem, []string{"remember"}); err != nil {
 		t.Fatalf("remember was rejected when memory was requested: %v", err)
 	}
@@ -600,7 +600,7 @@ func (remoteStub) Call(context.Context, string, json.RawMessage) (llm.ToolResult
 // write tool exited "unknown tool" and the only way to run with that server
 // was ungated. The gate the postmortem measured did not reach any MCP tool.
 func TestNameCheckSeesRemoteTools(t *testing.T) {
-	local := newRegistry("", t.TempDir()).Defs()
+	local := newRegistry("", t.TempDir(), false).Defs()
 	remote := []tool.Tool{remoteStub("read_text_file"), remoteStub("edit_file")}
 
 	if err := checkNames(local, nil, []string{"edit_file"}); err == nil {
@@ -674,5 +674,46 @@ func TestGateMCPRefusesContradictionsAndBuiltins(t *testing.T) {
 	_, err := gateMCP(nil, []string{"fs__wirte_file"}, remote)
 	if err == nil || !strings.Contains(err.Error(), "available: fs__write_file") {
 		t.Errorf("typo error = %v, want one listing the available MCP tools", err)
+	}
+}
+
+// -exec offers the tool and gates it, with nothing the operator passes able to
+// separate the two. An empty -approve, an unrelated one, and a run that also
+// has memory all end up asking before every exec call.
+func TestExecIsAlwaysGated(t *testing.T) {
+	for _, approve := range [][]string{nil, {"write_file"}} {
+		a := newAgentFor(agentOpts{
+			Key: "k", Model: "m", BaseURL: "https://example.test/v1", RunID: "run_test",
+			MaxSteps: 5, Exec: true, Memory: true, Approve: approve,
+			Store: &loop.Store{Dir: t.TempDir()},
+		})
+		if !contains(a.RequireApproval, "exec") {
+			t.Errorf("approve=%v: RequireApproval = %v, want exec in it", approve, a.RequireApproval)
+		}
+		for _, want := range append([]string{"remember"}, approve...) {
+			if !contains(a.RequireApproval, want) {
+				t.Errorf("approve=%v: forcing exec dropped %q", approve, want)
+			}
+		}
+		var offered bool
+		for _, d := range a.Tools {
+			if d.Name == "exec" {
+				offered = true
+			}
+		}
+		if !offered {
+			t.Error("-exec did not offer the exec tool")
+		}
+	}
+
+	// And without -exec there is no tool to gate.
+	a := newAgentFor(agentOpts{
+		Key: "k", Model: "m", BaseURL: "https://example.test/v1", RunID: "run_test",
+		MaxSteps: 5, Store: &loop.Store{Dir: t.TempDir()},
+	})
+	for _, d := range a.Tools {
+		if d.Name == "exec" {
+			t.Error("exec was offered to a run that did not ask for it")
+		}
 	}
 }
