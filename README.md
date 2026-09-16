@@ -64,10 +64,15 @@ would with Stripe's `Idempotency-Key`.
 | `write_file` | yes, incidentally | same bytes to the same path twice is the same file |
 | anything outbound — mail, payment | **must store and replay** | keep the first result keyed by `callID` and return it again |
 | delete | **never unattended** | put it behind `-approve` |
+| `exec` (with `-exec`) | **no** | a program can do anything; every call asks, and no flag removes the gate |
 
-MCP tools work too, over stdio. MCP has no per-call idempotency field, so a remote tool
-cannot dedupe on `callID` at the protocol level — the loop's completion record is what
-protects it.
+MCP tools work too, over stdio, from a config in the `mcpServers` shape other clients use
+(`-mcp-config`). Each is named `<server>__<tool>` — `fs__write_file` — so a server's
+`write_file` cannot shadow the sandboxed built-in, and **every MCP tool asks for approval**
+unless named in `-trust`. A filesystem server has four ways to change a file; a list of
+tools to gate covers the ones somebody remembered. MCP has no per-call idempotency field,
+so a remote tool cannot dedupe on `callID` at the protocol level — the loop's completion
+record is what protects it.
 
 ---
 
@@ -136,6 +141,7 @@ Four controls went in afterwards, each measured against the same fixture:
 | untrusted-content fencing | marks tool output as data and says so in the system prompt | the model choosing to comply |
 | `-allow calc,fetch` | refuses unlisted tools at the loop; a grant can never be widened on resume | nothing |
 | `-approve write_file` | asks per call, with the arguments in view; denies when there is no terminal and when there is no approver | a human being there |
+| MCP default gate, `-exec` | every MCP tool asks unless `-trust`ed; `exec` always asks and runs with an environment allow-list, so `.env` keys never reach it | a human being there |
 
 The sandbox is there because the first version was **not** one. Confinement was lexical —
 clean the path, resolve symlinks, check the prefix — and a Windows directory junction,
@@ -177,6 +183,11 @@ control moved to the side a control can actually hold: memory is off by default,
 write is gated behind approval, and an unattended run — no terminal, so nothing to ask —
 cannot write a note at all. That is the right way round, because an unattended run is
 where a planted note is both most dangerous and least likely to be noticed.
+
+Re-run through the reference MCP filesystem server, the exfiltration still works — and
+it works because the read tool was trusted, which is the first exemption anyone makes. The
+receipt attack, meanwhile, now fails on this model even with no gate at all, so it no
+longer tells a working control from a missing one.
 
 The full write-up, with the traces and what each control costs, is in
 [`docs/injection-postmortem.md`](docs/injection-postmortem.md).
