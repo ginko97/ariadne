@@ -71,12 +71,12 @@ func TestScoreFailsWhenToolNeverRan(t *testing.T) {
 func TestScoreWithCompactedToolCalls(t *testing.T) {
 	s := loop.NewState("run_eval", "task")
 	s.Steps, s.Cost = 2, 0.0001
-	
+
 	s.Messages[0].Blocks = append(s.Messages[0].Blocks, llm.Block{
 		Type: llm.BlockText,
 		Text: "[x earlier messages have been dropped...]\n- calc(...) -> 36",
 	})
-	
+
 	got := Score(calcTask, s, "15% of 240 is 36.", nil)
 	if !got.Pass {
 		t.Fatalf("want pass on compacted call, got %+v", got)

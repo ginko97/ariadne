@@ -715,3 +715,48 @@ func TestCompactMultiTurnWithToolsInTurn1PreservesQuestions(t *testing.T) {
 	assertWellFormed(t, s.Messages)
 	assertAnswersKeepTheirQuestions(t, s.Messages)
 }
+
+// The digest's line format is written and read in this package, and this test
+// is what holds the two together: the lines come from digestLines and
+// mergeDigest, never from a string typed here. Change the format and this
+// fails in the file that changed it, instead of every compacted eval task
+// quietly failing "never called" in another package.
+func TestCompactedCallsReadsWhatTheDigestWrites(t *testing.T) {
+	s := NewState("run_digest", "work out 15% of 240, then write it down")
+
+	first := []llm.Message{
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{
+			{Type: llm.BlockToolUse, ID: "c1", Name: "calc", Args: json.RawMessage(`{"expr":"0.15*240"}`)},
+		}},
+		{Role: llm.RoleUser, Blocks: []llm.Block{
+			{Type: llm.BlockToolResult, CallID: "c1", Content: "36"},
+		}},
+		// Prose that looks like a call must not be credited as one.
+		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "now try write_file(notes.txt)"}}},
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "I will call fetch(url) later"}}},
+	}
+	mergeDigest(&s.Messages[0], digestLines(first), len(first))
+
+	// A second compaction rewrites the digest; calls from the first must survive it.
+	second := []llm.Message{
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{
+			{Type: llm.BlockToolUse, ID: "c2", Name: "write_file", Args: json.RawMessage(`{"path":"n.txt","content":"36"}`)},
+		}},
+		{Role: llm.RoleUser, Blocks: []llm.Block{
+			{Type: llm.BlockToolResult, CallID: "c2", Content: "wrote 2 bytes"},
+		}},
+	}
+	mergeDigest(&s.Messages[0], digestLines(second), len(first)+len(second))
+
+	got := s.CompactedCalls()
+	want := []string{"calc", "write_file"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("CompactedCalls() = %v, want %v\ndigest:\n%s", got, want, s.Messages[0].Blocks[1].Text)
+	}
+}
+
+func TestCompactedCallsOnAnUncompactedRun(t *testing.T) {
+	if got := NewState("run_plain", "task").CompactedCalls(); got != nil {
+		t.Errorf("a run with no digest reported calls: %v", got)
+	}
+}

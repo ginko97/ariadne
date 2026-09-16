@@ -258,6 +258,38 @@ func digestLines(dropped []llm.Message) []string {
 	return lines
 }
 
+// CompactedCalls names the tools recorded in the digest: calls that were made
+// but whose messages compaction has since dropped.
+//
+// The parse lives here, beside digestLines and mergeDigest, because the line
+// format is this file's to change. A parser in another package would keep its
+// own hand-written tests green through a format change while every compacted
+// run it scored failed "never called" — which reads as the model getting worse.
+//
+// Block 1 of the task message is the digest whenever it exists; mergeDigest is
+// the only writer. Lines past maxDigestChars have already been evicted, oldest
+// first, so a long enough run can still lose a call from this list.
+func (s *State) CompactedCalls() []string {
+	if len(s.Messages) == 0 || len(s.Messages[0].Blocks) < 2 {
+		return nil
+	}
+	digest := s.Messages[0].Blocks[1]
+	if digest.Type != llm.BlockText {
+		return nil
+	}
+	var names []string
+	for _, l := range strings.Split(digest.Text, "\n") {
+		rest, ok := strings.CutPrefix(l, "- ")
+		if !ok || strings.HasPrefix(rest, "asked: ") || strings.HasPrefix(rest, "replied: ") {
+			continue
+		}
+		if name, _, ok := strings.Cut(rest, "("); ok && name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // shorten collapses whitespace and elides the middle, so one dropped call is
 // one line.
 //

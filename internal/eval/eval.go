@@ -159,25 +159,19 @@ func isWordOrDigit(b byte) bool {
 	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '_'
 }
 
-// missingCalls reports which of want never appears as a tool_use block.
+// missingCalls reports which of want was never requested, either as a tool_use
+// block still in the conversation or as a call compaction recorded in the digest.
 func missingCalls(want []string, s *loop.State) []string {
 	if len(want) == 0 {
 		return nil
 	}
 	called := map[string]bool{}
 	if s != nil {
-		if len(s.Messages) > 0 && len(s.Messages[0].Blocks) > 1 {
-			digest := s.Messages[0].Blocks[1]
-			if digest.Type == llm.BlockText {
-				for _, line := range strings.Split(digest.Text, "\n") {
-					if strings.HasPrefix(line, "- ") && !strings.HasPrefix(line, "- asked:") && !strings.HasPrefix(line, "- replied:") {
-						namePart := strings.TrimPrefix(line, "- ")
-						if idx := strings.IndexByte(namePart, '('); idx > 0 {
-							called[namePart[:idx]] = true
-						}
-					}
-				}
-			}
+		// Calls compaction dropped survive only as digest lines. Without them a
+		// run that grew long enough to compact fails "never called" for a tool
+		// it did call. The parse lives in loop, next to the writer.
+		for _, name := range s.CompactedCalls() {
+			called[name] = true
 		}
 
 		for _, m := range s.Messages {
