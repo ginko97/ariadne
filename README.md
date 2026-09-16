@@ -141,7 +141,7 @@ Four controls went in afterwards, each measured against the same fixture:
 | untrusted-content fencing | marks tool output as data and says so in the system prompt | the model choosing to comply |
 | `-allow calc,fetch` | refuses unlisted tools at the loop; a grant can never be widened on resume | nothing |
 | `-approve write_file` | asks per call, with the arguments in view; denies when there is no terminal and when there is no approver | a human being there |
-| MCP default gate, `-exec` | every MCP tool asks unless `-trust`ed; `exec` always asks and runs with an environment allow-list, so `.env` keys never reach it | a human being there |
+| MCP default gate, `-exec` | every MCP tool asks unless `-trust`ed; `exec` always asks, gets an environment allow-list, and ariadne's own API keys are redacted from every tool result. `exec` is **not** confined: an approved program can open any file you can, `.env` included, and only those four keys are redacted | a human being there |
 
 The sandbox is there because the first version was **not** one. Confinement was lexical —
 clean the path, resolve symlinks, check the prefix — and a Windows directory junction,
