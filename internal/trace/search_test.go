@@ -301,6 +301,9 @@ func TestSummariseResumedRunDoesNotInflateSteps(t *testing.T) {
 	if st.Steps != 3 {
 		t.Errorf("Steps = %d, want 3 (cumulative steps were double-counted across segments)", st.Steps)
 	}
+	if len(st.Failed) != 0 {
+		t.Errorf("Failed = %v, want 0 (cleanly resumed run was falsely marked failed)", st.Failed)
+	}
 }
 
 // Free-text query must match CallID, so searching for a specific call finds

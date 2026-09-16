@@ -228,9 +228,7 @@ func Summarise(dir string, q Query) (Stats, error) {
 				if e.Step > runSteps {
 					runSteps = e.Step
 				}
-				if e.Error != "" {
-					runFailed = true
-				}
+				runFailed = (e.Error != "")
 			}
 
 			if !q.matches(e) {
@@ -264,8 +262,7 @@ func Summarise(dir string, q Query) (Stats, error) {
 			// are normal. What is not is more starts than ends.
 			if starts > ends {
 				st.Incomplete = append(st.Incomplete, r)
-			}
-			if runFailed {
+			} else if runFailed {
 				st.Failed = append(st.Failed, r)
 			}
 		}
