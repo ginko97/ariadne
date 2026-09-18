@@ -352,3 +352,33 @@ func TestSummariseLastSegmentDecidesFailure(t *testing.T) {
 		})
 	}
 }
+
+// One line too long to decode is one malformed event, not a failed search.
+// A 66 MB tool result from before fetch had a cap made `ariadne traces` fail
+// with "bufio.Scanner: token too long" for every run on the machine.
+func TestSearchSkipsALineTooLongToRead(t *testing.T) {
+	saved := maxLine
+	maxLine = 200
+	defer func() { maxLine = saved }()
+
+	dir := t.TempDir()
+	huge := `{"run_id":"r","seq":2,"kind":"tool_result","content":"` + strings.Repeat("x", 1000) + `"}`
+	writeTrace(t, dir, "run_20260101T000000_long", evStart, huge, evEndOK)
+	// And one whose oversized line is the last thing in the file.
+	writeTrace(t, dir, "run_20260101T000001_tail", evStart, huge)
+
+	got, err := Search(dir, Query{}, 0)
+	if err != nil {
+		t.Fatalf("an oversized line failed the whole search: %v", err)
+	}
+	if len(got) != 3 {
+		t.Errorf("got %d events, want the 3 readable ones around the long lines", len(got))
+	}
+	st, err := Summarise(dir, Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Malformed != 2 {
+		t.Errorf("Malformed = %d, want each oversized line counted once", st.Malformed)
+	}
+}

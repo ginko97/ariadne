@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -125,11 +126,25 @@ func scan(path string, fn func(Event) bool) (bad int, err error) {
 	}
 	defer f.Close()
 
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
-
-	for sc.Scan() {
-		line := sc.Bytes()
+	// A bufio.Reader rather than a Scanner, because a Scanner stops at the
+	// first line longer than its buffer and reports ErrTooLong for the whole
+	// file. One such line existed: a 66 MB tool result from before fetch had a
+	// size cap, which made `ariadne traces` fail for every run on the machine.
+	// Now an oversized line is skipped and counted as malformed, like any
+	// other line that cannot be read, and the rest of the file is still read.
+	r := bufio.NewReaderSize(f, 64*1024)
+	for {
+		line, tooLong, err := readLine(r, maxLine)
+		if len(line) == 0 && err != nil {
+			if err == io.EOF {
+				return bad, nil
+			}
+			return bad, err
+		}
+		if tooLong {
+			bad++
+			continue
+		}
 		if len(strings.TrimSpace(string(line))) == 0 {
 			continue
 		}
@@ -142,7 +157,36 @@ func scan(path string, fn func(Event) bool) (bad int, err error) {
 			return bad, nil
 		}
 	}
-	return bad, sc.Err()
+}
+
+// maxLine is the longest trace line scan will decode. A variable so a test can
+// exercise the limit without writing megabytes.
+var maxLine = 8 << 20
+
+// readLine returns the next line without its newline. A line longer than max
+// is read to its end and discarded, with tooLong set, so the next call starts
+// on the following line.
+func readLine(r *bufio.Reader, max int) (line []byte, tooLong bool, err error) {
+	var buf []byte
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if !tooLong {
+			if len(buf)+len(chunk) > max {
+				tooLong, buf = true, nil
+			} else {
+				buf = append(buf, chunk...)
+			}
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if tooLong {
+			// A non-nil line with tooLong set, so the caller counts it even
+			// when the oversized line is the last one in the file.
+			return []byte{0}, true, err
+		}
+		return []byte(strings.TrimRight(string(buf), "\r\n")), false, err
+	}
 }
 
 // Search returns matching events across every run under dir, newest run first.
