@@ -181,6 +181,7 @@ chat flags: same as run/resume. While chatting, ` + "`/help`" + ` lists the comm
 
 ui flags: the same, without -stream and -remember, plus
   -port           loopback port to listen on (default 7357, 0: any free; env ARIADNE_PORT)
+  -no-open        do not open the browser
 
 eval flags:
   -models         comma-separated model ids  (default: ARIADNE_MODEL)
@@ -861,6 +862,7 @@ func cmdUI(args []string) int {
 	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	port := fs.Int("port", envInt("ARIADNE_PORT", defaultPort), "loopback port to listen on (0: pick a free one)")
+	noOpen := fs.Bool("no-open", false, "do not open the browser")
 	model := fs.String("model", envOr("ARIADNE_MODEL", ""), "model id (default depends on -base-url)")
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
@@ -997,9 +999,18 @@ func cmdUI(args []string) int {
 	}
 	defer ln.Close()
 
-	fmt.Fprintf(os.Stderr, "ariadne ui  http://%s  model=%s\n", ln.Addr(), *model)
+	pageURL := "http://" + ln.Addr().String()
+	fmt.Fprintf(os.Stderr, "ariadne ui  %s  model=%s\n", pageURL, *model)
 	fmt.Fprintf(os.Stderr, "csrf token: %s\n", srv.CSRFToken)
 	fmt.Fprintln(os.Stderr, "Ctrl-C to stop")
+
+	// After the listener is bound, so the page is there when the browser
+	// asks; requests that arrive before Serve wait in the accept backlog.
+	if !*noOpen {
+		if err := openBrowser(pageURL); err != nil {
+			fmt.Fprintf(os.Stderr, "could not open a browser (%v); open the URL above\n", err)
+		}
+	}
 
 	if err := http.Serve(ln, srv.Routes()); err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)

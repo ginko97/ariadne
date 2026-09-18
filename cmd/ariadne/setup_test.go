@@ -113,3 +113,17 @@ func TestWriteConfigEnvKeepsOtherLines(t *testing.T) {
 		t.Errorf("the old key survived:\n%s", got)
 	}
 }
+
+// No shell on Windows: `cmd /c start` would split a URL at &.
+func TestBrowserCommand(t *testing.T) {
+	const u = "http://127.0.0.1:7357/?a=1&b=2"
+	for goos, want := range map[string]string{
+		"windows": "rundll32 url.dll,FileProtocolHandler " + u,
+		"darwin":  "open " + u,
+		"linux":   "xdg-open " + u,
+	} {
+		if got := strings.Join(browserCommand(goos, u), " "); got != want {
+			t.Errorf("%s: %q, want %q", goos, got, want)
+		}
+	}
+}
