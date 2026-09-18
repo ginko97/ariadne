@@ -1,0 +1,35 @@
+# One static binary per platform, no cgo, stamped with the tag as its version.
+version: 2
+
+builds:
+  - id: ariadne
+    main: ./cmd/ariadne
+    binary: ariadne
+    env:
+      - CGO_ENABLED=0
+    goos: [windows, linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Tag }}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "ariadne_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  # Commit subjects are not release notes; those are written by hand.
+  disable: true
+
+release:
+  draft: false
+  prerelease: auto

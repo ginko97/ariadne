@@ -1,0 +1,45 @@
+# Every push and pull request: the same gate as `make check`, on the three
+# operating systems ariadne ships for. No live API calls — the `live` build
+# tag keeps those out of the default test run, and audit-livetests enforces it.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: make check
+        if: runner.os != 'Windows'
+        run: make check
+
+      - name: race detector
+        if: runner.os != 'Windows'
+        run: go test -race -count=1 ./...
+
+      # Windows runners are not guaranteed a GNU make, so the checks that
+      # make runs are spelled out. The race detector needs cgo there, so it
+      # runs on the other two.
+      - name: check (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          go vet -tags live ./...
+          go test -count=1 ./...

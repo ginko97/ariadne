@@ -119,6 +119,9 @@ func main() {
 	switch os.Args[1] {
 	case "setup":
 		os.Exit(cmdSetup(os.Args[2:]))
+	case "version", "-version", "--version":
+		fmt.Println("ariadne " + versionString())
+		os.Exit(exitOK)
 	case "run":
 		os.Exit(cmdRun(os.Args[2:]))
 	case "resume":
@@ -157,6 +160,7 @@ usage:
   ariadne ui     [flags]                 serve the chat endpoint on loopback
   ariadne eval   [flags]                 score a task set, one row per model
   ariadne traces [flags] [text]          search the JSONL traces every run writes
+  ariadne version                        print the version
 
 flags:
   -model          model id                   (env ARIADNE_MODEL)
