@@ -1,8 +1,65 @@
 # ariadne
 
-**An agent runtime where a run is a job, not a chat session.** It has an id, a step
-ceiling, a cost ceiling, and a checkpoint you can resume from after `kill -9`. You can
-score it, regress it, and read a trace of everything it did.
+**A personal AI assistant that asks before it acts.** Talk to it in your browser or your
+terminal, with whichever model you like. It reads and writes files in a folder you give
+it, uses tools from any MCP server, and — if you allow it — runs programs. Every step
+that changes something waits for your yes. Conversations survive a crash and pick up
+where they stopped. One binary: no Node, no Docker, no account beyond your model
+provider's.
+
+## Install
+
+Download the archive for your system from the
+[latest release](https://github.com/ginko97/ariadne/releases/latest) (Windows, macOS and
+Linux, amd64 and arm64), unpack it, and put `ariadne` somewhere on your `PATH`.
+
+Or, with Go 1.26:
+
+```bash
+go install github.com/ginko97/ariadne/cmd/ariadne@latest
+```
+
+## Start
+
+```bash
+ariadne setup   # choose a provider (OpenRouter by default) and paste your key
+ariadne ui      # opens in your browser
+```
+
+`ariadne chat` does the same in the terminal. Your conversations, notes and settings
+live in one folder — `%AppData%\ariadne` on Windows, `~/Library/Application
+Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ariadne from.
+
+## What it can do
+
+| | |
+| --- | --- |
+| Files | read and write in its workspace — a folder of its own, or `-workspace <folder>` |
+| Tools from anywhere | any MCP server: filesystem, search, git, ... (`-mcp-config`) |
+| Run programs | `-exec`, asking before every single one |
+| Remember | notes that carry across conversations (`-remember`, in the terminal for now) |
+| Any model | OpenRouter, OpenAI, Gemini, xAI, Groq, Together, a local Ollama |
+
+## Why it is different
+
+- **It asks first.** Writing a file you gated, every MCP tool you have not trusted, and
+  every program it wants to run: you see the exact arguments and say yes or no. No
+  answer is not a yes.
+- **It survives a crash.** A conversation is checkpointed after every tool call. Kill the
+  process mid-task and it resumes without repeating what already ran.
+- **It keeps a record.** Every request, tool call, approval and cost is in a trace you
+  can search: `ariadne traces`.
+- **It is honest about its limits.** [SECURITY.md](SECURITY.md) says what protects you
+  and what does not, and the [injection postmortem](docs/injection-postmortem.md) shows
+  the attacks that still work, with traces.
+
+---
+
+## How it works
+
+Underneath, every conversation is a **run**: it has an id, a step ceiling, a cost
+ceiling, and a checkpoint you can resume from after `kill -9`. You can score it,
+regress it, and read a trace of everything it did.
 
 Written in Go, against the OpenAI chat-completions protocol — so the same binary reaches
 OpenRouter, Gemini's compatibility endpoint, OpenAI, Groq, Together and a local Ollama by
@@ -334,8 +391,7 @@ all.
 ## Use
 
 ```bash
-go build ./cmd/ariadne
-
+ariadne setup                         # choose a provider and store its key
 ariadne chat                          # talk in the terminal
 ariadne chat <run-id>                 # pick a conversation back up
 ariadne ui                            # talk in a browser
