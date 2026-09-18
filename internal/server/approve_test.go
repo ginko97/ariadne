@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -400,5 +401,22 @@ func TestServerReplacesTheFactorysApprover(t *testing.T) {
 	}
 	if !strings.Contains(body, "approval_required") {
 		t.Errorf("no prompt reached the stream:\n%s", body)
+	}
+}
+
+func TestApproverReturnsContextErrorOnCancellation(t *testing.T) {
+	s, _ := newTestServer(t)
+	rec := newSyncRecorder()
+	out := &sseWriter{w: rec, f: rec}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	ok, err := s.approver("run_cancel", out)(ctx, llm.ToolCall{ID: "c1", Name: "write_file"})
+	if ok {
+		t.Error("cancelled call was approved")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("got error %v, want context.Canceled", err)
 	}
 }

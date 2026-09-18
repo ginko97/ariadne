@@ -800,3 +800,38 @@ func TestConversationEndpointNeverLendsTheServersKey(t *testing.T) {
 		}
 	}
 }
+
+// A provider's key goes only to that provider's host, matched on the parsed
+// host rather than a substring, and an unrecognised host gets ARIADNE_API_KEY
+// or nothing.
+func TestAPIKeyGoesOnlyToItsOwnProvider(t *testing.T) {
+	t.Setenv("ARIADNE_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "k-openrouter")
+	t.Setenv("GEMINI_API_KEY", "k-gemini")
+	t.Setenv("OPENAI_API_KEY", "k-openai")
+	t.Setenv("XAI_API_KEY", "k-xai")
+
+	for _, c := range []struct{ url, want string }{
+		{"https://openrouter.ai/api/v1", "k-openrouter"},
+		{"https://generativelanguage.googleapis.com/v1beta/openai", "k-gemini"},
+		{"https://api.openai.com/v1", "k-openai"},
+		{"https://api.x.ai/v1", "k-xai"},
+		// Unrecognised: no provider's key, whichever are set.
+		{"https://api.groq.com/openai/v1", ""},
+		{"http://localhost:11434/v1", ""},
+		// Substrings of a provider's domain are not that provider.
+		{"https://max.ai/v1", ""},
+		{"https://openrouter.ai.attacker.example/v1", ""},
+		{"https://notopenai.com/v1", ""},
+	} {
+		if got, _ := apiKey(c.url); got != c.want {
+			t.Errorf("apiKey(%s) = %q, want %q", c.url, got, c.want)
+		}
+	}
+
+	// ARIADNE_API_KEY is the operator's choice for every endpoint.
+	t.Setenv("ARIADNE_API_KEY", "k-ariadne")
+	if got, name := apiKey("https://api.groq.com/openai/v1"); got != "k-ariadne" || name != "ARIADNE_API_KEY" {
+		t.Errorf("with ARIADNE_API_KEY set: %q %q", got, name)
+	}
+}

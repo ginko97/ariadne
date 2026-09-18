@@ -75,3 +75,40 @@ func TestLoadWithoutGoMod(t *testing.T) {
 		t.Errorf("TEST_DOTENV_STANDALONE = %q, want works", got)
 	}
 }
+
+func TestLoadPreservesMismatchedAndTrailingQuotes(t *testing.T) {
+	dir := t.TempDir()
+	content := "TEST_DOTENV_P1=pass\"\nTEST_DOTENV_P2=\"pass'\nTEST_DOTENV_P3=\"\"double\"\"\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(cwd) }()
+
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	defer func() {
+		os.Unsetenv("TEST_DOTENV_P1")
+		os.Unsetenv("TEST_DOTENV_P2")
+		os.Unsetenv("TEST_DOTENV_P3")
+	}()
+
+	if got := os.Getenv("TEST_DOTENV_P1"); got != "pass\"" {
+		t.Errorf("TEST_DOTENV_P1 = %q, want pass\"", got)
+	}
+	if got := os.Getenv("TEST_DOTENV_P2"); got != "\"pass'" {
+		t.Errorf("TEST_DOTENV_P2 = %q, want \"pass'", got)
+	}
+	if got := os.Getenv("TEST_DOTENV_P3"); got != "\"double\"" {
+		t.Errorf("TEST_DOTENV_P3 = %q, want \"double\"", got)
+	}
+}

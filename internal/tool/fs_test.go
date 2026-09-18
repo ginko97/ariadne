@@ -67,15 +67,17 @@ func TestSandboxContainsAbsolutePaths(t *testing.T) {
 	dir := t.TempDir()
 	w := NewWriteFile(dir)
 
-	if _, isErr := call(t, w, writeArgs{Path: "/etc/passwd", Content: "x"}); isErr {
+	target := "/etc/passwd.ariadne-test"
+	if _, isErr := call(t, w, writeArgs{Path: target, Content: "x"}); isErr {
 		// Refusing is fine too; what matters is where it did not write.
 		t.Logf("absolute path refused, which is acceptable")
 	}
-	if _, err := os.Stat("/etc/passwd.ariadne-test"); err == nil {
+	if _, err := os.Stat(target); err == nil {
+		_ = os.Remove(target)
 		t.Fatal("wrote outside the sandbox")
 	}
 	// It should have landed under the sandbox root instead.
-	if _, err := os.Stat(filepath.Join(dir, "etc", "passwd")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(target))); err != nil {
 		t.Logf("absolute path was refused rather than remapped: %v", err)
 	}
 }

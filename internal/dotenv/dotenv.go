@@ -54,7 +54,12 @@ func Load() error {
 			continue
 		}
 		k = strings.TrimSpace(k)
-		v = strings.Trim(strings.TrimSpace(v), `"'`)
+		v = strings.TrimSpace(v)
+		if len(v) >= 2 {
+			if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
+				v = v[1 : len(v)-1]
+			}
+		}
 		if _, exists := os.LookupEnv(k); !exists {
 			if err := os.Setenv(k, v); err != nil {
 				return err

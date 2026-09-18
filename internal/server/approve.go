@@ -101,7 +101,7 @@ func (s *Server) approver(runID string, out *sseWriter) func(context.Context, ll
 		case <-ctx.Done():
 			// The tab closed or the request was cancelled. Nobody is reading the
 			// prompt that was just sent, so nobody is going to answer it.
-			return false, nil
+			return false, ctx.Err()
 		case <-time.After(approvalTimeout):
 			out.event("approval_timeout", map[string]any{"call_id": c.ID, "tool": c.Name})
 			return false, nil

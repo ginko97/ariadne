@@ -5,8 +5,9 @@ ceiling, a cost ceiling, and a checkpoint you can resume from after `kill -9`. Y
 score it, regress it, and read a trace of everything it did.
 
 Written in Go, against the OpenAI chat-completions protocol — so the same binary reaches
-OpenRouter, Gemini's compatibility endpoint, Groq, Together and a local Ollama by changing
-`-base-url` and nothing else.
+OpenRouter, Gemini's compatibility endpoint, OpenAI, Groq, Together and a local Ollama by
+changing `-base-url` — plus `ARIADNE_API_KEY` for any endpoint that is not OpenRouter,
+Gemini, OpenAI or xAI.
 
 ```
 $ ariadne run "Fetch quarterly-report.html, invoice-2291.html, statement-0442.html and
@@ -162,7 +163,7 @@ Four controls went in afterwards, each measured against the same fixture:
 | untrusted-content fencing | marks tool output as data and says so in the system prompt | the model choosing to comply |
 | `-allow calc,fetch` | refuses unlisted tools at the loop; a grant can never be widened on resume | nothing |
 | `-approve write_file` | asks per call, with the arguments in view; denies when there is no terminal and when there is no approver | a human being there |
-| MCP default gate, `-exec` | every MCP tool asks unless `-trust`ed; `exec` always asks, gets an environment allow-list, and ariadne's own API keys are redacted from every tool result. `exec` is **not** confined: an approved program can open any file you can, `.env` included, and only those four keys are redacted | a human being there |
+| MCP default gate, `-exec` | every MCP tool asks unless `-trust`ed; `exec` always asks, gets an environment allow-list, and ariadne's own API keys are redacted from every tool result. `exec` is **not** confined: an approved program can open any file you can, `.env` included, and only ariadne's own provider keys are redacted | a human being there |
 
 ```mermaid
 flowchart TD
@@ -192,7 +193,8 @@ provider on the next turn, so approving a read approves sending what it reads.
 running ariadne, and that program opens whatever files it likes: `..\.env`, `~/.ssh`, a
 document in another folder. The approval card is the control, and the card shows the full
 argv — including a `python -c` script, which is a shell in all but name. Redaction covers
-ariadne's own four API keys and nothing else.
+ariadne's own provider keys (`ARIADNE_`, `OPENROUTER_`, `GEMINI_`, `OPENAI_` and
+`XAI_API_KEY`) and nothing else.
 
 If a task only needs to read and edit files, leave `-exec` off and give it a filesystem MCP
 server pointed at the directory instead; that server confines itself. Turn `exec` on for
@@ -371,8 +373,11 @@ answer.txt` leaves you with the answer and nothing else. The one exception is a 
 run on a terminal, where the answer has already scrolled past and printing it again would
 just be the same answer twice.
 
-Set `ARIADNE_API_KEY` (or `OPENROUTER_API_KEY`, or `GEMINI_API_KEY`) in the environment or
-in a `.env` at the repo root. `runs/` holds checkpoints and traces and is not committed.
+Set a key in the environment or in a `.env` at the repo root: `OPENROUTER_API_KEY`,
+`GEMINI_API_KEY`, `OPENAI_API_KEY` or `XAI_API_KEY` is used for its own provider's host, and
+`ARIADNE_API_KEY` for any endpoint. An endpoint ariadne does not recognise never gets a
+provider's key; a local server that needs none, like Ollama, takes any `ARIADNE_API_KEY`.
+`runs/` holds checkpoints and traces and is not committed.
 
 ```bash
 make check     # gofmt, vet in both build modes, tests, and three audits

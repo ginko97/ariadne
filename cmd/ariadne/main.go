@@ -23,6 +23,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -170,7 +171,9 @@ traces flags (must come before the search text):
   -limit          maximum events to print (default 50, 0: all)
 
 environment:
-  ARIADNE_API_KEY   api key; falls back to GEMINI_API_KEY, then OPENROUTER_API_KEY
+  ARIADNE_API_KEY   key for any endpoint; without it, the provider's own by host:
+                    OPENROUTER_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, XAI_API_KEY.
+                    Other endpoints (Groq, Ollama, ...) need ARIADNE_API_KEY
                     .env in the repo root is read if present
 `
 
@@ -1243,7 +1246,7 @@ func retryMessage(status int, delay time.Duration) string {
 
 // secretEnvNames are the variables this process holds credentials in: the
 // ones apiKey reads, which dotenv.Load fills from .env.
-var secretEnvNames = []string{"ARIADNE_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY"}
+var secretEnvNames = []string{"ARIADNE_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY"}
 
 // minRedactLen keeps a short or placeholder value from redacting ordinary
 // text: a key set to "x" would otherwise blank every x in every result.
@@ -1385,36 +1388,53 @@ func envOr(key, fallback string) string {
 }
 
 // apiKey resolves the key for one endpoint. ARIADNE_API_KEY always wins;
-// otherwise the host decides.
+// otherwise the host decides, and only a host this function recognises gets a
+// provider's key.
 //
 // Deciding by host matters as soon as .env holds more than one provider's key:
 // a fixed precedence order would send the Gemini key to OpenRouter and produce
 // a 401 that reads as "bad key" rather than "wrong key".
+//
+// An unrecognised host gets ARIADNE_API_KEY or nothing. It used to fall back to
+// whichever provider key was set, which sent an OpenRouter or OpenAI key to any
+// endpoint anybody typed into -base-url, or recorded on a checkpoint. That is
+// the leak 6b4845c closed for a known host with an unset key, from the other
+// side. A local server that needs no key (Ollama) takes any ARIADNE_API_KEY.
+//
+// Matched on the parsed host, by exact name or subdomain. A substring match
+// gave max.ai the xAI key, because "max.ai" contains "x.ai".
 func apiKey(baseURL string) (key, envName string) {
 	if v := os.Getenv("ARIADNE_API_KEY"); v != "" {
 		return v, "ARIADNE_API_KEY"
 	}
-
-	name := ""
-	switch {
-	case strings.Contains(baseURL, "openrouter.ai"):
-		name = "OPENROUTER_API_KEY"
-	case strings.Contains(baseURL, "googleapis.com"):
-		name = "GEMINI_API_KEY"
-	case strings.Contains(baseURL, "x.ai"):
-		name = "XAI_API_KEY"
-	}
-	if name != "" {
+	if name := providerKeyName(baseURL); name != "" {
 		return os.Getenv(name), name
 	}
+	return "", "ARIADNE_API_KEY"
+}
 
-	// Unrecognised host: take whatever is set, but say which one was used.
-	for _, k := range []string{"OPENROUTER_API_KEY", "GEMINI_API_KEY"} {
-		if v := os.Getenv(k); v != "" {
-			return v, k
+// providerKeys maps a provider's domain to the variable holding its key.
+var providerKeys = []struct{ domain, env string }{
+	{"openrouter.ai", "OPENROUTER_API_KEY"},
+	{"googleapis.com", "GEMINI_API_KEY"},
+	{"x.ai", "XAI_API_KEY"},
+	{"openai.com", "OPENAI_API_KEY"},
+}
+
+// providerKeyName returns the key variable for baseURL's host, or "" for a host
+// that is not a known provider's domain or a subdomain of one.
+func providerKeyName(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, p := range providerKeys {
+		if host == p.domain || strings.HasSuffix(host, "."+p.domain) {
+			return p.env
 		}
 	}
-	return "", "ARIADNE_API_KEY"
+	return ""
 }
 
 // cmdEval scores a task set against one or more models and prints a row each.
@@ -1486,7 +1506,8 @@ func cmdEval(args []string) int {
 		// something from task 3 is no longer measuring 34 independent tasks.
 		return newAgentFor(agentOpts{
 			Key: key, Model: model, BaseURL: *baseURL, RunID: runID,
-			MaxSteps: maxSteps, Budget: *budget, ToolTimeout: defaultToolTimeout, HTTPTimeout: defaultHTTPTimeout,
+			Workspace: defaultWorkspace,
+			MaxSteps:  maxSteps, Budget: *budget, ToolTimeout: defaultToolTimeout, HTTPTimeout: defaultHTTPTimeout,
 			Store: store, Trace: tw,
 		})
 	}
@@ -1579,16 +1600,6 @@ func closeTrace(tw *trace.Writer) {
 	if err := tw.Close(); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: trace incomplete: %v\n", err)
 	}
-}
-
-// isTerminal reports whether f is a console rather than a pipe or a file.
-//
-// Two different decisions need it — whether there is anybody to ask for
-// approval, and whether a streamed answer has already been seen — so it is one
-// function rather than the same Stat dance written twice.
-func isTerminal(f *os.File) bool {
-	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 // approveOnTerminal asks the operator before a gated call runs.
