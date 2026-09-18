@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ginko97/ariadne/internal/config"
 	"github.com/ginko97/ariadne/internal/dotenv"
 	"github.com/ginko97/ariadne/internal/eval"
 	"github.com/ginko97/ariadne/internal/llm"
@@ -56,12 +57,10 @@ const (
 	// $0.000031 a task, and the cheapest model that actually called the tool.
 	defaultOpenRouterModel = "deepseek/deepseek-v4-flash-0731"
 	defaultBaseURL         = "https://generativelanguage.googleapis.com/v1beta/openai"
-	runsDir                = "runs"
 	// Loopback only, and the port is the only part an operator can change:
 	// a --port int cannot be spelled 0.0.0.0. Settled 2026-09-10.
-	defaultPort      = 7357
-	historyDir       = "eval/history"
-	defaultWorkspace = "workspace"
+	defaultPort = 7357
+	historyDir  = "eval/history"
 	// defaultToolTimeout bounds one tool call from the command line, where the
 	// Agent's own default of 0 means unlimited. Same split as MaxSteps: a
 	// library caller decides for itself, a job gets a limit whether or not
@@ -72,10 +71,18 @@ const (
 	defaultHTTPTimeout = 300 * time.Second
 )
 
-// Outside the workspace on purpose: if the notes lived where the tools are
-// confined, write_file could rewrite them and every rule in internal/memory
-// would be decoration.
-var memoryFile = "MEMORY.md"
+// Where this process keeps its data. The values here are what a checkout has
+// always used and what the tests see; main replaces them with paths under the
+// home directory internal/config resolves, so an installed binary has one
+// history wherever it is run from.
+var (
+	runsDir          = "runs"
+	defaultWorkspace = "workspace"
+	// Outside the workspace on purpose: if the notes lived where the tools are
+	// confined, write_file could rewrite them and every rule in
+	// internal/memory would be decoration.
+	memoryFile = "MEMORY.md"
+)
 
 // Exit codes: 0 the run succeeded, 1 it failed, 2 the command line was wrong.
 const (
@@ -85,8 +92,20 @@ const (
 )
 
 func main() {
-	// Best effort: a missing .env is not an error, the env var may already be set.
+	// Keys and settings, in precedence order: the process environment, a
+	// checkout's .env (development), then config.env in the home directory
+	// (an installed binary, written by `ariadne setup`). Each load leaves
+	// variables already set alone, so the order of calls is the precedence.
+	// Best effort: none of them has to exist.
 	_ = dotenv.Load()
+	repo, _ := dotenv.Repo()
+	paths, err := config.Resolve(os.Getenv, repo, os.UserConfigDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ariadne: %v\n", err)
+		os.Exit(exitFail)
+	}
+	_ = dotenv.LoadFile(paths.Env)
+	runsDir, defaultWorkspace, memoryFile = paths.Runs, paths.Workspace, paths.Memory
 
 	if len(os.Args) < 2 {
 		usage()
