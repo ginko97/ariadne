@@ -566,9 +566,22 @@ func TestResolveWorkspace(t *testing.T) {
 // need a provider and a store to run, and registering them elsewhere just so a
 // test could list them would be the tail wagging the dog.
 func TestUsageNamesEveryFlag(t *testing.T) {
-	src, err := os.ReadFile("main.go")
+	// Every non-test file, not just main.go: setup's flags live in setup.go,
+	// and a test reading one file would pass whatever a new file registered.
+	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
+	}
+	var src []byte
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src = append(src, b...)
 	}
 	re := regexp.MustCompile(`fs\.(?:String|Int|Bool|Duration|Float64)\("([a-z][a-z-]*)"`)
 	seen := map[string]bool{}

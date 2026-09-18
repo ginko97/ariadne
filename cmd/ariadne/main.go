@@ -45,8 +45,8 @@ import (
 )
 
 const (
-	// defaultModel belongs to defaultBaseURL, and the pair is the point: the two
-	// flags default independently, so a bare id aimed at a gateway that
+	// defaultModel belongs to Gemini's endpoint, and the pairing is the point:
+	// the two flags default independently, so a bare id aimed at a gateway that
 	// namespaces everything is a mismatch nobody asked for. OpenRouter resolved
 	// "gemini-2.5-flash" to "google/gemini-2.5-flash" silently — visible only
 	// because the served model is now recorded — and a stricter endpoint would
@@ -56,7 +56,10 @@ const (
 	// measurement rather than from a price table: 6/6 on the task set at
 	// $0.000031 a task, and the cheapest model that actually called the tool.
 	defaultOpenRouterModel = "deepseek/deepseek-v4-flash-0731"
-	defaultBaseURL         = "https://generativelanguage.googleapis.com/v1beta/openai"
+	// OpenRouter by default: one key reaches most models, and it is what
+	// `ariadne setup` offers first. defaultModelFor pairs it with
+	// defaultOpenRouterModel.
+	defaultBaseURL = "https://openrouter.ai/api/v1"
 	// Loopback only, and the port is the only part an operator can change:
 	// a --port int cannot be spelled 0.0.0.0. Settled 2026-09-10.
 	defaultPort = 7357
@@ -106,6 +109,7 @@ func main() {
 	}
 	_ = dotenv.LoadFile(paths.Env)
 	runsDir, defaultWorkspace, memoryFile = paths.Runs, paths.Workspace, paths.Memory
+	configEnvFile = paths.Env
 
 	if len(os.Args) < 2 {
 		usage()
@@ -113,6 +117,8 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "setup":
+		os.Exit(cmdSetup(os.Args[2:]))
 	case "run":
 		os.Exit(cmdRun(os.Args[2:]))
 	case "resume":
@@ -144,6 +150,7 @@ func usage() { fmt.Fprint(os.Stderr, usageText) }
 const usageText = `ariadne — an agent runtime where a run is a job
 
 usage:
+  ariadne setup  [flags]                 choose a provider and store its key (start here)
   ariadne run    [flags] <task>
   ariadne resume [flags] <run-id>
   ariadne chat   [flags] [run-id]        talk; with no id, the first line typed is the task
@@ -193,7 +200,17 @@ environment:
   ARIADNE_API_KEY   key for any endpoint; without it, the provider's own by host:
                     OPENROUTER_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, XAI_API_KEY.
                     Other endpoints (Groq, Ollama, ...) need ARIADNE_API_KEY
-                    .env in the repo root is read if present
+  ARIADNE_HOME      where runs, workspace, MEMORY.md and config.env live
+                    (default: your user config directory, e.g. %AppData%\ariadne)
+
+Keys come from the environment, then config.env (written by ariadne setup),
+then a .env in an ariadne source checkout.
+
+setup flags:
+  -provider       openrouter (default), openai, gemini, xai, or other
+  -base-url       endpoint, for -provider other
+  -model          model to use by default
+  -no-check       write the config without testing the key
 `
 
 // defaultModelFor picks a model that belongs to the endpoint being used.
@@ -260,7 +277,7 @@ func cmdRun(args []string) int {
 
 	key, envName := apiKey(*baseURL)
 	if key == "" {
-		fmt.Fprintf(os.Stderr, "ariadne run: no api key for %s — set %s in the environment or .env\n", *baseURL, envName)
+		fmt.Fprintf(os.Stderr, "ariadne run: no api key for %s — run `ariadne setup`, or set %s\n", *baseURL, envName)
 		return exitUsage
 	}
 
@@ -373,7 +390,7 @@ func cmdResume(args []string) int {
 
 	key, envName := apiKey(endpoint)
 	if key == "" {
-		fmt.Fprintf(os.Stderr, "ariadne resume: no api key for %s — set %s in the environment or .env\n", endpoint, envName)
+		fmt.Fprintf(os.Stderr, "ariadne resume: no api key for %s — run `ariadne setup`, or set %s\n", endpoint, envName)
 		return exitUsage
 	}
 
@@ -554,7 +571,7 @@ func cmdChat(args []string) int {
 
 	key, envName := apiKey(endpoint)
 	if key == "" {
-		fmt.Fprintf(os.Stderr, "ariadne chat: no api key for %s — set %s in the environment or .env\n", endpoint, envName)
+		fmt.Fprintf(os.Stderr, "ariadne chat: no api key for %s — run `ariadne setup`, or set %s\n", endpoint, envName)
 		return exitUsage
 	}
 
@@ -894,7 +911,7 @@ func cmdUI(args []string) int {
 
 	key, envName := apiKey(*baseURL)
 	if key == "" {
-		fmt.Fprintf(os.Stderr, "ariadne ui: no api key for %s — set %s in the environment or .env\n", *baseURL, envName)
+		fmt.Fprintf(os.Stderr, "ariadne ui: no api key for %s — run `ariadne setup`, or set %s\n", *baseURL, envName)
 		return exitUsage
 	}
 
