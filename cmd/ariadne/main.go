@@ -56,6 +56,8 @@ const (
 	// measurement rather than from a price table: 6/6 on the task set at
 	// $0.000031 a task, and the cheapest model that actually called the tool.
 	defaultOpenRouterModel = "deepseek/deepseek-v4-flash-0731"
+	defaultOpenAIModel     = "gpt-4o-mini"
+	defaultXAIModel        = "grok-2"
 	// OpenRouter by default: one key reaches most models, and it is what
 	// `ariadne setup` offers first. defaultModelFor pairs it with
 	// defaultOpenRouterModel.
@@ -107,7 +109,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "ariadne: %v\n", err)
 		os.Exit(exitFail)
 	}
-	_ = dotenv.LoadFile(paths.Env)
+	if len(os.Args) < 2 || os.Args[1] != "setup" {
+		_ = dotenv.LoadFile(paths.Env)
+	}
 	runsDir, defaultWorkspace, memoryFile = paths.Runs, paths.Workspace, paths.Memory
 	configEnvFile = paths.Env
 
@@ -225,10 +229,28 @@ setup flags:
 // namespaces its ids has no use for a bare one, and the reverse is equally
 // true.
 func defaultModelFor(baseURL string) string {
-	if strings.Contains(baseURL, "openrouter.ai") {
-		return defaultOpenRouterModel
+	u, err := url.Parse(baseURL)
+	host := ""
+	if err == nil {
+		host = strings.ToLower(u.Hostname())
 	}
-	return defaultModel
+	if host == "" {
+		if u2, err2 := url.Parse("//" + baseURL); err2 == nil {
+			host = strings.ToLower(u2.Hostname())
+		}
+	}
+	switch {
+	case host == "openrouter.ai" || strings.HasSuffix(host, ".openrouter.ai"):
+		return defaultOpenRouterModel
+	case host == "openai.com" || strings.HasSuffix(host, ".openai.com"):
+		return defaultOpenAIModel
+	case host == "x.ai" || strings.HasSuffix(host, ".x.ai"):
+		return defaultXAIModel
+	case host == "googleapis.com" || strings.HasSuffix(host, ".googleapis.com"):
+		return defaultModel
+	default:
+		return defaultModel
+	}
 }
 
 func cmdRun(args []string) int {

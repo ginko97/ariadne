@@ -3,6 +3,8 @@ runs/
 /ariadne
 /ariadne.exe
 .env
+config.env
+.config-*.env
 
 # --- private: how I'm learning this, not what I built ---
 # Never pushed. Keep a backup outside the repo — these are gitignored,

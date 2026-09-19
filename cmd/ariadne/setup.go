@@ -110,6 +110,9 @@ func runSetup(stdin io.Reader, out io.Writer, args []string) int {
 	}
 
 	vals := map[string]string{"ARIADNE_BASE_URL": url, keyName: key, "ARIADNE_MODEL": *model}
+	if keyName != "ARIADNE_API_KEY" {
+		vals["ARIADNE_API_KEY"] = ""
+	}
 	if err := writeConfigEnv(configEnvFile, vals); err != nil {
 		fmt.Fprintf(out, "ariadne setup: %v\n", err)
 		return exitFail
@@ -169,24 +172,29 @@ func readSecret(stdin io.Reader, in *bufio.Reader, out io.Writer, prompt string)
 func writeConfigEnv(path string, vals map[string]string) error {
 	var lines []string
 	if data, err := os.ReadFile(path); err == nil {
-		lines = strings.Split(strings.TrimRight(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n"), "\n")
+		s := strings.TrimRight(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+		if s != "" {
+			lines = strings.Split(s, "\n")
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 
 	done := map[string]bool{}
-	for i, l := range lines {
+	var kept []string
+	for _, l := range lines {
 		k, _, ok := strings.Cut(strings.TrimPrefix(strings.TrimSpace(l), "export "), "=")
 		k = strings.TrimSpace(k)
 		if v, set := vals[k]; ok && set {
-			if v == "" {
-				lines[i] = ""
-			} else {
-				lines[i] = k + "=" + v
+			if v != "" {
+				kept = append(kept, k+"="+v)
 			}
 			done[k] = true
+		} else {
+			kept = append(kept, l)
 		}
 	}
+	lines = kept
 	names := make([]string, 0, len(vals))
 	for k := range vals {
 		names = append(names, k)
