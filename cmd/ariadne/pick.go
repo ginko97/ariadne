@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -39,22 +40,55 @@ func folderPickerCommand(goos string) []string {
 }
 
 // pickFolder shows the dialog and returns the chosen folder, or "" when the
-// person cancelled. Cancelling is not an error: each tool reports it its own
-// way — PowerShell prints nothing, osascript exits 1 with error -128, zenity
-// exits 1 — and all of them mean "never mind".
+// person cancelled.
 func pickFolder(ctx context.Context) (string, error) {
 	argv := folderPickerCommand(runtime.GOOS)
-	out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).Output()
-	var exitErr *exec.ExitError
-	switch {
-	case errors.Is(err, exec.ErrNotFound):
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if errors.Is(err, exec.ErrNotFound) {
 		return "", errors.New(argv[0] + " is not installed")
-	case errors.As(err, &exitErr) && exitErr.ExitCode() == 1:
-		return "", nil
-	case err != nil:
+	}
+	code := 0
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		code = exitErr.ExitCode()
+	} else if err != nil {
 		return "", err
 	}
-	p := strings.TrimSpace(string(out))
+	return pickResult(runtime.GOOS, string(out), stderr.String(), code)
+}
+
+// pickResult reads what a folder dialog printed and how it exited.
+//
+// Cancelling is not an error, but each tool says it differently, and exit 1
+// alone is not enough to tell a cancel from a failure. The Windows script
+// prints nothing and exits 0 on cancel, so any non-zero exit there is
+// PowerShell failing. osascript exits 1 for every error and marks a cancel
+// with error -128. zenity exits 1 on cancel and prints nothing. Treating every
+// exit 1 as a cancel made a broken dialog look like somebody changing their
+// mind: the Browse button silently did nothing.
+func pickResult(goos, stdout, stderr string, code int) (string, error) {
+	msg := strings.TrimSpace(stderr)
+	if code != 0 {
+		cancelled := false
+		switch goos {
+		case "windows":
+		case "darwin":
+			cancelled = code == 1 && strings.Contains(msg, "-128")
+		default:
+			cancelled = code == 1 && msg == ""
+		}
+		if cancelled {
+			return "", nil
+		}
+		if msg == "" {
+			msg = "no error message"
+		}
+		return "", fmt.Errorf("the folder dialog exited %d: %s", code, msg)
+	}
+	p := strings.TrimSpace(stdout)
 	// osascript ends a folder path with a slash; the rest of ariadne does not.
 	if len(p) > 1 {
 		p = strings.TrimRight(p, "/")
