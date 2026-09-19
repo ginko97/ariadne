@@ -53,6 +53,8 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
   and what does not, and the [injection postmortem](docs/injection-postmortem.md) shows
   the attacks that still work, with traces.
 
+What changed in each release: [CHANGELOG.md](CHANGELOG.md).
+
 ---
 
 ## How it works
@@ -430,11 +432,15 @@ answer.txt` leaves you with the answer and nothing else. The one exception is a 
 run on a terminal, where the answer has already scrolled past and printing it again would
 just be the same answer twice.
 
-Set a key in the environment or in a `.env` at the repo root: `OPENROUTER_API_KEY`,
-`GEMINI_API_KEY`, `OPENAI_API_KEY` or `XAI_API_KEY` is used for its own provider's host, and
-`ARIADNE_API_KEY` for any endpoint. An endpoint ariadne does not recognise never gets a
-provider's key; a local server that needs none, like Ollama, takes any `ARIADNE_API_KEY`.
-`runs/` holds checkpoints and traces and is not committed.
+`ariadne setup` saves your key in `config.env` in the data folder. You can also set it in
+the environment, which takes precedence, or — in a source checkout — in a `.env` at the repo
+root. `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` or `XAI_API_KEY` is used only
+for its own provider's host, and `ARIADNE_API_KEY` for any endpoint. An endpoint ariadne
+does not recognise never gets a provider's key; a local server that needs none, like
+Ollama, takes any `ARIADNE_API_KEY`.
+
+Conversations are saved as checkpoints and traces in `runs/` inside the data folder (in a
+source checkout, the repo's own `runs/`, which git ignores).
 
 ```bash
 make check     # gofmt, vet in both build modes, tests, and three audits
