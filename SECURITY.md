@@ -38,6 +38,9 @@ The attacks behind every line above, with traces, are in
 
 ## Reporting a vulnerability
 
-Please use GitHub's private vulnerability reporting ("Report a vulnerability"
-on the repository's Security tab) rather than a public issue. Include
-`ariadne version`, your OS, and the smallest steps that reproduce it.
+Please report it privately rather than in a public issue: use GitHub's
+private vulnerability reporting ("Report a vulnerability" on the repository's
+Security tab). If that button is not there, open an issue that says only that
+you have a security report and asks for a private contact — no details in it.
+
+Include `ariadne version`, your OS, and the smallest steps that reproduce it.

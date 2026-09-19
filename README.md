@@ -13,7 +13,7 @@ Download the archive for your system from the
 [latest release](https://github.com/ginko97/ariadne/releases/latest) (Windows, macOS and
 Linux, amd64 and arm64), unpack it, and put `ariadne` somewhere on your `PATH`.
 
-Or, with Go 1.26:
+Or, with Go 1.25 or newer:
 
 ```bash
 go install github.com/ginko97/ariadne/cmd/ariadne@latest
@@ -392,6 +392,7 @@ all.
 
 ```bash
 ariadne setup                         # choose a provider and store its key
+ariadne version                       # which build this is (for bug reports)
 ariadne chat                          # talk in the terminal
 ariadne chat <run-id>                 # pick a conversation back up
 ariadne ui                            # talk in a browser

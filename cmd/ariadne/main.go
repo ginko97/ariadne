@@ -115,6 +115,7 @@ func main() {
 	}
 	runsDir, defaultWorkspace, memoryFile = paths.Runs, paths.Workspace, paths.Memory
 	configEnvFile = paths.Env
+	mcp.ClientVersion = versionString()
 
 	if len(os.Args) < 2 {
 		usage()

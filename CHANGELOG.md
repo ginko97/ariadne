@@ -3,7 +3,7 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
-## Unreleased — v0.4.0 "install it in five minutes"
+## v0.4.0 — 2026-09-19 — install it in five minutes
 
 - **`ariadne setup`**: pick a provider (OpenRouter by default), enter its key
   with the input hidden, and it checks the key with one small request before

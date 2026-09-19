@@ -15,10 +15,12 @@ import (
 	"github.com/ginko97/ariadne/internal/tool"
 )
 
-const (
-	clientName    = "ariadne"
-	clientVersion = "0.0.1"
-)
+const clientName = "ariadne"
+
+// ClientVersion is what ariadne tells MCP servers it is. cmd/ariadne sets it
+// to the build's version before connecting; "dev" is what a caller that does
+// not gets, rather than a number that looks like a release and is not one.
+var ClientVersion = "dev"
 
 // Server is a connection to one MCP server running as a subprocess over stdio.
 type Server struct {
@@ -34,7 +36,7 @@ type Server struct {
 func Dial(ctx context.Context, command string, args ...string) (*Server, error) {
 	c := mcpsdk.NewClient(&mcpsdk.Implementation{
 		Name:    clientName,
-		Version: clientVersion,
+		Version: ClientVersion,
 	}, nil)
 
 	t := &mcpsdk.CommandTransport{Command: exec.CommandContext(ctx, command, args...)}
