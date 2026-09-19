@@ -5,6 +5,10 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Switch between saved keys in Settings.** With OpenRouter and Gemini keys
+  both set up, choosing the other provider in ⚙ with the key field empty uses
+  that provider's own saved key; the field says "saved — leave empty to use
+  it". A URL typed under "Other" never gets a saved key.
 - **"Working…" while a turn runs**: a status line above the message box with
   the time so far and what is happening — thinking, calling a tool, waiting
   for your approval, writing the answer — so a long turn no longer looks

@@ -48,10 +48,13 @@ type SetupStatus struct {
 
 // SetupProvider is one choice offered on the setup card.
 type SetupProvider struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	BaseURL      string `json:"base_url"`
-	NeedsKey     bool   `json:"needs_key"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	BaseURL  string `json:"base_url"`
+	NeedsKey bool   `json:"needs_key"`
+	// KeySaved says a key for this provider is already set up, so the page
+	// can offer to use it. Whether, never what.
+	KeySaved     bool   `json:"key_saved,omitempty"`
 	KeyName      string `json:"key_name,omitempty"`
 	DefaultModel string `json:"default_model,omitempty"`
 }

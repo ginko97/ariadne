@@ -737,7 +737,7 @@ function showSetupFields() {
   $('setupKeyRow').hidden = !p.needs_key;
   $('setupKeyName').textContent = p.key_name ? '(' + p.key_name + ')' : '';
   const same = setup.configured && setup.provider === p.id;
-  $('setupKey').placeholder = same && setup.key_set ? 'leave empty to keep the saved key' : '';
+  $('setupKey').placeholder = (same && setup.key_set) || p.key_saved ? 'saved — leave empty to use it' : '';
   $('setupModel').placeholder = p.default_model || (p.id === 'ollama' ? 'first model Ollama lists' : '');
   $('setupModels').replaceChildren();
   if (p.id === 'ollama') loadOllamaModels();

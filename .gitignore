@@ -2,6 +2,10 @@
 runs/
 /ariadne
 /ariadne.exe
+# Windows keeps the replaced binary as ariadne.exe~ when a build overwrites a
+# running one. 20 MB of it was once committed by accident, and removed from
+# the history before any push.
+*~
 .env
 config.env
 .config-*.env

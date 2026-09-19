@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -153,5 +154,91 @@ func TestUIConfigureLeavesShellSettings(t *testing.T) {
 	}
 	if len(st.Notes) != 1 || !strings.Contains(st.Notes[0], "ARIADNE_MODEL") {
 		t.Errorf("notes = %q, want one about ARIADNE_MODEL", st.Notes)
+	}
+}
+
+// stubCheck replaces the key check with one that records what it was given,
+// so a named provider can be configured without a request to it.
+func stubCheck(t *testing.T) *[]string {
+	t.Helper()
+	var got []string
+	saved := checkKeyFn
+	checkKeyFn = func(_ context.Context, url, key, model string) error {
+		got = append(got, url+" "+key+" "+model)
+		return nil
+	}
+	t.Cleanup(func() { checkKeyFn = saved })
+	return &got
+}
+
+// Two keys saved: switching provider with the key field empty uses the key
+// saved under that provider's own name — not ARIADNE_API_KEY, which would go
+// to every endpoint — and does not copy it into config.env.
+func TestUIConfigureSwitchesToASavedProviderKey(t *testing.T) {
+	cfg := isolateSettings(t)
+	checks := stubCheck(t)
+	os.Setenv("OPENROUTER_API_KEY", "sk-or-saved-111111")
+	os.Setenv("GEMINI_API_KEY", "gm-saved-key-222222")
+	os.Setenv("ARIADNE_API_KEY", "wildcard-333333333")
+	p := &uiProvider{baseURL: providers["openrouter"], key: "sk-or-saved-111111", model: "m"}
+
+	if _, err := p.configure(context.Background(), server.SetupRequest{Provider: "gemini"}); err != nil {
+		t.Fatal(err)
+	}
+	want := providers["gemini"] + " gm-saved-key-222222 " + defaultModelFor(providers["gemini"])
+	if len(*checks) != 1 || (*checks)[0] != want {
+		t.Errorf("checked %q, want %q", *checks, want)
+	}
+	if b, k, _ := p.current(); b != providers["gemini"] || k != "gm-saved-key-222222" {
+		t.Errorf("current = %q %q", b, k)
+	}
+	data, _ := os.ReadFile(cfg)
+	if strings.Contains(string(data), "gm-saved") || strings.Contains(string(data), "GEMINI_API_KEY") {
+		t.Errorf("the saved key was copied into config.env:\n%s", data)
+	}
+	if !strings.Contains(string(data), "ARIADNE_BASE_URL="+providers["gemini"]) {
+		t.Errorf("config.env does not point at Gemini:\n%s", data)
+	}
+
+	// And back: OpenRouter's own key, again from the empty field.
+	if _, err := p.configure(context.Background(), server.SetupRequest{Provider: "openrouter"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, k, _ := p.current(); k != "sk-or-saved-111111" {
+		t.Errorf("switched back with key %q", k)
+	}
+}
+
+// A URL typed as "Other" never receives a saved key: ARIADNE_API_KEY is set,
+// and the empty field still asks for one.
+func TestUIConfigureNeverSendsASavedKeyToATypedURL(t *testing.T) {
+	isolateSettings(t)
+	checks := stubCheck(t)
+	os.Setenv("ARIADNE_API_KEY", "wildcard-333333333")
+	p := &uiProvider{baseURL: providers["openrouter"], key: "sk-or", model: "m"}
+	_, err := p.configure(context.Background(), server.SetupRequest{Provider: "other", BaseURL: "https://api.example.test/v1"})
+	if err == nil || !strings.Contains(err.Error(), "enter the key") {
+		t.Errorf("err = %v, want a request for the key", err)
+	}
+	if len(*checks) != 0 {
+		t.Errorf("a key was checked against the typed URL: %q", *checks)
+	}
+}
+
+// The page learns that a key is saved, never the key.
+func TestUIStatusSaysWhichKeysAreSaved(t *testing.T) {
+	isolateSettings(t)
+	os.Setenv("GEMINI_API_KEY", "gm-saved-key-222222")
+	st := (&uiProvider{}).status()
+	saved := map[string]bool{}
+	for _, pr := range st.Providers {
+		saved[pr.ID] = pr.KeySaved
+	}
+	if !saved["gemini"] || saved["openai"] || saved["openrouter"] {
+		t.Errorf("key_saved = %v, want gemini only", saved)
+	}
+	b, _ := json.Marshal(st)
+	if strings.Contains(string(b), "gm-saved") {
+		t.Errorf("the status carries the key: %s", b)
 	}
 }

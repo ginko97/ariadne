@@ -71,6 +71,19 @@ func (p *uiProvider) status() server.SetupStatus {
 	}
 }
 
+// checkKeyFn is checkKey, replaceable so a test can configure a named
+// provider without a request to it.
+var checkKeyFn = checkKey
+
+// savedKey is the key already set up for a named provider's endpoint, under
+// that provider's own name, or "".
+func savedKey(endpoint string) string {
+	if name := providerKeyName(endpoint); name != "" {
+		return os.Getenv(name)
+	}
+	return ""
+}
+
 // setupProviders are the choices on the setup card, in the order the
 // terminal's setup offers them, OpenRouter first.
 func setupProviders() []server.SetupProvider {
@@ -81,7 +94,7 @@ func setupProviders() []server.SetupProvider {
 	for _, n := range named {
 		u := providers[n.id]
 		out = append(out, server.SetupProvider{
-			ID: n.id, Name: n.name, BaseURL: u, NeedsKey: true,
+			ID: n.id, Name: n.name, BaseURL: u, NeedsKey: true, KeySaved: savedKey(u) != "",
 			KeyName: providerKeyName(u), DefaultModel: defaultModelFor(u),
 		})
 	}
@@ -143,6 +156,7 @@ func (p *uiProvider) configure(ctx context.Context, req server.SetupRequest) (se
 	}
 
 	curURL, curKey, _ := p.current()
+	reused := false
 	if id == "ollama" {
 		if model == "" {
 			models, err := ollamaModels(ctx, endpoint)
@@ -159,11 +173,16 @@ func (p *uiProvider) configure(ctx context.Context, req server.SetupRequest) (se
 			key = localNoKey
 		}
 	} else if key == "" {
-		// Blank keeps the key already in use for this same endpoint, so the
-		// model can be changed without pasting the key again.
+		// Blank keeps a key already saved, so switching between providers
+		// whose keys are both set up needs no pasting. For a named provider
+		// that is the key under its own name — GEMINI_API_KEY for Gemini, never
+		// ARIADNE_API_KEY, which goes everywhere. For any other endpoint, only
+		// the one in use, so a saved key never goes to a URL typed here.
 		switch {
 		case endpoint == curURL && curKey != "" && curKey != localNoKey:
-			key = curKey
+			key, reused = curKey, true
+		case savedKey(endpoint) != "":
+			key, reused = savedKey(endpoint), true
 		case isLoopbackURL(endpoint):
 		default:
 			return server.SetupStatus{}, errors.New("enter the key")
@@ -177,11 +196,16 @@ func (p *uiProvider) configure(ctx context.Context, req server.SetupRequest) (se
 	if check == "" {
 		check = localNoKey
 	}
-	if err := checkKey(ctx, endpoint, check, model); err != nil {
+	if err := checkKeyFn(ctx, endpoint, check, model); err != nil {
 		return server.SetupStatus{}, fmt.Errorf("checking %s with %s failed: %s", endpoint, model, describeCheckError(err))
 	}
 
 	vals := configVals(endpoint, key, model)
+	if name := providerKeyName(endpoint); reused && name != "" {
+		// The saved key may live in the environment or a checkout's .env
+		// rather than config.env; it is not copied anywhere new.
+		delete(vals, name)
+	}
 	if err := writeConfigEnv(configEnvFile, vals); err != nil {
 		return server.SetupStatus{}, err
 	}
