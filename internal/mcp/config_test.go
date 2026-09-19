@@ -151,4 +151,3 @@ func TestConnectNilOrEmptyConfig(t *testing.T) {
 	}
 	closeAll()
 }
-

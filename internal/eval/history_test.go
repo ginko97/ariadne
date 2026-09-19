@@ -167,4 +167,3 @@ func TestStepRegressionsIgnoresFailingTasks(t *testing.T) {
 		t.Fatalf("got %v, want none", got)
 	}
 }
-

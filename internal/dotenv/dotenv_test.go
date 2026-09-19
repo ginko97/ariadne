@@ -160,4 +160,3 @@ func TestLoadFileSkipsEmptyKeys(t *testing.T) {
 		t.Errorf("TEST_DOTENV_VALID = %q, want loaded", got)
 	}
 }
-

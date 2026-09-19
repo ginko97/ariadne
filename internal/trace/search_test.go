@@ -322,7 +322,6 @@ func TestSummariseIncompleteRunCountsSteps(t *testing.T) {
 	}
 }
 
-
 // Free-text query must match CallID, so searching for a specific call finds
 // tool results and approvals.
 func TestSearchMatchesCallID(t *testing.T) {
