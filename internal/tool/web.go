@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ginko97/ariadne/internal/llm"
 )
@@ -159,7 +160,11 @@ func (w WebFetch) Call(ctx context.Context, _ string, args json.RawMessage) (llm
 	}
 
 	if len(text) > maxFetchBytes {
-		text, cut = text[:maxFetchBytes], true
+		limit := maxFetchBytes
+		for limit > 0 && !utf8.RuneStart(text[limit]) {
+			limit--
+		}
+		text, cut = text[:limit], true
 	}
 	note := ""
 	if cut {

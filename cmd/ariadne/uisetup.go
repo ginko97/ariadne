@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/server"
@@ -266,7 +267,11 @@ func describeCheckError(err error) string {
 		}
 	}
 	if len(msg) > 300 {
-		msg = msg[:300] + "…"
+		limit := 300
+		for limit > 0 && !utf8.RuneStart(msg[limit]) {
+			limit--
+		}
+		msg = msg[:limit] + "…"
 	}
 	return msg
 }

@@ -948,3 +948,17 @@ func TestCostTextNeverShowsUnknownAsZero(t *testing.T) {
 		}
 	}
 }
+
+// An eval task's approvals: yes for the tools it names, no for the rest —
+// including web_fetch and exec, which no eval should reach unless named.
+func TestEvalApprovesOnlyListedTools(t *testing.T) {
+	approve := approveListed([]string{"edit_file"})
+	for name, want := range map[string]bool{"edit_file": true, "web_fetch": false, "exec": false, "write_file": false} {
+		if got, err := approve(context.Background(), llm.ToolCall{Name: name}); err != nil || got != want {
+			t.Errorf("%s: %v %v, want %v", name, got, err, want)
+		}
+	}
+	if got, _ := approveListed(nil)(context.Background(), llm.ToolCall{Name: "edit_file"}); got {
+		t.Error("no list approved edit_file")
+	}
+}

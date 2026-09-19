@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"unicode/utf8"
 )
 
 func allowAll(string) error { return nil }
@@ -264,5 +265,28 @@ func TestWebFetchStopsAfterTooManyRedirects(t *testing.T) {
 
 	if out, isErr, _ := fetchURL(t, w, srv.URL+"/"); !isErr || !strings.Contains(out, "redirects") {
 		t.Errorf("result %q, want a redirect-limit error", out)
+	}
+}
+
+func TestWebFetchTruncatesAtRuneBoundary(t *testing.T) {
+	prefix := strings.Repeat("a", maxFetchBytes-1)
+	payload := prefix + "€€€"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+	w := NewWebFetch("test")
+	w.allowAddr = allowAll
+
+	out, isErr, _ := fetchURL(t, w, srv.URL)
+	if isErr {
+		t.Fatalf("fetch failed: %.200s", out)
+	}
+	if !utf8.ValidString(out) {
+		t.Errorf("fetch output contains invalid UTF-8: %.200s", out[len(out)-200:])
+	}
+	if !strings.Contains(out, "[truncated") {
+		t.Errorf("expected truncation note")
 	}
 }

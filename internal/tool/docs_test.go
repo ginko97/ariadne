@@ -217,6 +217,7 @@ func TestExcelDate(t *testing.T) {
 	}{
 		{46082, false, "2026-03-01"},
 		{46082.25, false, "2026-03-01 06:00:00"},
+		{46082.0 + 86399.6/86400.0, false, "2026-03-02"},
 		{61, false, "1900-03-01"},
 		{0.5, false, "12:00:00"},
 		{0, true, "1904-01-01"},
@@ -224,6 +225,30 @@ func TestExcelDate(t *testing.T) {
 	} {
 		if got := excelDate(c.serial, c.date1904); got != c.want {
 			t.Errorf("excelDate(%v, 1904=%v) = %q, want %q", c.serial, c.date1904, got, c.want)
+		}
+	}
+}
+
+func TestColumnIndex(t *testing.T) {
+	for ref, want := range map[string]int{
+		"A1": 0, "a1": 0, "B5": 1, "b5": 1, "Z9": 25, "z9": 25,
+		"AA1": 26, "aa1": 26, "AB10": 27, "ab10": 27,
+		"123": -1, "": -1, "AAAA1": -1,
+	} {
+		if got := columnIndex(ref); got != want {
+			t.Errorf("columnIndex(%q) = %d, want %d", ref, got, want)
+		}
+	}
+}
+
+func TestXlsxCellBoolean(t *testing.T) {
+	dateStyles := map[int]bool{}
+	for v, want := range map[string]string{
+		"1": "TRUE", "true": "TRUE", "True": "TRUE", "TRUE": "TRUE",
+		"0": "FALSE", "false": "FALSE", "False": "FALSE", "": "FALSE",
+	} {
+		if got := xlsxCell(v, "b", 0, nil, dateStyles, false); got != want {
+			t.Errorf("xlsxCell(%q, b) = %q, want %q", v, got, want)
 		}
 	}
 }
@@ -420,6 +445,12 @@ func TestPdftotextHelper(t *testing.T) {
 		fmt.Printf("read %s\npath %s\n", data, file)
 	case "empty":
 		fmt.Print("\f\n")
+	case "utf8split":
+		prefix := bytes.Repeat([]byte("a"), (32<<10)-1)
+		os.Stdout.Write(prefix)
+		os.Stdout.Write([]byte{0xC3})
+		time.Sleep(10 * time.Millisecond)
+		os.Stdout.Write([]byte{0xA9, 'b', '\n'})
 	case "pages":
 		// What pdftotext writes on Windows: CRLF, a form feed after each page.
 		fmt.Print("Roadmap\r\n\r\n  one binary\r\n\fQ1\r\n• ship\r\n\f")
@@ -601,5 +632,43 @@ func TestFetchPDFMarksPages(t *testing.T) {
 	want := "--- page 1 ---\nRoadmap\n\n  one binary\n\n--- page 2 ---\nQ1\n• ship"
 	if got != want {
 		t.Errorf("pdf text:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestFetchPDFUtf8RuneSplit(t *testing.T) {
+	fakePdftotext(t, "utf8split")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "split.pdf"), []byte("%PDF-1.7"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := fetchDoc(t, dir, "split.pdf")
+	if !strings.Contains(got, "éb") {
+		t.Errorf("multi-byte rune was corrupted across buffer boundary: %q", got[len(got)-20:])
+	}
+	if strings.ContainsRune(got, utf8.RuneError) {
+		t.Errorf("result contained RuneError: %q", got[len(got)-20:])
+	}
+}
+
+func TestFetchReadsXlsxWithXlPrefixRels(t *testing.T) {
+	dir := t.TempDir()
+	workbook := `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ` +
+		`xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+		`<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>`
+	rels := `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+		`<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" ` +
+		`Target="xl/worksheets/sheet1.xml"/></Relationships>`
+	sheet := `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>` +
+		`<row r="1"><c r="a1" t="b"><v>true</v></c></row>` +
+		`</sheetData></worksheet>`
+	writeZip(t, dir, "prefix.xlsx",
+		[2]string{"xl/workbook.xml", workbook},
+		[2]string{"xl/_rels/workbook.xml.rels", rels},
+		[2]string{"xl/worksheets/sheet1.xml", sheet},
+	)
+	got := fetchDoc(t, dir, "prefix.xlsx")
+	want := "## Sheet1\nTRUE"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

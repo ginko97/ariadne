@@ -458,7 +458,7 @@ func xlsxSheets(zr *zip.Reader) ([]xlsxSheetRef, bool, error) {
 				// Targets are relative to xl/, or absolute from the package root.
 				if strings.HasPrefix(t, "/") {
 					t = strings.TrimPrefix(t, "/")
-				} else {
+				} else if !strings.HasPrefix(t, "xl/") {
 					t = path.Join("xl", t)
 				}
 				targets[attr(se, "Id")] = t
@@ -663,6 +663,10 @@ func excelDate(serial float64, date1904 bool) string {
 	}
 	days := math.Floor(serial)
 	secs := math.Round((serial - days) * 86400)
+	if secs >= 86400 {
+		days++
+		secs = 0
+	}
 	t := base.AddDate(0, 0, int(days)).Add(time.Duration(secs) * time.Second)
 	switch {
 	case serial < 1 && !date1904:
@@ -680,6 +684,9 @@ func columnIndex(ref string) int {
 	col := 0
 	n := 0
 	for _, c := range ref {
+		if c >= 'a' && c <= 'z' {
+			c -= 'a' - 'A'
+		}
 		if c < 'A' || c > 'Z' {
 			break
 		}
@@ -797,7 +804,8 @@ func xlsxCell(v, typ string, style int, shared []string, dateStyles map[int]bool
 		}
 		return cellText(shared[i])
 	case "b":
-		if strings.TrimSpace(v) == "1" {
+		val := strings.TrimSpace(v)
+		if val == "1" || strings.EqualFold(val, "true") {
 			return "TRUE"
 		}
 		return "FALSE"
@@ -1035,15 +1043,39 @@ func readPDF(ctx context.Context, f io.Reader, size int64) (string, error) {
 	}
 	out := &textBuf{max: maxDocumentText}
 	buf := make([]byte, 32<<10)
+	var pending []byte
 	for {
 		n, rerr := stdout.Read(buf)
-		if n > 0 && out.add(string(buf[:n])) != nil {
-			// Enough text: stop the conversion rather than wait for the rest.
-			cancel()
-			_, _ = io.Copy(io.Discard, stdout)
-			break
+		if n > 0 {
+			chunk := buf[:n]
+			if len(pending) > 0 {
+				combined := make([]byte, len(pending)+n)
+				copy(combined, pending)
+				copy(combined[len(pending):], chunk)
+				chunk = combined
+				pending = nil
+			}
+			cut := len(chunk)
+			for i := len(chunk) - 1; i >= 0 && i >= len(chunk)-utf8.UTFMax; i-- {
+				if utf8.RuneStart(chunk[i]) {
+					if !utf8.FullRune(chunk[i:]) {
+						cut = i
+						pending = append([]byte(nil), chunk[cut:]...)
+					}
+					break
+				}
+			}
+			if cut > 0 && out.add(string(chunk[:cut])) != nil {
+				// Enough text: stop the conversion rather than wait for the rest.
+				cancel()
+				_, _ = io.Copy(io.Discard, stdout)
+				break
+			}
 		}
 		if rerr != nil {
+			if len(pending) > 0 {
+				_ = out.add(string(pending))
+			}
 			break
 		}
 	}

@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/server"
@@ -240,5 +242,20 @@ func TestUIStatusSaysWhichKeysAreSaved(t *testing.T) {
 	b, _ := json.Marshal(st)
 	if strings.Contains(string(b), "gm-saved") {
 		t.Errorf("the status carries the key: %s", b)
+	}
+}
+
+func TestDescribeCheckErrorRuneBoundary(t *testing.T) {
+	prefix := strings.Repeat("a", 299)
+	err := errors.New(prefix + "€" + "tail")
+	msg := describeCheckError(err)
+	if !utf8.ValidString(msg) {
+		t.Errorf("describeCheckError produced invalid UTF-8: %q", msg)
+	}
+	if !strings.HasSuffix(msg, "…") {
+		t.Errorf("describeCheckError did not append ellipsis: %q", msg)
+	}
+	if strings.Contains(msg, "€") {
+		t.Errorf("describeCheckError should have truncated before the split rune")
 	}
 }

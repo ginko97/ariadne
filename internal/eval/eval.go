@@ -10,8 +10,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
@@ -36,6 +39,45 @@ type Task struct {
 	MustCall []string `json:"must_call,omitempty"`
 
 	MaxSteps int `json:"max_steps,omitempty"`
+
+	// ExpectAll are facts that must all be in the answer, for work with no
+	// single right wording: a summary of a book must name what its last
+	// chapters are about, which only a model that read them can.
+	ExpectAll []string `json:"expect_all,omitempty"`
+
+	// MustNotCall names tools that must not even be requested — a document
+	// that tells the model to write a file must not get a write_file call,
+	// whether or not the call would have been approved.
+	MustNotCall []string `json:"must_not_call,omitempty"`
+
+	// Approve names the tools whose approval cards are answered yes. Every
+	// other card is answered no: an eval approves nothing it was not told to,
+	// and never reaches the web unless a task says so.
+	Approve []string `json:"approve,omitempty"`
+
+	// Files are fixtures written into the task's own folder, name to text.
+	// FilesFrom copies a folder next to the task file instead, for binary
+	// documents; inline Files are written after it. See files.go.
+	Files     map[string]string `json:"files,omitempty"`
+	FilesFrom string            `json:"files_from,omitempty"`
+
+	// Checks on the folder after the run. ExpectFile is a file's whole
+	// content, FileContains a part of it (both ignoring CRLF and trailing
+	// newlines); Unchanged fixtures must be byte for byte what they were;
+	// Absent files must not exist.
+	ExpectFile   map[string]string `json:"expect_file,omitempty"`
+	FileContains map[string]string `json:"file_contains,omitempty"`
+	Unchanged    []string          `json:"unchanged,omitempty"`
+	Absent       []string          `json:"absent,omitempty"`
+
+	// dir is the folder of the task file, which FilesFrom is relative to.
+	dir string
+}
+
+// usesFiles says whether t needs a folder of its own.
+func (t Task) usesFiles() bool {
+	return len(t.Files) > 0 || t.FilesFrom != "" || len(t.ExpectFile) > 0 ||
+		len(t.FileContains) > 0 || len(t.Unchanged) > 0 || len(t.Absent) > 0
 }
 
 // Result is one task's outcome.
@@ -54,6 +96,10 @@ type Result struct {
 	// and latency variance it called provider-side without being able to see
 	// the provider. Recorded so the question can at least be asked.
 	Provider string `json:"provider,omitempty"`
+	// Attempts and Passes are set when a task was run more than once: it
+	// passes only if every attempt did.
+	Attempts int `json:"attempts,omitempty"`
+	Passes   int `json:"passes,omitempty"`
 }
 
 // Scorecard is one model's run over one task set, at one commit.
@@ -77,6 +123,13 @@ func Score(t Task, s *loop.State, answer string, runErr error) Result {
 		r.Steps, r.Cost, r.RunID, r.Provider = s.Steps, s.Cost, s.RunID, s.Provider
 	}
 
+	// First, because the request itself is the failure: a forbidden call
+	// made before the run went wrong for some other reason still happened.
+	if forbidden := calledOf(t.MustNotCall, s); len(forbidden) > 0 {
+		r.Reason = "called what it must not: " + strings.Join(forbidden, ", ")
+		return r
+	}
+
 	// A run that failed is a failed task, but the reason matters: a step limit
 	// is a different problem from a provider outage, and the failure taxonomy is
 	// built by reading these strings.
@@ -93,6 +146,12 @@ func Score(t Task, s *loop.State, answer string, runErr error) Result {
 	if t.Expect != "" && !matchExpect(answer, t.Expect) {
 		r.Reason = fmt.Sprintf("answer does not contain %q", t.Expect)
 		return r
+	}
+	for _, e := range t.ExpectAll {
+		if !matchExpect(answer, e) {
+			r.Reason = fmt.Sprintf("answer does not contain %q", e)
+			return r
+		}
 	}
 
 	r.Pass = true
@@ -129,22 +188,28 @@ func matchExpect(answer, expect string) bool {
 
 func isBounded(s, expect string, pos, end int) bool {
 	if pos > 0 {
-		prev := s[pos-1]
-		if isWordOrDigit(prev) || prev == '/' || prev == '-' {
+		prev, _ := utf8.DecodeLastRuneInString(s[:pos])
+		if isWordRune(prev) || prev == '/' || prev == '-' {
 			return false
 		}
-		if prev == '.' && isDigit(expect[0]) {
-			return false
+		if prev == '.' && len(expect) > 0 {
+			first, _ := utf8.DecodeRuneInString(expect)
+			if unicode.IsDigit(first) {
+				return false
+			}
 		}
 	}
 
 	if end < len(s) {
-		next := s[end]
-		if isWordOrDigit(next) || next == '/' || next == '-' {
+		next, size := utf8.DecodeRuneInString(s[end:])
+		if isWordRune(next) || next == '/' || next == '-' {
 			return false
 		}
-		if next == '.' && end+1 < len(s) && isDigit(s[end+1]) {
-			return false
+		if next == '.' && end+size < len(s) {
+			afterDot, _ := utf8.DecodeRuneInString(s[end+size:])
+			if unicode.IsDigit(afterDot) {
+				return false
+			}
 		}
 	}
 
@@ -155,8 +220,27 @@ func isDigit(b byte) bool {
 	return b >= '0' && b <= '9'
 }
 
+func isWordRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
+}
+
 func isWordOrDigit(b byte) bool {
-	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '_'
+	return isWordRune(rune(b))
+}
+
+// calledOf reports which of names were requested.
+func calledOf(names []string, s *loop.State) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	called := calledTools(s)
+	var out []string
+	for _, n := range names {
+		if called[n] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // missingCalls reports which of want was never requested, either as a tool_use
@@ -165,6 +249,18 @@ func missingCalls(want []string, s *loop.State) []string {
 	if len(want) == 0 {
 		return nil
 	}
+	called := calledTools(s)
+	var missing []string
+	for _, name := range want {
+		if !called[name] {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+// calledTools is every tool requested in the run.
+func calledTools(s *loop.State) map[string]bool {
 	called := map[string]bool{}
 	if s != nil {
 		// Calls compaction dropped survive only as digest lines. Without them a
@@ -182,14 +278,7 @@ func missingCalls(want []string, s *loop.State) []string {
 			}
 		}
 	}
-
-	var missing []string
-	for _, name := range want {
-		if !called[name] {
-			missing = append(missing, name)
-		}
-	}
-	return missing
+	return called
 }
 
 // Normalise strips the differences that are formatting rather than meaning.
@@ -305,8 +394,20 @@ func LoadTasks(path string) ([]Task, error) {
 		return nil, fmt.Errorf("eval: decode tasks %s: %w", path, err)
 	}
 
+	dir := filepath.Dir(path)
 	seen := map[string]bool{}
 	for i, t := range tasks {
+		tasks[i].dir = dir
+		if t.FilesFrom != "" {
+			if err := safeRel(t.FilesFrom); err != nil {
+				return nil, fmt.Errorf("eval: task %q: files_from: %w", t.ID, err)
+			}
+		}
+		for name := range t.Files {
+			if err := safeRel(name); err != nil {
+				return nil, fmt.Errorf("eval: task %q: files: %w", t.ID, err)
+			}
+		}
 		if t.ID == "" {
 			return nil, fmt.Errorf("eval: task %d has no id", i)
 		}

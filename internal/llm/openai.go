@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -148,8 +149,10 @@ func (o *OpenAI) sleep(ctx context.Context, d time.Duration) error {
 	if o.Sleep != nil {
 		return o.Sleep(ctx, d)
 	}
+	t := time.NewTimer(d)
+	defer t.Stop()
 	select {
-	case <-time.After(d):
+	case <-t.C:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -423,5 +426,9 @@ func truncate(b []byte, n int) string {
 	if len(b) <= n {
 		return string(b)
 	}
-	return string(b[:n]) + "…"
+	limit := n
+	for limit > 0 && !utf8.RuneStart(b[limit]) {
+		limit--
+	}
+	return string(b[:limit]) + "…"
 }

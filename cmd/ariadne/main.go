@@ -200,6 +200,7 @@ eval flags:
   -models         comma-separated model ids  (default: ARIADNE_MODEL)
   -tasks          path to task set           (default testdata/tasks.json)
   -min-pass-rate  exit non-zero if any model scores below this
+  -repeat         run each task this many times; it passes only if all do (default 1)
   -save           write scorecard to eval/history and report regressions
 
 traces flags (must come before the search text):
@@ -1612,6 +1613,15 @@ func providerKeyName(baseURL string) string {
 //
 // Every model sees the same tasks, the same tools and the same scoring, which
 // is the only reason the numbers can be compared at all.
+// approveListed answers an approval card yes for a tool in names and no for
+// every other. An eval runs unattended: without it, a gated call fell back to
+// asking on the terminal in the middle of a sweep.
+func approveListed(names []string) func(context.Context, llm.ToolCall) (bool, error) {
+	return func(_ context.Context, c llm.ToolCall) (bool, error) {
+		return contains(names, c.Name), nil
+	}
+}
+
 func cmdEval(args []string) int {
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -1619,6 +1629,7 @@ func cmdEval(args []string) int {
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	tasksPath := fs.String("tasks", "testdata/tasks.json", "task set")
 	minPass := fs.Float64("min-pass-rate", 0, "exit non-zero if any model scores below this (0 = report only)")
+	repeat := fs.Int("repeat", 1, "run each task this many times; it passes only if every attempt does")
 	save := fs.Bool("save", false, "write each scorecard to "+historyDir+" and report regressions")
 	// Present so compaction can be measured against the same task set it was
 	// built beside: a budget small enough to force trimming should not collapse
@@ -1663,7 +1674,8 @@ func cmdEval(args []string) int {
 	taskRunID := func(model, taskID string) string {
 		return fmt.Sprintf("%s_%s", newRunID(), taskID)
 	}
-	newAgent := func(model, runID string, maxSteps int) *loop.Agent {
+	newAgent := func(model string, env eval.TaskEnv) *loop.Agent {
+		runID, maxSteps := env.RunID, env.MaxSteps
 		tw, err := trace.NewFileWriter(runsDir, runID)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ariadne eval: trace: %v\n", err)
@@ -1675,11 +1687,16 @@ func cmdEval(args []string) int {
 		// Never streams: an eval reads scorecards, and printing tokens for 34
 		// tasks would bury them. No memory either — a sweep that remembers
 		// something from task 3 is no longer measuring 34 independent tasks.
+		ws := env.Workspace
+		if ws == "" {
+			ws = defaultWorkspace
+		}
 		return newAgentFor(agentOpts{
 			Key: key, Model: model, BaseURL: *baseURL, RunID: runID,
-			Workspace: defaultWorkspace,
+			Workspace: ws,
 			MaxSteps:  maxSteps, Budget: *budget, ToolTimeout: defaultToolTimeout, HTTPTimeout: defaultHTTPTimeout,
 			Store: store, Trace: tw,
+			ApproveFn: approveListed(env.Approve),
 		})
 	}
 
@@ -1693,10 +1710,14 @@ func cmdEval(args []string) int {
 		if model == "" {
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "eval %s over %d tasks...\n", model, len(tasks))
+		if *repeat > 1 {
+			fmt.Fprintf(os.Stderr, "eval %s over %d tasks, %d times each...\n", model, len(tasks), *repeat)
+		} else {
+			fmt.Fprintf(os.Stderr, "eval %s over %d tasks...\n", model, len(tasks))
+		}
 
 		sc := eval.NewScorecard(model, commit,
-			eval.RunTasks(ctx, tasks, model, newAgent, taskRunID))
+			eval.RunTasks(ctx, tasks, model, newAgent, taskRunID, *repeat))
 
 		if i > 0 {
 			fmt.Println()

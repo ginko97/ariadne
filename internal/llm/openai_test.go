@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestToWire(t *testing.T) {
@@ -559,5 +560,28 @@ func TestZeroRetryAfterDoesNotOverrideTheBodyDelay(t *testing.T) {
 		if w := backoff(1, resp, body); w.delay != 20*time.Second || !w.explicit {
 			t.Errorf("Retry-After %q: wait %v explicit=%v, want the body's 20s", header, w.delay, w.explicit)
 		}
+	}
+}
+
+func TestTruncateRuneBoundary(t *testing.T) {
+	b := []byte("aaaaa€bbbbb")
+	res := truncate(b, 6)
+	if res != "aaaaa…" {
+		t.Errorf("truncate(b, 6) = %q, want \"aaaaa…\"", res)
+	}
+	if !utf8.ValidString(res) {
+		t.Errorf("truncate produced invalid UTF-8: %q", res)
+	}
+}
+
+func TestOpenAISleep(t *testing.T) {
+	o := &OpenAI{}
+	if err := o.sleep(context.Background(), 5*time.Millisecond); err != nil {
+		t.Errorf("sleep returned unexpected error: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := o.sleep(ctx, 1*time.Hour); !errors.Is(err, context.Canceled) {
+		t.Errorf("sleep returned error %v, want context.Canceled", err)
 	}
 }

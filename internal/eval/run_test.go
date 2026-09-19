@@ -13,11 +13,11 @@ import (
 // scripted builds an AgentFactory whose provider replays canned responses —
 // the whole eval loop, end to end, with no network and no key.
 func scripted(responses ...llm.Response) AgentFactory {
-	return func(model, runID string, maxSteps int) *loop.Agent {
+	return func(model string, env TaskEnv) *loop.Agent {
 		return &loop.Agent{
 			Provider: &llm.Fake{Responses: responses},
 			Model:    model,
-			MaxSteps: maxSteps,
+			MaxSteps: env.MaxSteps,
 			RunTool: func(_ context.Context, c llm.ToolCall) (llm.ToolResult, error) {
 				return llm.ToolResult{Content: "36"}, nil
 			},
@@ -51,7 +51,7 @@ func TestRunTasksScoresEach(t *testing.T) {
 
 	// Each task gets a fresh agent, so both see the same script.
 	results := RunTasks(context.Background(), tasks, "test/model",
-		scripted(toolThenAnswer("the answer is **36**")...), ids)
+		scripted(toolThenAnswer("the answer is **36**")...), ids, 1)
 
 	if len(results) != 2 {
 		t.Fatalf("got %d results, want 2", len(results))
@@ -81,14 +81,14 @@ func TestRunTasksContinuesAfterFailure(t *testing.T) {
 		{ID: "b", Prompt: "p", Expect: "36", MaxSteps: 5},
 	}
 
-	exhausted := func(model, runID string, maxSteps int) *loop.Agent {
+	exhausted := func(model string, env TaskEnv) *loop.Agent {
 		return &loop.Agent{
 			Provider: &llm.Fake{}, // no responses at all
-			Model:    model, MaxSteps: maxSteps,
+			Model:    model, MaxSteps: env.MaxSteps,
 		}
 	}
 
-	results := RunTasks(context.Background(), tasks, "m", exhausted, ids)
+	results := RunTasks(context.Background(), tasks, "m", exhausted, ids, 1)
 	if len(results) != 2 {
 		t.Fatalf("got %d results, want 2 — the sweep stopped early", len(results))
 	}
@@ -109,8 +109,18 @@ func TestRunTasksStopsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if got := RunTasks(ctx, tasks, "m", scripted(), ids); len(got) != 0 {
+	if got := RunTasks(ctx, tasks, "m", scripted(), ids, 1); len(got) != 0 {
 		t.Fatalf("got %d results, want 0 — nothing should have run", len(got))
+	}
+}
+
+func TestRunTasksNilFactoryOrRunID(t *testing.T) {
+	tasks := []Task{{ID: "a"}}
+	if got := RunTasks(context.Background(), tasks, "m", nil, ids, 1); got != nil {
+		t.Errorf("got %v, want nil", got)
+	}
+	if got := RunTasks(context.Background(), tasks, "m", scripted(), nil, 1); got != nil {
+		t.Errorf("got %v, want nil", got)
 	}
 }
 

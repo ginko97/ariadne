@@ -186,7 +186,11 @@ func (f Fetch) Call(ctx context.Context, _ string, args json.RawMessage) (llm.To
 	// 20MB file has already spent the memory by the time anyone can object.
 	// Up to maxDocumentText the file is read and served in parts; past it,
 	// not at all.
-	if fi, err := file.Stat(); err == nil && fi.Size() > maxDocumentText {
+	fi, err := file.Stat()
+	if err != nil {
+		return fail("fetch: cannot read %q: %v", in.Path, err)
+	}
+	if fi.Size() > maxDocumentText {
 		return fail("fetch: %q is %d bytes, over the %d-byte limit; "+
 			"a document this large cannot be read into the conversation, even in parts",
 			in.Path, fi.Size(), maxDocumentText)

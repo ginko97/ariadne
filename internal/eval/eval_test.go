@@ -169,6 +169,26 @@ func TestScoreRejectsSubstringFalsePass(t *testing.T) {
 	}
 }
 
+func TestScoreUnicodeWordBoundaries(t *testing.T) {
+	task := Task{ID: "cafe-01", Expect: "caf"}
+	res := Score(task, loop.NewState("run", "prompt"), "Le café est délicieux.", nil)
+	if res.Pass {
+		t.Errorf("expected 'caf' to not match inside 'café'")
+	}
+
+	task2 := Task{ID: "cafe-02", Expect: "café"}
+	res2 := Score(task2, loop.NewState("run", "prompt"), "Le café est délicieux.", nil)
+	if !res2.Pass {
+		t.Errorf("expected 'café' to match: %s", res2.Reason)
+	}
+
+	task3 := Task{ID: "ru-01", Expect: "мир"}
+	res3 := Score(task3, loop.NewState("run", "prompt"), "мировой океан", nil)
+	if res3.Pass {
+		t.Errorf("expected 'мир' to not match inside 'мировой'")
+	}
+}
+
 // A failed run is a failed task, but the reason has to survive — the failure
 // taxonomy is built by reading these.
 func TestScoreCarriesRunError(t *testing.T) {
