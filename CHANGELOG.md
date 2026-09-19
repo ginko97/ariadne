@@ -5,6 +5,9 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Theme switch** in the browser: system, light or dark, remembered in that
+  browser. The page now paints its own background, so a browser's dark
+  default no longer shows through the light theme.
 - **Documents.** `fetch` reads the text of `.docx`, `.xlsx`, `.pptx`, `.odt`,
   `.ods` and `.odp` files: tables as tab-separated rows, spreadsheets with a
   heading per sheet and dates as dates, slides in order. PDFs are read through

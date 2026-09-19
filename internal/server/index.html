@@ -5,10 +5,15 @@
 <style>
   :root { color-scheme: light dark; --edge:#8883; --dim:#8888; --err:#c33; }
   * { box-sizing: border-box; }
+  /* Painted, not inherited: a browser that draws its own default behind an
+     unpainted page (dark, in some embedded views) would show through. The
+     system colours follow color-scheme, so the theme button still decides. */
   body { margin:0; height:100vh; display:grid; grid-template-columns:17rem 1fr;
+         background:Canvas; color:CanvasText;
          font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif; }
   aside { border-right:1px solid var(--edge); display:flex; flex-direction:column; min-height:0; }
   aside header { padding:.7rem .9rem; border-bottom:1px solid var(--edge); display:flex; gap:.5rem; }
+  #theme { font:inherit; cursor:pointer; width:2.4rem; }
   #runs { overflow-y:auto; flex:1; }
   #runs button { display:block; width:100%; text-align:left; background:none; border:0;
                  border-bottom:1px solid var(--edge); padding:.6rem .9rem; cursor:pointer;
@@ -52,6 +57,7 @@
 <aside>
   <header>
     <button class="primary" id="new" style="flex:1">New conversation</button>
+    <button type="button" id="theme" title="Theme: follow the system, light, or dark"></button>
   </header>
   <div id="runs"></div>
 </aside>
@@ -96,6 +102,30 @@ const pendingApprovals = new Map();
 // StopsTheTurn). What already ran is checkpointed; a tool call waiting for
 // approval stays pending, to be asked again on Resume.
 let turn = null;
+
+// Theme: follow the system, or force light or dark. Every colour here is a
+// translucent grey over the browser's own canvas, so setting color-scheme on
+// the root is the whole switch. Remembered in this browser only; storage can
+// be unavailable (a private window), and then the choice lasts the page.
+const THEMES = { auto: ['light dark', 'Theme: system'], light: ['light', 'Theme: light'], dark: ['dark', 'Theme: dark'] };
+const THEME_ICON = { auto: '◐', light: '☀', dark: '☾' };
+function setTheme(name) {
+  if (!THEMES[name]) name = 'auto';
+  document.documentElement.style.colorScheme = THEMES[name][0];
+  $('theme').textContent = THEME_ICON[name];
+  $('theme').title = THEMES[name][1] + ' (click to change)';
+  $('theme').dataset.theme = name;
+  try { localStorage.setItem('ariadne.theme', name); } catch {}
+}
+{
+  let saved = 'auto';
+  try { saved = localStorage.getItem('ariadne.theme') || 'auto'; } catch {}
+  setTheme(saved);
+}
+$('theme').onclick = () => {
+  const order = ['auto', 'light', 'dark'];
+  setTheme(order[(order.indexOf($('theme').dataset.theme) + 1) % order.length]);
+};
 
 const api = (path, opts = {}) => fetch(path, {
   ...opts,

@@ -29,6 +29,9 @@ ariadne ui      # opens in your browser
 With [Ollama](https://ollama.com) running, `ariadne setup -provider ollama` needs no key:
 it lists the models you have pulled and checks that the one you pick can call tools.
 
+The page follows your system's light or dark mode; the button next to **New conversation**
+switches between system, light and dark.
+
 `ariadne chat` does the same in the terminal. Your conversations, notes and settings
 live in one folder — `%AppData%\ariadne` on Windows, `~/Library/Application
 Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ariadne from.
