@@ -58,6 +58,11 @@ EVAL_TASKS ?= testdata/tasks.json
 eval:
 	$(GO) run ./cmd/ariadne eval --base-url $(EVAL_URL) --models $(EVAL_MODEL) --tasks $(EVAL_TASKS) --save
 
+# The daily set: documents, folders, edits and an injection attempt. Real model
+# calls, so it is never part of `make check`.
+eval-daily:
+	$(GO) run ./cmd/ariadne eval --base-url $(EVAL_URL) --models $(EVAL_MODEL) --tasks testdata/daily/tasks.json
+
 # Stage the fetchable fixtures into the sandbox the tools are confined to.
 #
 # workspace/ is gitignored, because it is scratch space a run writes into. The

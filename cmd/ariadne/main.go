@@ -1609,10 +1609,6 @@ func providerKeyName(baseURL string) string {
 	return ""
 }
 
-// cmdEval scores a task set against one or more models and prints a row each.
-//
-// Every model sees the same tasks, the same tools and the same scoring, which
-// is the only reason the numbers can be compared at all.
 // approveListed answers an approval card yes for a tool in names and no for
 // every other. An eval runs unattended: without it, a gated call fell back to
 // asking on the terminal in the middle of a sweep.
@@ -1622,6 +1618,10 @@ func approveListed(names []string) func(context.Context, llm.ToolCall) (bool, er
 	}
 }
 
+// cmdEval scores a task set against one or more models and prints a row each.
+//
+// Every model sees the same tasks, the same tools and the same scoring, which
+// is the only reason the numbers can be compared at all.
 func cmdEval(args []string) int {
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)

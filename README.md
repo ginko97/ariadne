@@ -201,6 +201,64 @@ Scoring checks that the required tools actually **ran**, not just that the answe
 right. On a six-task set the cheapest tool-capable model on the gateway scored well by
 answering arithmetic from its own weights and never calling the tool at all.
 
+### Check a model against your own tasks
+
+A task set is a JSON file. Each task says what to ask, and one thing a correct
+result cannot be missing — you need to know that one thing, not the whole answer.
+
+```json
+[
+  {
+    "id": "vat",
+    "prompt": "What is 11% VAT on 1,250,000? Use the calc tool.",
+    "expect": "137500",
+    "must_call": ["calc"]
+  },
+  {
+    "id": "move-meeting",
+    "prompt": "In notes.txt, move the meeting to Tuesday 10am. Change nothing else.",
+    "files": {"notes.txt": "Meeting: Monday 9am\nRoom: B\n"},
+    "approve": ["edit_file"],
+    "expect_file": {"notes.txt": "Meeting: Tuesday 10am\nRoom: B"},
+    "must_call": ["edit_file"]
+  }
+]
+```
+
+```bash
+ariadne eval -tasks my-tasks.json -models deepseek/deepseek-v4-flash-0731,google/gemini-2.5-flash
+ariadne eval -tasks my-tasks.json -repeat 3 -min-pass-rate 1.0   # gate a default
+```
+
+| In a task | |
+| --- | --- |
+| `expect`, `expect_all` | a fact, or several, the answer must contain |
+| `must_call`, `must_not_call` | tools that must have run, or must not have been asked for at all |
+| `files`, `files_from` | fixtures written into a fresh folder for that task: inline text, or a folder next to the task file (for `.docx`, `.pdf`, …) |
+| `expect_file`, `file_contains`, `unchanged`, `absent` | what the folder must look like afterwards |
+| `approve` | tools whose approval card is answered yes; every other card is answered no |
+| `max_steps` | give up after this many steps |
+
+Each task runs in a folder of its own, which is removed afterwards, so one task
+cannot help or break the next. `-repeat 3` runs each task three times and passes
+it only if all three passed: models are not consistent, and "passed 2/3" is a
+finding. `-save` keeps scorecards in `eval/history/` and reports what changed.
+
+Two things to know before running one. **It spends money**: every task is real
+model calls, so start with cheap models. And **every fixture is sent to the model
+you are testing**, so write made-up content rather than copying a real document.
+
+The set this project runs against its own daily work is
+[`testdata/daily/tasks.json`](testdata/daily/tasks.json): finding a file by
+listing a folder, a code word planted past the first 256 KB part of a long file,
+a summary that has to mention how a long story ends, a fact from each of `.docx`,
+`.xlsx` and `.pptx`, an exact edit, refusing to write a "PDF", and an invoice
+whose text tells the model to write a file — which it must not.
+
+```bash
+ariadne eval -tasks testdata/daily/tasks.json -models <model>
+```
+
 ### The finding that changed how this is scored
 
 A truncation bug was reintroduced into `calc` deliberately, to check the suite would
