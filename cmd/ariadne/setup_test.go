@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -242,5 +243,120 @@ func TestSetupWarnsWhenEnvVarIsExportedInProcess(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "OPENROUTER_API_KEY is also set in your environment") {
 		t.Errorf("expected warning about process environment, got:\n%s", out.String())
+	}
+}
+
+// fakeOllama answers /api/tags with models and /v1/chat/completions with
+// complete, recording whether the check offered a tool.
+func fakeOllama(t *testing.T, models string, complete http.HandlerFunc) (*httptest.Server, *atomic.Bool) {
+	t.Helper()
+	var sawTools atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tags":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(models))
+		case "/v1/chat/completions":
+			body, _ := io.ReadAll(r.Body)
+			sawTools.Store(strings.Contains(string(body), `"tools"`))
+			complete(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &sawTools
+}
+
+func okChat(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(okCompletion))
+}
+
+// Ollama: no key asked or stored, the pulled models listed and the first one
+// taken on Enter, the check made with a tool on offer, and a wildcard key from
+// an earlier setup cleared so it is not sent here.
+func TestSetupOllamaListsModelsAndStoresNoKey(t *testing.T) {
+	srv, sawTools := fakeOllama(t, `{"models":[{"name":"qwen3:8b"},{"name":"llama3.2:latest"}]}`, okChat)
+	cfg := useConfigFile(t)
+	if err := os.MkdirAll(filepath.Dir(cfg), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfg, []byte("ARIADNE_API_KEY=sk-old-wildcard\nOPENROUTER_API_KEY=sk-or-keep\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	code := runSetup(strings.NewReader("\n"), &out, []string{"-provider", "ollama", "-base-url", srv.URL + "/v1"})
+	if code != exitOK {
+		t.Fatalf("exit %d:\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "qwen3:8b, llama3.2:latest") {
+		t.Errorf("pulled models not listed:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "input hidden") {
+		t.Errorf("setup asked Ollama for a key:\n%s", out.String())
+	}
+	if !sawTools.Load() {
+		t.Error("the check offered no tool; a model that cannot call tools would pass setup and fail the first question")
+	}
+	data, _ := os.ReadFile(cfg)
+	got := string(data)
+	for _, want := range []string{"ARIADNE_BASE_URL=" + srv.URL + "/v1", "ARIADNE_MODEL=qwen3:8b", "OPENROUTER_API_KEY=sk-or-keep"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("config.env lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "ARIADNE_API_KEY") {
+		t.Errorf("ARIADNE_API_KEY stored for a local Ollama; it would outrank OPENROUTER_API_KEY:\n%s", got)
+	}
+}
+
+// Each way Ollama can be unusable is found before anything is written, and
+// says what to do.
+func TestSetupOllamaWritesNothingWhenItCannotWork(t *testing.T) {
+	down := httptest.NewServer(http.NotFoundHandler())
+	downURL := down.URL
+	down.Close()
+
+	empty, _ := fakeOllama(t, `{"models":[]}`, okChat)
+	noTools, _ := fakeOllama(t, `{"models":[{"name":"gemma:2b"}]}`, func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":{"message":"registry.ollama.ai/library/gemma:2b does not support tools"}}`, http.StatusBadRequest)
+	})
+
+	for _, c := range []struct{ name, url, want string }{
+		{"not running", downURL, "ollama serve"},
+		{"no models", empty.URL, "ollama pull"},
+		{"no tools", noTools.URL, "does not support tools"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := useConfigFile(t)
+			var out strings.Builder
+			code := runSetup(strings.NewReader("\n"), &out, []string{"-provider", "ollama", "-base-url", c.url + "/v1"})
+			if code != exitFail {
+				t.Errorf("exit %d, want %d:\n%s", code, exitFail, out.String())
+			}
+			if !strings.Contains(out.String(), c.want) {
+				t.Errorf("output lacks %q:\n%s", c.want, out.String())
+			}
+			if _, err := os.Stat(cfg); !os.IsNotExist(err) {
+				t.Errorf("config.env written (%v)", err)
+			}
+		})
+	}
+}
+
+// Ollama on another machine gets the placeholder stored, because apiKey only
+// supplies one for loopback.
+func TestSetupOllamaElsewhereStoresThePlaceholder(t *testing.T) {
+	cfg := useConfigFile(t)
+	var out strings.Builder
+	code := runSetup(strings.NewReader(""), &out, []string{"-provider", "ollama", "-base-url", "http://192.168.1.5:11434/v1", "-model", "qwen3", "-no-check"})
+	if code != exitOK {
+		t.Fatalf("exit %d:\n%s", code, out.String())
+	}
+	data, _ := os.ReadFile(cfg)
+	if !strings.Contains(string(data), "ARIADNE_API_KEY="+localNoKey) {
+		t.Errorf("no placeholder key for a remote Ollama:\n%s", data)
 	}
 }

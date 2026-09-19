@@ -5,6 +5,11 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Ollama in `setup`.** `ariadne setup -provider ollama` asks no key, lists
+  the models Ollama has pulled, and checks the chosen one can call tools; a
+  model that cannot, Ollama not running, or no models pulled is reported
+  before anything is written. An endpoint on this machine no longer needs a
+  key to start. The setup check now offers a tool, for every provider.
 - **Unknown cost says "unknown".** A provider that reports no cost (anything
   but OpenRouter) used to show `cost=0.0000`, as if the conversation were free.
   The terminal now prints `cost=unknown`, the browser `cost unknown`, and

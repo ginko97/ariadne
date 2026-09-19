@@ -220,8 +220,9 @@ Keys come from the environment, then config.env (written by ariadne setup),
 then a .env in an ariadne source checkout.
 
 setup flags:
-  -provider       openrouter (default), openai, gemini, xai, or other
-  -base-url       endpoint, for -provider other
+  -provider       openrouter (default), openai, gemini, xai, ollama, or other
+  -base-url       endpoint, for -provider other (or Ollama somewhere other than
+                  http://localhost:11434/v1)
   -model          model to use by default
   -no-check       write the config without testing the key
 `
@@ -1513,7 +1514,14 @@ func envOr(key, fallback string) string {
 // whichever provider key was set, which sent an OpenRouter or OpenAI key to any
 // endpoint anybody typed into -base-url, or recorded on a checkpoint. That is
 // the leak 6b4845c closed for a known host with an unset key, from the other
-// side. A local server that needs no key (Ollama) takes any ARIADNE_API_KEY.
+// side.
+//
+// A loopback endpoint with no key set gets localNoKey: Ollama and other local
+// servers ask for none, and every command refuses to start without one. The
+// placeholder is sent only to this machine, and ARIADNE_API_KEY still wins for
+// a local server that does want a key. Storing a placeholder ARIADNE_API_KEY
+// in config.env instead would have outranked a real OPENROUTER_API_KEY the
+// moment someone pointed -base-url back at OpenRouter.
 //
 // Matched on the parsed host, by exact name or subdomain. A substring match
 // gave max.ai the xAI key, because "max.ai" contains "x.ai".
@@ -1524,7 +1532,33 @@ func apiKey(baseURL string) (key, envName string) {
 	if name := providerKeyName(baseURL); name != "" {
 		return os.Getenv(name), name
 	}
+	if isLoopbackURL(baseURL) {
+		return localNoKey, ""
+	}
 	return "", "ARIADNE_API_KEY"
+}
+
+// localNoKey is the key a loopback endpoint gets when none is set.
+const localNoKey = "no-key"
+
+// isLoopbackURL says baseURL's host is this machine: localhost or a loopback
+// address. Not the local network — a server on another machine is somebody
+// else's, as far as keys go.
+func isLoopbackURL(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" {
+		if u2, err2 := url.Parse("//" + baseURL); err2 == nil {
+			u = u2
+		} else {
+			return false
+		}
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // providerKeys maps a provider's domain to the variable holding its key.

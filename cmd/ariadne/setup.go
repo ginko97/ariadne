@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,7 +30,11 @@ var providers = map[string]string{
 	"openai":     "https://api.openai.com/v1",
 	"gemini":     "https://generativelanguage.googleapis.com/v1beta/openai",
 	"xai":        "https://api.x.ai/v1",
+	// Ollama needs no key; setup asks it which models are pulled instead.
+	"ollama": ollamaURL,
 }
+
+const ollamaURL = "http://localhost:11434/v1"
 
 // cmdSetup writes config.env so an installed binary works with no flags: the
 // endpoint, the key for it, and optionally a model. It then makes one tiny
@@ -41,8 +47,8 @@ func cmdSetup(args []string) int {
 func runSetup(stdin io.Reader, out io.Writer, args []string) int {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	fs.SetOutput(out)
-	provider := fs.String("provider", "", "openrouter (default), openai, gemini, xai, or other")
-	baseURL := fs.String("base-url", "", "endpoint, for -provider other")
+	provider := fs.String("provider", "", "openrouter (default), openai, gemini, xai, ollama, or other")
+	baseURL := fs.String("base-url", "", "endpoint, for -provider other (or Ollama somewhere other than "+ollamaURL+")")
 	model := fs.String("model", "", "model to use by default (default: one chosen for the provider)")
 	noCheck := fs.Bool("no-check", false, "write the config without testing the key")
 	if err := fs.Parse(args); err != nil {
@@ -71,6 +77,11 @@ func runSetup(stdin io.Reader, out io.Writer, args []string) int {
 
 	url, known := providers[*provider]
 	switch {
+	case *provider == "ollama":
+		if *baseURL != "" {
+			url = *baseURL
+		}
+		return setupOllama(out, ask, url, *model, *noCheck)
 	case known:
 	case *provider == "other":
 		url = *baseURL
@@ -134,7 +145,115 @@ func runSetup(stdin io.Reader, out io.Writer, args []string) int {
 	return exitOK
 }
 
-// checkKey makes the smallest real request: one short message, no tools.
+// setupOllama configures a local Ollama. There is no key to ask for; what can
+// go wrong is that Ollama is not running or has no model pulled, and both are
+// found by asking it before anything is written. No key is stored either:
+// apiKey gives a loopback endpoint a placeholder of its own.
+func setupOllama(out io.Writer, ask func(string) string, url, model string, noCheck bool) int {
+	if noCheck && model == "" {
+		fmt.Fprintln(out, "ariadne setup: -no-check with -provider ollama needs -model")
+		return exitUsage
+	}
+	if !noCheck {
+		models, err := ollamaModels(url)
+		if err != nil {
+			fmt.Fprintf(out, "ariadne setup: Ollama is not answering at %s: %v\n"+
+				"start it (open the Ollama app, or run `ollama serve`), then run setup again\n", ollamaRoot(url), err)
+			return exitFail
+		}
+		if len(models) == 0 {
+			fmt.Fprint(out, "ariadne setup: Ollama is running but has no models; pull one that can call tools, e.g.\n"+
+				"  ollama pull qwen3\nthen run setup again\n")
+			return exitFail
+		}
+		if model == "" {
+			fmt.Fprintf(out, "models in Ollama: %s\n", strings.Join(models, ", "))
+			if model = ask(fmt.Sprintf("model [%s]: ", models[0])); model == "" {
+				model = models[0]
+			}
+		}
+		fmt.Fprintf(out, "checking %s with %s ... ", url, model)
+		if err := checkKey(url, localNoKey, model); err != nil {
+			fmt.Fprintf(out, "failed\nariadne setup: %v\nnothing written; ariadne needs a model that can call tools\n", err)
+			return exitFail
+		}
+		fmt.Fprintln(out, "ok")
+	}
+
+	// ARIADNE_API_KEY is cleared for the same reason as for a named provider:
+	// it goes to every endpoint, so a key left from an earlier setup would be
+	// sent here, and would outrank the provider keys once -base-url points
+	// elsewhere.
+	vals := map[string]string{"ARIADNE_BASE_URL": url, "ARIADNE_MODEL": model, "ARIADNE_API_KEY": ""}
+	if !isLoopbackURL(url) {
+		// Ollama on another machine: apiKey gives only loopback a placeholder,
+		// so this one is stored. It is not a secret, and it goes to every
+		// endpoint, which is why the loopback case does not store it.
+		vals["ARIADNE_API_KEY"] = localNoKey
+		fmt.Fprintf(out, "note: %s is not this machine, so ARIADNE_API_KEY=%s is stored for it;\n"+
+			"ARIADNE_API_KEY outranks every provider's key, so rerun setup before using another provider\n", url, localNoKey)
+	}
+	if err := writeConfigEnv(configEnvFile, vals); err != nil {
+		fmt.Fprintf(out, "ariadne setup: %v\n", err)
+		return exitFail
+	}
+	fmt.Fprintf(out, "wrote %s\n", configEnvFile)
+	for _, name := range []string{"ARIADNE_BASE_URL", "ARIADNE_MODEL"} {
+		if v, ok := os.LookupEnv(name); ok && v != vals[name] {
+			fmt.Fprintf(out, "note: %s is also set in your environment and takes precedence over config.env\n", name)
+		}
+	}
+	if os.Getenv("ARIADNE_API_KEY") != "" {
+		fmt.Fprintln(out, "note: ARIADNE_API_KEY is set in your environment and is sent to every endpoint, Ollama included")
+	}
+	fmt.Fprint(out, "\nnext:\n  ariadne ui      talk in the browser\n  ariadne chat    talk in the terminal\n")
+	return exitOK
+}
+
+// ollamaRoot is the server behind an Ollama OpenAI-compatible URL: /v1 is
+// where conversations go, the native /api is where the pulled models are listed.
+func ollamaRoot(url string) string {
+	return strings.TrimSuffix(strings.TrimSuffix(url, "/"), "/v1")
+}
+
+// ollamaModels asks a running Ollama which models are pulled.
+func ollamaModels(url string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ollamaRoot(url)+"/api/tags", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET /api/tags: %s", resp.Status)
+	}
+	var tags struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&tags); err != nil {
+		return nil, fmt.Errorf("GET /api/tags: %v", err)
+	}
+	var names []string
+	for _, m := range tags.Models {
+		if m.Name != "" {
+			names = append(names, m.Name)
+		}
+	}
+	return names, nil
+}
+
+// checkKey makes the smallest real request that looks like a conversation: one
+// short message and one tool on offer. The tool is there because every
+// conversation offers tools, and a model that cannot take them (common among
+// local models) is refused with a 400 — better here, before anything is
+// written, than on the first real question.
 func checkKey(url, key, model string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -144,6 +263,11 @@ func checkKey(url, key, model string) error {
 		Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
 			{Type: llm.BlockText, Text: "Reply with the single word: ready"},
 		}}},
+		Tools: []llm.ToolDef{{
+			Name:        "ready",
+			Description: "Not needed; answer in text.",
+			Schema:      []byte(`{"type":"object","properties":{}}`),
+		}},
 	})
 	return err
 }

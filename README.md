@@ -26,6 +26,9 @@ ariadne setup   # choose a provider (OpenRouter by default) and paste your key
 ariadne ui      # opens in your browser
 ```
 
+With [Ollama](https://ollama.com) running, `ariadne setup -provider ollama` needs no key:
+it lists the models you have pulled and checks that the one you pick can call tools.
+
 `ariadne chat` does the same in the terminal. Your conversations, notes and settings
 live in one folder — `%AppData%\ariadne` on Windows, `~/Library/Application
 Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ariadne from.
@@ -442,8 +445,8 @@ just be the same answer twice.
 the environment, which takes precedence, or — in a source checkout — in a `.env` at the repo
 root. `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` or `XAI_API_KEY` is used only
 for its own provider's host, and `ARIADNE_API_KEY` for any endpoint. An endpoint ariadne
-does not recognise never gets a provider's key; a local server that needs none, like
-Ollama, takes any `ARIADNE_API_KEY`.
+does not recognise never gets a provider's key. An endpoint on this machine (`localhost`,
+`127.0.0.1`), like Ollama, needs no key at all; set `ARIADNE_API_KEY` if yours wants one.
 
 Conversations are saved as checkpoints and traces in `runs/` inside the data folder (in a
 source checkout, the repo's own `runs/`, which git ignores).

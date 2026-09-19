@@ -854,7 +854,14 @@ func TestAPIKeyGoesOnlyToItsOwnProvider(t *testing.T) {
 		{"https://api.x.ai/v1", "k-xai"},
 		// Unrecognised: no provider's key, whichever are set.
 		{"https://api.groq.com/openai/v1", ""},
-		{"http://localhost:11434/v1", ""},
+		// This machine: no provider's key, a placeholder so commands start.
+		{"http://localhost:11434/v1", localNoKey},
+		{"http://127.0.0.1:11434/v1", localNoKey},
+		{"http://[::1]:11434/v1", localNoKey},
+		{"localhost:11434/v1", localNoKey},
+		// Not this machine, whatever the name says.
+		{"http://192.168.1.5:11434/v1", ""},
+		{"http://localhost.attacker.example/v1", ""},
 		// Substrings of a provider's domain are not that provider.
 		{"https://max.ai/v1", ""},
 		{"https://openrouter.ai.attacker.example/v1", ""},
@@ -869,6 +876,10 @@ func TestAPIKeyGoesOnlyToItsOwnProvider(t *testing.T) {
 	t.Setenv("ARIADNE_API_KEY", "k-ariadne")
 	if got, name := apiKey("https://api.groq.com/openai/v1"); got != "k-ariadne" || name != "ARIADNE_API_KEY" {
 		t.Errorf("with ARIADNE_API_KEY set: %q %q", got, name)
+	}
+	// Including a local server that does want a key.
+	if got, _ := apiKey("http://localhost:4000/v1"); got != "k-ariadne" {
+		t.Errorf("ARIADNE_API_KEY lost to the loopback placeholder: %q", got)
 	}
 }
 
