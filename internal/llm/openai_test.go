@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -522,9 +523,10 @@ func TestParseRetryAfter(t *testing.T) {
 		t.Error("negative delay should not parse")
 	}
 
-	// Explicit zero delay
-	if d, ok := parseRetryAfter("0"); !ok || d != 0 {
-		t.Errorf("parseRetryAfter(\"0\") = %v, %v; want 0, true", d, ok)
+	// Zero is not an instruction: it would outrank the body's retryDelay and
+	// fire every retry at once. The backoff decides instead.
+	if d, ok := parseRetryAfter("0"); ok {
+		t.Errorf("parseRetryAfter(\"0\") = %v, true; want no instruction", d)
 	}
 
 	// Positive seconds
@@ -532,15 +534,30 @@ func TestParseRetryAfter(t *testing.T) {
 		t.Errorf("parseRetryAfter(\"2.5\") = %v, %v; want 2.5s, true", d, ok)
 	}
 
-	// Date in the past: should return 0, true
+	// A date in the past, usually clock skew: no instruction either.
 	past := time.Now().Add(-1 * time.Minute).UTC().Format(http.TimeFormat)
-	if d, ok := parseRetryAfter(past); !ok || d != 0 {
-		t.Errorf("parseRetryAfter(past) = %v, %v; want 0, true", d, ok)
+	if d, ok := parseRetryAfter(past); ok {
+		t.Errorf("parseRetryAfter(past) = %v, true; want no instruction", d)
 	}
 
 	// Date in the future
 	future := time.Now().Add(3 * time.Second).UTC().Format(http.TimeFormat)
 	if d, ok := parseRetryAfter(future); !ok || d <= 0 || d > 4*time.Second {
 		t.Errorf("parseRetryAfter(future) = %v, %v; want ~3s, true", d, ok)
+	}
+}
+
+// A gateway that answers a 429 with "Retry-After: 0" in front of Gemini's own
+// retryDelay must not turn the 20s wait into none.
+func TestZeroRetryAfterDoesNotOverrideTheBodyDelay(t *testing.T) {
+	body, err := os.ReadFile("testdata/rate_limit_429.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, header := range []string{"0", time.Now().Add(-time.Minute).UTC().Format(http.TimeFormat)} {
+		resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": {header}}}
+		if w := backoff(1, resp, body); w.delay != 20*time.Second || !w.explicit {
+			t.Errorf("Retry-After %q: wait %v explicit=%v, want the body's 20s", header, w.delay, w.explicit)
+		}
 	}
 }

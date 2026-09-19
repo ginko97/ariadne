@@ -354,19 +354,25 @@ func backoff(attempt int, resp *http.Response, body []byte) retryWait {
 	return retryWait{delay: delay}
 }
 
+// parseRetryAfter reads a positive wait from a Retry-After header.
+//
+// Zero, and a date already past, are "no instruction", not "retry now": an
+// explicit wait outranks Gemini's retryDelay in the body and is never
+// floored, so a zero would fire every remaining retry at a rate limiter
+// within milliseconds and fail the turn. A past date is usually clock skew
+// between here and the server. Either way the doubling backoff is the safe
+// reading.
 func parseRetryAfter(header string) (time.Duration, bool) {
 	if header == "" {
 		return 0, false
 	}
-	if sec, err := strconv.ParseFloat(header, 64); err == nil && sec >= 0 {
+	if sec, err := strconv.ParseFloat(header, 64); err == nil && sec > 0 {
 		return time.Duration(sec * float64(time.Second)), true
 	}
 	if t, err := http.ParseTime(header); err == nil {
-		d := time.Until(t)
-		if d < 0 {
-			d = 0
+		if d := time.Until(t); d > 0 {
+			return d, true
 		}
-		return d, true
 	}
 	return 0, false
 }

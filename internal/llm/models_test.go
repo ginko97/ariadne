@@ -268,64 +268,85 @@ func TestModelsNeverUsesTheDefaultClient(t *testing.T) {
 }
 
 func TestModelsConcurrentGetDoesNotBlockStaleCache(t *testing.T) {
-	fetchStarted := make(chan struct{})
-	releaseFetch := make(chan struct{})
-
+	// One handler for the whole test: swapping ts.Config.Handler while the
+	// server is running is itself a data race. Phase 0 answers at once; phase
+	// 1 reports that a fetch started, then holds it until release is closed.
+	var phase atomic.Int32
+	fetchStarted := make(chan struct{}, 8)
+	release := make(chan struct{})
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case fetchStarted <- struct{}{}:
-		default:
+		if phase.Load() == 1 {
+			select {
+			case fetchStarted <- struct{}{}:
+			default:
+			}
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
 		}
-		<-releaseFetch
-		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(modelsFixture))
 	}))
 	defer ts.Close()
+	// Registered after ts.Close, so it runs first: a held fetch is let go
+	// before Close waits for it, and a failing test fails instead of hanging.
+	var releaseOnce atomic.Bool
+	unblock := func() {
+		if releaseOnce.CompareAndSwap(false, true) {
+			close(release)
+		}
+	}
+	defer unblock()
 
 	m := newCache(t, ts.URL)
 	m.TTL = 10 * time.Millisecond
-
-	// Populate initial cache
-	close(releaseFetch)
 	if _, source, _ := m.Get(context.Background()); source != "live" {
 		t.Fatalf("initial source = %q, want live", source)
 	}
+	time.Sleep(20 * time.Millisecond) // the cached list is now stale
 
-	// Wait for TTL to expire
-	time.Sleep(20 * time.Millisecond)
-
-	// Second fetch will block on releaseFetch2
-	releaseFetch2 := make(chan struct{})
-	defer close(releaseFetch2)
-	ts.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fetchStarted <- struct{}{}
-		<-releaseFetch2
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(modelsFixture))
-	})
-
-	// Start background refresh
-	fetchDone := make(chan struct{})
+	phase.Store(1)
+	refreshDone := make(chan struct{})
 	go func() {
-		defer close(fetchDone)
+		defer close(refreshDone)
 		m.Get(context.Background())
 	}()
-
-	// Wait until background fetch is actively in flight
-	<-fetchStarted
-
-	// Concurrent call during in-flight fetch should return stale cache immediately
-	start := time.Now()
-	rows, source, _ := m.Get(context.Background())
-	elapsed := time.Since(start)
-
-	if source != "cache" {
-		t.Errorf("source = %q during in-flight fetch, want cache", source)
+	select {
+	case <-fetchStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the background refresh never reached the server")
 	}
-	if len(rows) != 3 {
-		t.Errorf("got %d rows, want 3", len(rows))
+
+	// A second caller while that fetch is in flight gets the stale list at
+	// once, and does not start a fetch of its own.
+	type result struct {
+		rows   []ModelRow
+		source string
 	}
-	if elapsed > 100*time.Millisecond {
-		t.Errorf("Get blocked for %v during in-flight fetch, want non-blocking cache read", elapsed)
+	got := make(chan result, 1)
+	go func() {
+		rows, source, _ := m.Get(context.Background())
+		got <- result{rows, source}
+	}()
+	select {
+	case r := <-got:
+		if r.source != "cache" || len(r.rows) != 3 {
+			t.Errorf("during an in-flight fetch: source=%q rows=%d, want cache and 3", r.source, len(r.rows))
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("Get blocked behind the in-flight fetch instead of serving the stale list")
+	}
+	select {
+	case <-fetchStarted:
+		t.Error("a second fetch started while one was in flight")
+	default:
+	}
+
+	unblock()
+	select {
+	case <-refreshDone:
+	case <-time.After(5 * time.Second):
+		t.Error("the background refresh did not finish after release")
 	}
 }
