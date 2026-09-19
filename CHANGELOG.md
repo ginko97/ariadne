@@ -5,6 +5,13 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Documents.** `fetch` reads the text of `.docx`, `.xlsx`, `.pptx`, `.odt`,
+  `.ods` and `.odp` files: tables as tab-separated rows, spreadsheets with a
+  heading per sheet and dates as dates, slides in order. PDFs are read through
+  Poppler's `pdftotext` when it is installed, with the command to install it
+  when it is not. Text past 256 KB is cut and marked, instead of the document
+  being refused. Old binary `.doc`/`.xls`/`.ppt` files get a message to save
+  them in the newer format.
 - **Ollama in `setup`.** `ariadne setup -provider ollama` asks no key, lists
   the models Ollama has pulled, and checks the chosen one can call tools; a
   model that cannot, Ollama not running, or no models pulled is reported

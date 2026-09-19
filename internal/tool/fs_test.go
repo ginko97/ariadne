@@ -322,16 +322,18 @@ func TestFetchRefusesADocumentTooLargeForTheConversation(t *testing.T) {
 }
 
 // Reading a PDF as a string does not fail, it succeeds at producing millions of
-// characters of compressed rubbish that costs tokens and answers nothing.
+// characters of compressed rubbish that costs tokens and answers nothing. A
+// .pdf now goes to pdftotext (docs.go); the same bytes under a name fetch does
+// not know are still refused.
 func TestFetchRefusesBinary(t *testing.T) {
 	dir := t.TempDir()
 	pdf := append([]byte("%PDF-1.7\n"), 0x00, 0x8f, 0x1e, 0x00, 'j', 'u', 'n', 'k')
-	if err := os.WriteFile(filepath.Join(dir, "doc.pdf"), pdf, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "doc.dat"), pdf, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	res, err := NewFetch(dir).Call(context.Background(), "c1",
-		json.RawMessage(`{"path":"doc.pdf"}`))
+		json.RawMessage(`{"path":"doc.dat"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,20 +369,21 @@ func TestFetchStillReadsTextDocuments(t *testing.T) {
 // reported as too large while a 244KB one was reported as not text — and shown
 // that table, a model concluded the small one was corrupt. Two identical
 // formats must not get two explanations because of which limit they tripped.
+// (Named .dat: a .pdf is now read through pdftotext.)
 func TestFetchReportsFormatBeforeSize(t *testing.T) {
 	dir := t.TempDir()
 
 	small := append([]byte("%PDF-1.7\n"), make([]byte, 100)...)
 	large := append([]byte("%PDF-1.7\n"), make([]byte, maxFetchBytes+1)...)
-	if err := os.WriteFile(filepath.Join(dir, "small.pdf"), small, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "small.dat"), small, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "large.pdf"), large, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "large.dat"), large, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	f := NewFetch(dir)
-	for _, name := range []string{"small.pdf", "large.pdf"} {
+	for _, name := range []string{"small.dat", "large.dat"} {
 		res, err := f.Call(context.Background(), "c1",
 			json.RawMessage(`{"path":"`+name+`"}`))
 		if err != nil {

@@ -32,6 +32,11 @@ plainly, what protects you and what does not.
   whole URL to that site, and a URL can hold anything the model has read
   (`https://example.com/?q=...`). Read the URL on the card before approving;
   `-trust web_fetch` removes that check.
+- **Reading a PDF runs another program.** When Poppler's `pdftotext` is
+  installed, `fetch` runs it on a copy of the PDF, without asking, as it
+  reads any file. A PDF crafted against a bug in `pdftotext` would run with
+  your permissions. Keep Poppler updated, or uninstall it and PDFs are
+  refused. Office and LibreOffice files are read by ariadne itself.
 - **Whatever a tool reads is sent to your model provider.** Approving a read
   approves sending what it reads. Redaction covers only ariadne's own keys.
 - **Marking text as untrusted asks the model to behave; it does not make it.**

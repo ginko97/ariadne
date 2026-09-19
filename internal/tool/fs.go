@@ -74,9 +74,11 @@ var _ Tool = Fetch{}
 func (Fetch) Name() string { return "fetch" }
 
 func (Fetch) Description() string {
-	return "Fetch a document by path and return its text content. " +
-		"Paths are relative to a workspace directory this tool cannot read " +
-		"outside of; absolute paths are refused."
+	return "Fetch a document by path and return its text content: plain text " +
+		"files, and the text of Word, Excel and PowerPoint (.docx, .xlsx, .pptx), " +
+		"OpenDocument (.odt, .ods, .odp) and PDF files. Spreadsheets come back as " +
+		"tab-separated rows under a heading per sheet. Paths are relative to a " +
+		"workspace directory this tool cannot read outside of; absolute paths are refused."
 }
 
 func (Fetch) Schema() json.RawMessage {
@@ -94,7 +96,7 @@ type fetchArgs struct {
 	Path string `json:"path"`
 }
 
-func (f Fetch) Call(_ context.Context, _ string, args json.RawMessage) (llm.ToolResult, error) {
+func (f Fetch) Call(ctx context.Context, _ string, args json.RawMessage) (llm.ToolResult, error) {
 	fail := func(format string, a ...any) (llm.ToolResult, error) {
 		return llm.ToolResult{Content: fmt.Sprintf(format, a...), IsError: true}, nil
 	}
@@ -118,6 +120,36 @@ func (f Fetch) Call(_ context.Context, _ string, args json.RawMessage) (llm.Tool
 		return fail("fetch: cannot read %q: %v", in.Path, err)
 	}
 	defer file.Close()
+
+	// A document is read for its text, by its extension; everything else is
+	// read as text or refused as binary below. See docs.go.
+	switch kind := documentKind(in.Path); kind {
+	case "":
+	case "legacy":
+		return fail("%s", legacyMessage(in.Path))
+	default:
+		fi, err := file.Stat()
+		if err != nil {
+			return fail("fetch: cannot read %q: %v", in.Path, err)
+		}
+		var text string
+		if kind == ".pdf" {
+			text, err = readPDF(ctx, file, fi.Size())
+		} else if fi.Size() > maxDocumentBytes {
+			err = fmt.Errorf("it is %d bytes, over the %d-byte limit for documents", fi.Size(), maxDocumentBytes)
+		} else {
+			text, err = readDocument(file, fi.Size(), kind)
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return llm.ToolResult{}, ctx.Err()
+			}
+			return fail("fetch: cannot read %q: %v", in.Path, err)
+		}
+		// Untrusted, as any fetch: whoever wrote the document is not whoever
+		// asked the question.
+		return llm.ToolResult{Content: text, Untrusted: true}, nil
+	}
 
 	// Format before size, and the order is the point. A PDF is a PDF at any
 	// size, but size was checked first, so a 2MB one was reported as too large
