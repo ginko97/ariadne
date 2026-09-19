@@ -32,9 +32,17 @@ provider, key or model later, and the page never shows the key again.
 With [Ollama](https://ollama.com) running, `ariadne setup -provider ollama` needs no key:
 it lists the models you have pulled and checks that the one you pick can call tools.
 
-Type `/help` in the page for its commands (`/new`, `/model`, `/folder`, `/settings`, …);
-they are answered by the page and never sent to the model. The page follows your system's light or dark mode; the button next to **New conversation**
-switches between system, light and dark.
+### In the browser
+
+| | |
+| --- | --- |
+| **New conversation**, then **Folder…** | choose the folder it may read and write, before the first message; it stays fixed after that |
+| **⚙** | provider, key and model. With two keys saved (say OpenRouter and Gemini), pick the other provider and leave the key empty to switch; a conversation keeps the provider it started on |
+| `/help` | the page's commands — `/new`, `/model`, `/folder`, `/settings`, `/theme`, `/stop`. Answered by the page, never sent to the model; `//text` sends a message starting with `/` |
+| **Working…** | shown while a turn runs: how long, and whether it is thinking, calling a tool, waiting for you, or writing |
+| **Stop** / **Resume turn** | end a turn at any point; finish one that was interrupted, without repeating what already ran |
+| answers | formatted (headings, lists, tables, code); images are never loaded |
+| ◐ | theme: system, light or dark |
 
 `ariadne chat` does the same in the terminal. Your conversations, notes and settings
 live in one folder — `%AppData%\ariadne` on Windows, `~/Library/Application
@@ -44,19 +52,19 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
 
 | | |
 | --- | --- |
-| Files | list, read, write and edit in one folder per conversation — pick it in the browser (**Folder…**), or `-workspace <folder>`; `edit_file` changes only the text it names and asks first |
+| Files | list, read, write and edit in one folder per conversation — pick it in the browser (**Folder…**), or `-workspace <folder>`; `edit_file` changes only the text it names and asks first. It saves text (`.md`, `.txt`), not PDF or Word files |
 | Documents | read Word, Excel and PowerPoint files (`.docx`, `.xlsx`, `.pptx`) and their LibreOffice counterparts (`.odt`, `.ods`, `.odp`) — spreadsheets as rows, dates as dates, a long document in 256 KB parts; PDFs when [Poppler](https://poppler.freedesktop.org)'s `pdftotext` is installed |
 | The web | read a page by URL (`web_fetch`), asking before every fetch; never your own machine or local network |
 | Tools from anywhere | any MCP server: filesystem, search, git, ... (`-mcp-config`) |
 | Run programs | `-exec`, asking before every single one |
 | Remember | notes that carry across conversations (`-remember`, in the terminal for now) |
-| Any model | OpenRouter, OpenAI, Gemini, xAI, Groq, Together, a local Ollama |
+| Any model | OpenRouter, OpenAI, Gemini, xAI, Groq, Together, a local Ollama — switch in **⚙** |
 
 ## Why it is different
 
-- **It asks first.** Writing a file you gated, every MCP tool you have not trusted, and
-  every program it wants to run: you see the exact arguments and say yes or no. No
-  answer is not a yes.
+- **It asks first.** Reading a web page, editing a file, writing one you gated, every MCP
+  tool you have not trusted, and every program it wants to run: you see the exact
+  arguments and say yes or no. No answer is not a yes.
 - **It survives a crash.** A conversation is saved when a turn starts and after every
   tool call. Kill the process mid-task and it resumes without repeating what already ran.
   In the browser, **Stop** ends a turn at any point, and **Resume turn** finishes one that
