@@ -34,7 +34,7 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
 
 | | |
 | --- | --- |
-| Files | read and write in one folder per conversation — pick it in the browser (**Folder…**), or `-workspace <folder>` |
+| Files | read, write and edit in one folder per conversation — pick it in the browser (**Folder…**), or `-workspace <folder>`; `edit_file` changes only the text it names and asks first |
 | The web | read a page by URL (`web_fetch`), asking before every fetch; never your own machine or local network |
 | Tools from anywhere | any MCP server: filesystem, search, git, ... (`-mcp-config`) |
 | Run programs | `-exec`, asking before every single one |
@@ -233,12 +233,12 @@ flowchart TD
     M["model asks for a tool call"] --> A{"allowed? no -allow means every tool"}
     A -- no --> D["denied; the model is told why"]
     A -- yes --> G{"needs approval?"}
-    G -- "yes: -approve, MCP tools and web_fetch unless -trust, exec always" --> P["card in the terminal or browser"]
+    G -- "yes: -approve, MCP tools, web_fetch and edit_file unless -trust, exec always" --> P["card in the terminal or browser"]
     P -- "deny, or no answer in 5 minutes" --> D
     P -- "tab closed or Stop" --> WAIT["the call waits; asked again on Resume"]
     P -- approve --> T{"which tool"}
     G -- no --> T
-    T -- "fetch, write_file" --> R["os.Root: cannot leave the workspace"]
+    T -- "fetch, write_file, edit_file" --> R["os.Root: cannot leave the workspace"]
     T -- "MCP tool" --> S["confined only by the server's own arguments"]
     T -- exec --> X["NOT confined: runs as you, env allow-list, timeout, 64 KB cap"]
     T -- web_fetch --> W["public internet only: no private or local addresses, no cookies or keys"]

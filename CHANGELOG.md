@@ -5,6 +5,11 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **`edit_file`**: change an exact piece of text in a file and leave the rest
+  byte for byte. The text must occur once (or `replace_all`); a miss or an
+  ambiguous match is refused with the count. Keeps Windows (CRLF) line endings
+  and the file's permissions, writes atomically, stays inside the workspace,
+  and asks first unless `-trust edit_file`.
 - **`web_fetch`**: read a web page by URL. It asks before every fetch, with the
   whole URL shown, unless `-trust web_fetch`; refuses your own machine and
   local network (loopback, private, link-local, carrier-grade NAT) on every

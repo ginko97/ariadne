@@ -87,9 +87,13 @@ func TestWebFetchIsGatedUnlessTrusted(t *testing.T) {
 	}
 
 	trusted := base
-	trusted.TrustWeb = true
-	if a := newAgentFor(trusted); contains(a.RequireApproval, tool.WebFetchName) {
+	trusted.Trust = []string{tool.WebFetchName}
+	a = newAgentFor(trusted)
+	if contains(a.RequireApproval, tool.WebFetchName) {
 		t.Errorf("-trust web_fetch did not drop the gate: %v", a.RequireApproval)
+	}
+	if !contains(a.RequireApproval, tool.EditFileName) {
+		t.Errorf("trusting web_fetch also dropped edit_file's gate: %v", a.RequireApproval)
 	}
 }
 
@@ -102,5 +106,29 @@ func TestTrustAcceptsWebFetchButNotWithApprove(t *testing.T) {
 	}
 	if _, err := gateMCP(nil, []string{"write_file"}, nil); err == nil {
 		t.Error("-trust write_file was accepted; only web_fetch and MCP tools can be trusted")
+	}
+}
+
+// edit_file is offered to every agent and, like web_fetch, asks first unless
+// -trust names it.
+func TestEditFileIsGatedUnlessTrusted(t *testing.T) {
+	base := agentOpts{Key: "k", Model: "m", BaseURL: "https://example.test/v1", RunID: "run_test", MaxSteps: 5, Store: &loop.Store{Dir: t.TempDir()}}
+	a := newAgentFor(base)
+	offered := false
+	for _, d := range a.Tools {
+		if d.Name == tool.EditFileName {
+			offered = true
+		}
+	}
+	if !offered || !contains(a.RequireApproval, tool.EditFileName) {
+		t.Errorf("edit_file offered=%v, gated=%v; want both", offered, contains(a.RequireApproval, tool.EditFileName))
+	}
+	trusted := base
+	trusted.Trust = []string{tool.EditFileName}
+	if a := newAgentFor(trusted); contains(a.RequireApproval, tool.EditFileName) {
+		t.Errorf("-trust edit_file did not drop the gate: %v", a.RequireApproval)
+	}
+	if _, err := gateMCP(nil, []string{tool.EditFileName}, nil); err != nil {
+		t.Errorf("-trust edit_file refused: %v", err)
 	}
 }

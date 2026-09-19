@@ -185,8 +185,9 @@ flags:
   -mcp-config     JSON file listing MCP servers to start (env ARIADNE_MCP_CONFIG)
                   each server's tools are named <server>__<tool>, and every one
                   asks for approval unless named in -trust
-  -trust          MCP tools, or web_fetch, that run without approval, e.g. fs__read_text_file
-                  (web_fetch asks before every fetch unless named here)
+  -trust          MCP tools, web_fetch or edit_file that run without approval,
+                  e.g. fs__read_text_file (web_fetch and edit_file ask every time
+                  unless named here)
 
 chat flags: same as run/resume. While chatting, ` + "`/help`" + ` lists the commands.
 
@@ -266,7 +267,7 @@ func cmdRun(args []string) int {
 	workspace := fs.String("workspace", defaultWorkspace, "directory fetch and write_file are confined to")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "comma-separated tools that need a yes on the terminal before each call")
-	trust := fs.String("trust", "", "MCP tools, or web_fetch, that run without approval; every other one asks first")
+	trust := fs.String("trust", "", "MCP tools, web_fetch or edit_file that run without approval; every other one asks first")
 	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
@@ -331,7 +332,7 @@ func cmdRun(args []string) int {
 		return exitUsage
 	}
 	gated, err := gateMCP(splitList(*approve), splitList(*trust), mcpTools)
-	trustWeb := contains(splitList(*trust), tool.WebFetchName)
+	trusted := splitList(*trust)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne run: %v\n", err)
 		return exitUsage
@@ -349,7 +350,7 @@ func cmdRun(args []string) int {
 
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: *model, BaseURL: *baseURL, RunID: state.RunID,
-		MaxSteps: *maxSteps, Budget: *budget, Stream: *stream, Memory: *remember, Exec: *allowExec, TrustWeb: trustWeb,
+		MaxSteps: *maxSteps, Budget: *budget, Stream: *stream, Memory: *remember, Exec: *allowExec, Trust: trusted,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: gated,
 		Workspace: *workspace,
@@ -378,7 +379,7 @@ func cmdResume(args []string) int {
 	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (defaults to the checkpoint's)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "add tools needing approval; a gate in the checkpoint cannot be dropped here")
-	trust := fs.String("trust", "", "MCP tools, or web_fetch, that run without approval; every other one asks first")
+	trust := fs.String("trust", "", "MCP tools, web_fetch or edit_file that run without approval; every other one asks first")
 	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
@@ -455,7 +456,7 @@ func cmdResume(args []string) int {
 		return exitUsage
 	}
 	gated, err := gateMCP(splitList(*approve), splitList(*trust), mcpTools)
-	trustWeb := contains(splitList(*trust), tool.WebFetchName)
+	trusted := splitList(*trust)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
 		return exitUsage
@@ -471,7 +472,7 @@ func cmdResume(args []string) int {
 	}
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: state.Model, BaseURL: endpoint, RunID: state.RunID,
-		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem, Exec: *allowExec, TrustWeb: trustWeb,
+		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem, Exec: *allowExec, Trust: trusted,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: gated,
 		Workspace: workspaceDir,
@@ -507,7 +508,7 @@ func cmdChat(args []string) int {
 	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (fresh: default workspace; resumed: checkpoint's unless overridden)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "tools needing a yes on the terminal before each call (resume can only add)")
-	trust := fs.String("trust", "", "MCP tools, or web_fetch, that run without approval; every other one asks first")
+	trust := fs.String("trust", "", "MCP tools, web_fetch or edit_file that run without approval; every other one asks first")
 	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
@@ -596,7 +597,7 @@ func cmdChat(args []string) int {
 		return exitUsage
 	}
 	gated, err := gateMCP(splitList(*approve), splitList(*trust), mcpTools)
-	trustWeb := contains(splitList(*trust), tool.WebFetchName)
+	trusted := splitList(*trust)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
 		return exitUsage
@@ -652,7 +653,7 @@ func cmdChat(args []string) int {
 
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: startModel, BaseURL: endpoint, RunID: runID,
-		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem, Exec: *allowExec, TrustWeb: trustWeb,
+		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem, Exec: *allowExec, Trust: trusted,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: gated,
 		ApproveFn: approveOnTerminalReader(os.Stdin, stdinReader),
@@ -902,7 +903,7 @@ func cmdUI(args []string) int {
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
 	allow := fs.String("allow", "", "comma-separated tools a conversation may call (default: all)")
 	approve := fs.String("approve", "", "tools needing approval in the browser before each call")
-	trust := fs.String("trust", "", "MCP tools, or web_fetch, that run without approval; every other one asks first")
+	trust := fs.String("trust", "", "MCP tools, web_fetch or edit_file that run without approval; every other one asks first")
 	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
 	workspace := fs.String("workspace", "", "default folder for new conversations; the page can choose another, and an existing conversation always keeps its own")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
@@ -940,7 +941,7 @@ func cmdUI(args []string) int {
 		return exitUsage
 	}
 	gated, err := gateMCP(splitList(*approve), splitList(*trust), mcpTools)
-	trustWeb := contains(splitList(*trust), tool.WebFetchName)
+	trusted := splitList(*trust)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne ui: %v\n", err)
 		return exitUsage
@@ -986,7 +987,7 @@ func cmdUI(args []string) int {
 
 		agent := newAgentFor(agentOpts{
 			Key: endpointKey, Model: *model, BaseURL: endpoint, RunID: runID,
-			MaxSteps: *maxSteps, Budget: budgetVal, Exec: *allowExec, TrustWeb: trustWeb,
+			MaxSteps: *maxSteps, Budget: budgetVal, Exec: *allowExec, Trust: trusted,
 			ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 			Allow:     splitList(*allow),
 			Workspace: workspaceDir,
@@ -1119,7 +1120,7 @@ func localTools(rememberFor, workspace string, withExec bool) []tool.Tool {
 	if withExec {
 		tools = append(tools, tool.NewExec(workspace))
 	}
-	tools = append(tools, tool.NewWebFetch(versionString()))
+	tools = append(tools, tool.NewWebFetch(versionString()), tool.NewEditFile(workspace))
 	return tools
 }
 
@@ -1173,10 +1174,10 @@ type agentOpts struct {
 	// Exec offers the exec tool and forces it into the approval list. Unlike
 	// Approve, nothing the operator passes can take it back out.
 	Exec bool
-	// TrustWeb drops web_fetch's default gate. Only -trust web_fetch sets it;
-	// anything that builds an agent without saying so — eval, a future
-	// command — gets web_fetch gated.
-	TrustWeb bool
+	// Trust lists the default-gated built-ins (defaultGated) the operator
+	// exempted with -trust. Anything that builds an agent without saying so —
+	// eval, a future command — gets all of them gated.
+	Trust []string
 
 	Allow   []string
 	Approve []string
@@ -1228,11 +1229,10 @@ func newAgentFor(o agentOpts) *loop.Agent {
 			approve = append(append([]string{}, approve...), "remember")
 		}
 	}
-	if !o.TrustWeb && !contains(approve, tool.WebFetchName) {
-		// web_fetch is the outbound channel: the model chooses the URL, so one
-		// GET can carry out anything it has read. Gated unless -trust names it,
-		// and the approval card shows the whole URL.
-		approve = append(append([]string{}, approve...), tool.WebFetchName)
+	for _, name := range defaultGated {
+		if !contains(o.Trust, name) && !contains(approve, name) {
+			approve = append(append([]string{}, approve...), name)
+		}
 	}
 	if o.Exec && !contains(approve, "exec") {
 		// Forced, like remember, and further: remember is gated because a bad
@@ -1369,6 +1369,15 @@ func redactSecrets(getenv func(string) string) func(string) string {
 	return r.Replace
 }
 
+// defaultGated are the built-in tools that ask before every call unless -trust
+// names them. Built-ins added after the rule that a new tool which changes
+// state or reaches the network is gated by default; write_file predates it and
+// asks only under -approve.
+//
+// web_fetch is the outbound channel: the model chooses the URL, so one GET can
+// carry out anything it has read. edit_file changes a file in place.
+var defaultGated = []string{tool.WebFetchName, tool.EditFileName}
+
 // gateMCP returns the tools that need approval: those named in -approve, and
 // every MCP tool not named in -trust.
 //
@@ -1388,9 +1397,9 @@ func gateMCP(approve, trust []string, remote []tool.Tool) ([]string, error) {
 	}
 	trusted := make(map[string]bool, len(trust))
 	for _, n := range trust {
-		if n == tool.WebFetchName {
-			// The one built-in that is gated by default, and so the one
-			// built-in -trust can name. newAgentFor applies it.
+		if contains(defaultGated, n) {
+			// A built-in gated by default, and so one -trust can name.
+			// newAgentFor applies it.
 			if contains(approve, n) {
 				return nil, fmt.Errorf("%q is in both -approve and -trust", n)
 			}
@@ -1398,7 +1407,7 @@ func gateMCP(approve, trust []string, remote []tool.Tool) ([]string, error) {
 		}
 		if !isRemote[n] {
 			if !strings.Contains(n, mcp.Separator) {
-				return nil, fmt.Errorf("-trust %q: only MCP tools and web_fetch can be trusted; other built-in tools are gated with -approve", n)
+				return nil, fmt.Errorf("-trust %q: only MCP tools, web_fetch and edit_file can be trusted; other built-in tools are gated with -approve", n)
 			}
 			names := make([]string, 0, len(remote))
 			for _, r := range remote {

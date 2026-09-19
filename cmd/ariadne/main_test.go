@@ -638,16 +638,16 @@ func (remoteStub) Call(context.Context, string, json.RawMessage) (llm.ToolResult
 // was ungated. The gate the postmortem measured did not reach any MCP tool.
 func TestNameCheckSeesRemoteTools(t *testing.T) {
 	local := newRegistry("", t.TempDir(), false).Defs()
-	remote := []tool.Tool{remoteStub("read_text_file"), remoteStub("edit_file")}
+	remote := []tool.Tool{remoteStub("read_text_file"), remoteStub("move_file")}
 
-	if err := checkNames(local, nil, []string{"edit_file"}); err == nil {
-		t.Fatal("precondition: the local registry alone should not know edit_file")
+	if err := checkNames(local, nil, []string{"move_file"}); err == nil {
+		t.Fatal("precondition: the local registry alone should not know move_file")
 	}
-	if err := checkNames(withRemote(local, remote), []string{"calc", "read_text_file"}, []string{"edit_file"}); err != nil {
+	if err := checkNames(withRemote(local, remote), []string{"calc", "read_text_file"}, []string{"move_file"}); err != nil {
 		t.Errorf("an MCP tool could not be granted or gated: %v", err)
 	}
 	// And a typo is still a typo.
-	if err := checkNames(withRemote(local, remote), nil, []string{"edit_fiel"}); err == nil {
+	if err := checkNames(withRemote(local, remote), nil, []string{"move_fiel"}); err == nil {
 		t.Error("a misspelt tool passed once remote tools were included")
 	}
 }
