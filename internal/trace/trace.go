@@ -82,8 +82,11 @@ type Event struct {
 	InTokens  int     `json:"input_tokens,omitempty"`
 	OutTokens int     `json:"output_tokens,omitempty"`
 	Cost      float64 `json:"cost_usd,omitempty"`
-	LatencyMS int64   `json:"latency_ms,omitempty"`
-	Messages  int     `json:"messages,omitempty"`
+	// CostUnknown marks a Cost nobody measured (a response), or a total that
+	// includes such a step (a run_end). Cost is then a lower bound.
+	CostUnknown bool  `json:"cost_unknown,omitempty"`
+	LatencyMS   int64 `json:"latency_ms,omitempty"`
+	Messages    int   `json:"messages,omitempty"`
 
 	CallID  string          `json:"call_id,omitempty"`
 	Tool    string          `json:"tool,omitempty"`

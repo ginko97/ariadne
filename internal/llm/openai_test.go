@@ -340,8 +340,21 @@ func TestFromWireCarriesReportedCost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Usage.Cost != 2.56e-05 {
-		t.Errorf("Cost = %v, want 2.56e-05", got.Usage.Cost)
+	if got.Usage.Cost != 2.56e-05 || !got.Usage.CostReported {
+		t.Errorf("Cost = %v reported=%v, want 2.56e-05 reported", got.Usage.Cost, got.Usage.CostReported)
+	}
+
+	// A free model: the gateway reports zero, and that zero is a measurement.
+	free := []byte(`{
+  "choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],
+  "usage":{"prompt_tokens":2,"completion_tokens":10,"cost":0}
+}`)
+	got, err = fromWire(free)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Usage.Cost != 0 || !got.Usage.CostReported {
+		t.Errorf("Cost = %v reported=%v, want a reported 0", got.Usage.Cost, got.Usage.CostReported)
 	}
 
 	// Gemini direct: no cost field, and its absence must not be an error.
@@ -353,8 +366,8 @@ func TestFromWireCarriesReportedCost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Usage.Cost != 0 {
-		t.Errorf("Cost = %v, want 0 when unreported", got.Usage.Cost)
+	if got.Usage.Cost != 0 || got.Usage.CostReported {
+		t.Errorf("Cost = %v reported=%v, want 0, unreported", got.Usage.Cost, got.Usage.CostReported)
 	}
 }
 

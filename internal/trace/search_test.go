@@ -382,3 +382,22 @@ func TestSearchSkipsALineTooLongToRead(t *testing.T) {
 		t.Errorf("Malformed = %d, want each oversized line counted once", st.Malformed)
 	}
 }
+
+// Responses whose cost nobody measured are counted, so the total can be shown
+// as a lower bound instead of passing for what the sweep cost.
+func TestSummariseCountsUnpricedResponses(t *testing.T) {
+	dir := t.TempDir()
+	unpriced := `{"run_id":"r","seq":3,"kind":"response","stop":"end_turn","input_tokens":52,"output_tokens":18,"cost_unknown":true}`
+	writeTrace(t, dir, "run_20260101T000000_mixed", evStart, evReq, evResp, evReq, unpriced, evEndOK)
+
+	st, err := Summarise(dir, Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Unpriced != 1 {
+		t.Errorf("Unpriced = %d, want 1", st.Unpriced)
+	}
+	if st.Cost != 0.0001 {
+		t.Errorf("Cost = %v, want the one measured 0.0001", st.Cost)
+	}
+}

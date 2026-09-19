@@ -112,7 +112,7 @@ func (a *accumulator) add(c Chunk) {
 	// Usage arrives in its own final chunk and is the only place a streamed
 	// run learns what it spent. Requesting it is not the default — see
 	// stream_options in openai.go.
-	if c.Usage.InputTokens > 0 || c.Usage.OutputTokens > 0 || c.Usage.Cost > 0 {
+	if c.Usage.Reported() {
 		a.usage = c.Usage
 	}
 	// First non-empty wins: these are properties of the response, not of the

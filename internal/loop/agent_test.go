@@ -427,14 +427,25 @@ func TestCheckpointOnErrorPaths(t *testing.T) {
 func TestPriceUsesReportedCost(t *testing.T) {
 	p := Price{InputPerMTok: 1000, OutputPerMTok: 1000} // deliberately absurd
 
-	reported := p.Cost(llm.Usage{InputTokens: 1, OutputTokens: 1, Cost: 0.25})
-	if reported != 0.25 {
-		t.Errorf("got %v, want the reported 0.25 — the table should not win", reported)
+	reported, known := p.Cost(llm.Usage{InputTokens: 1, OutputTokens: 1, Cost: 0.25, CostReported: true})
+	if reported != 0.25 || !known {
+		t.Errorf("got %v known=%v, want the reported 0.25 — the table should not win", reported, known)
 	}
 
-	fallback := p.Cost(llm.Usage{InputTokens: 1_000_000, OutputTokens: 0})
-	if fallback != 1000 {
-		t.Errorf("got %v, want 1000 from the table when cost is unreported", fallback)
+	// A free model on a gateway reports zero, and zero is what it cost.
+	free, known := p.Cost(llm.Usage{InputTokens: 1, OutputTokens: 1, CostReported: true})
+	if free != 0 || !known {
+		t.Errorf("got %v known=%v, want a known 0 — a reported zero is free, not unknown", free, known)
+	}
+
+	fallback, known := p.Cost(llm.Usage{InputTokens: 1_000_000, OutputTokens: 0})
+	if fallback != 1000 || !known {
+		t.Errorf("got %v known=%v, want 1000 from the table when cost is unreported", fallback, known)
+	}
+
+	// Nothing reported and no table: unmeasured, not free.
+	if _, known := (Price{}).Cost(llm.Usage{InputTokens: 1_000_000, OutputTokens: 1000}); known {
+		t.Error("no reported cost and no price came back as known; it would print as $0.0000")
 	}
 }
 
@@ -636,5 +647,58 @@ func TestRunIsSavedBeforeTheFirstModelCall(t *testing.T) {
 	}
 	if st.Task != "a question worth keeping" || len(st.Messages) != 1 {
 		t.Errorf("saved state = task %q, %d messages; want the question and nothing else", st.Task, len(st.Messages))
+	}
+}
+
+// A provider that reports tokens but no cost, with no price table, leaves the
+// run's cost unmeasured. The state and the trace must say so, so that nothing
+// downstream prints $0.0000 for a run that was billed.
+func TestUnreportedCostIsUnknownNotZero(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("call_a1", "calc", `{"expr":"1+1"}`, 52, 18),
+		endResponse("2", 94, 11),
+	}}
+	var events []trace.Event
+	a := &Agent{
+		Provider: fake, Model: "test/model", MaxSteps: 10,
+		RunTool: func(context.Context, llm.ToolCall) (llm.ToolResult, error) {
+			return llm.ToolResult{Content: "2"}, nil
+		},
+		Trace: func(e trace.Event) { events = append(events, e) },
+	}
+	s := NewState("run_unpriced", "1+1?")
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	if s.UnpricedSteps != 2 {
+		t.Errorf("UnpricedSteps = %d, want 2", s.UnpricedSteps)
+	}
+	for _, e := range events {
+		if (e.Kind == trace.KindResponse || e.Kind == trace.KindRunEnd) && !e.CostUnknown {
+			t.Errorf("%s event has CostUnknown=false; its $%v is not a measured cost", e.Kind, e.Cost)
+		}
+	}
+
+	// The same run on a provider that reports a cost is measured throughout.
+	priced := func(r llm.Response) llm.Response {
+		r.Usage.Cost, r.Usage.CostReported = 0.001, true
+		return r
+	}
+	a.Provider = &llm.Fake{Responses: []llm.Response{
+		priced(toolUseResponse("call_b1", "calc", `{"expr":"1+1"}`, 52, 18)),
+		priced(endResponse("2", 94, 11)),
+	}}
+	events = nil
+	s = NewState("run_priced", "1+1?")
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	if s.UnpricedSteps != 0 {
+		t.Errorf("UnpricedSteps = %d on a provider that reports cost, want 0", s.UnpricedSteps)
+	}
+	for _, e := range events {
+		if e.CostUnknown {
+			t.Errorf("%s event marked CostUnknown on a provider that reports cost", e.Kind)
+		}
 	}
 }

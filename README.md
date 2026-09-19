@@ -62,8 +62,8 @@ What changed in each release: [CHANGELOG.md](CHANGELOG.md).
 
 ## How it works
 
-Underneath, every conversation is a **run**: it has an id, a step ceiling, a cost
-ceiling, and a checkpoint you can resume from after `kill -9`. You can score it,
+Underneath, every conversation is a **run**: it has an id, a step ceiling, a running
+cost, and a checkpoint you can resume from after `kill -9`. You can score it,
 regress it, and read a trace of everything it did.
 
 Written in Go, against the OpenAI chat-completions protocol — so the same binary reaches
@@ -80,7 +80,7 @@ run run_20260913T064046_9ffee0  model=deepseek/deepseek-v4-flash-0731
 $ ariadne resume run_20260913T064046_9ffee0
 resume run_20260913T064046_9ffee0  model=deepseek/deepseek-v4-flash-0731  from step 1 (3 messages)
 ...
-run run_20260913T064046_9ffee0  steps=4  cost=0.0003  20.214s
+run run_20260913T064046_9ffee0  steps=4  cost=$0.0003  20.214s
 ```
 
 Three messages were on disk when the process died. The resumed run picked them up and
@@ -325,7 +325,7 @@ ariadne ui                         # browser, on 127.0.0.1
 ```
 
 A chat here is not a session. It is a run with more messages appended, so it is
-checkpointed per tool call, resumable after a crash, compacted, cost-capped and traced —
+checkpointed per tool call, resumable after a crash, compacted, costed and traced —
 and `ariadne traces` lists conversations without being taught to, because they were never
 a separate kind of thing.
 

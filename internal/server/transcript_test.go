@@ -230,3 +230,26 @@ func TestTranscriptReportsPendingAndDefaultWorkspace(t *testing.T) {
 		t.Errorf("got.Workspace = %q, want /default/workspace", got.Workspace)
 	}
 }
+
+// A conversation reopened from the list must say its cost is unknown the same
+// way the live turn did, or the page falls back to showing a figure.
+func TestTranscriptSaysWhenCostIsUnknown(t *testing.T) {
+	s, ts := newTestServer(t)
+	st := loop.NewState("run_unpriced_ts", "hello")
+	st.Steps, st.UnpricedSteps = 2, 2
+	if err := s.Store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+	if _, got := getTranscript(t, ts, "run_unpriced_ts"); !got.CostUnknown {
+		t.Error("CostUnknown = false for a run with unpriced steps")
+	}
+
+	st = loop.NewState("run_priced_ts", "hello")
+	st.Steps, st.Cost = 2, 0.01
+	if err := s.Store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+	if _, got := getTranscript(t, ts, "run_priced_ts"); got.CostUnknown {
+		t.Error("CostUnknown = true for a run whose every step was priced")
+	}
+}

@@ -53,6 +53,10 @@ type State struct {
 	Messages        []llm.Message `json:"messages"`
 	Steps           int           `json:"steps"`
 	Cost            float64       `json:"cost_usd"`
+	// UnpricedSteps counts the steps whose cost nobody measured: the provider
+	// sent none and there was no price. While it is above zero, Cost is a
+	// lower bound — and when every step is unpriced, it is not a cost at all.
+	UnpricedSteps int `json:"unpriced_steps,omitempty"`
 	// Memory records that this run was started with MEMORY.md enabled.
 	//
 	// The loop never reads it — it is the command's bookkeeping, kept here for

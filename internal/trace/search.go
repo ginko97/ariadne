@@ -222,6 +222,9 @@ type Stats struct {
 	Events int
 	Cost   float64
 	Steps  int
+	// Unpriced counts responses whose cost was not measured; while it is
+	// above zero, Cost is a lower bound.
+	Unpriced int
 
 	ByKind map[string]int
 	ByTool map[string]int
@@ -292,6 +295,9 @@ func Summarise(dir string, q Query) (Stats, error) {
 				st.RetryMS += e.LatencyMS
 			case KindResponse:
 				st.Cost += e.Cost
+				if e.CostUnknown {
+					st.Unpriced++
+				}
 			}
 			return true
 		})

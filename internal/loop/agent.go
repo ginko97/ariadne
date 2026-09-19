@@ -35,12 +35,19 @@ type Price struct {
 // changed a pricing page. Providers that do not report it fall back to Price,
 // applied to provider-reported tokens — never a local tokenizer, since only the
 // provider's count matches the bill.
-func (p Price) Cost(u llm.Usage) float64 {
-	if u.Cost > 0 {
-		return u.Cost
+//
+// known is false when neither is there: the provider sent no cost and there is
+// no price for the model. The cost is then unmeasured, not zero, and callers
+// must not add it up as if it were free.
+func (p Price) Cost(u llm.Usage) (usd float64, known bool) {
+	if u.CostReported || u.Cost > 0 {
+		return u.Cost, true
+	}
+	if p.InputPerMTok == 0 && p.OutputPerMTok == 0 {
+		return 0, false
 	}
 	return float64(u.InputTokens)/1e6*p.InputPerMTok +
-		float64(u.OutputTokens)/1e6*p.OutputPerMTok
+		float64(u.OutputTokens)/1e6*p.OutputPerMTok, true
 }
 
 // ToolRunner executes one tool call. tool.Registry.Call satisfies it, and so
@@ -283,7 +290,11 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 
 		// Charged whether or not the turn was useful.
 		s.Steps++
-		s.Cost += a.Price.Cost(resp.Usage)
+		cost, known := a.Price.Cost(resp.Usage)
+		s.Cost += cost
+		if !known {
+			s.UnpricedSteps++
+		}
 		// The provider's own count of what that prompt cost. This is what the
 		// next iteration compacts against, and recording it on the state is what
 		// makes a resumed run behave like one that never stopped.
@@ -307,7 +318,7 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 			Model: served, Provider: resp.Provider,
 			Stop: string(resp.Stop), LatencyMS: latency,
 			InTokens: resp.Usage.InputTokens, OutTokens: resp.Usage.OutputTokens,
-			Cost: a.Price.Cost(resp.Usage), Text: resp.Text(),
+			Cost: cost, CostUnknown: !known, Text: resp.Text(),
 		})
 
 		// Whatever the model said is now part of the conversation, in every branch.
@@ -671,7 +682,7 @@ func (a *Agent) emit(e trace.Event) {
 func (a *Agent) endRun(s *State, err error) error {
 	e := trace.Event{
 		Kind: trace.KindRunEnd, Step: s.Steps,
-		Messages: len(s.Messages), Cost: s.Cost,
+		Messages: len(s.Messages), Cost: s.Cost, CostUnknown: s.UnpricedSteps > 0,
 	}
 	if err != nil {
 		e.Error = err.Error()

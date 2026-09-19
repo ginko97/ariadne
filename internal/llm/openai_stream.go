@@ -167,11 +167,7 @@ func chunksOf(raw oaStreamChunk) []Chunk {
 	}
 
 	if raw.Usage != nil {
-		out = append(out, Chunk{Usage: Usage{
-			InputTokens:  raw.Usage.PromptTokens,
-			OutputTokens: raw.Usage.CompletionTokens,
-			Cost:         raw.Usage.Cost,
-		}})
+		out = append(out, Chunk{Usage: raw.Usage.usage()})
 	}
 	return out
 }

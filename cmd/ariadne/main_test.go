@@ -901,3 +901,22 @@ func TestCmdChatRefusesModelSwitchWithPendingToolCalls(t *testing.T) {
 		t.Errorf("cmdChat with explicit -model on pending run returned %d, want exitUsage (%d)", code, exitUsage)
 	}
 }
+
+// Unmeasured must never print as free: "$0.0000" for a run that was billed is
+// the string this exists to prevent.
+func TestCostTextNeverShowsUnknownAsZero(t *testing.T) {
+	for _, c := range []struct {
+		usd     float64
+		unknown bool
+		want    string
+	}{
+		{0, true, "unknown"},
+		{0.0123, true, ">=$0.0123"},
+		{0.0123, false, "$0.0123"},
+		{0, false, "$0.0000"},
+	} {
+		if got := costText(c.usd, c.unknown, 4); got != c.want {
+			t.Errorf("costText(%v, %v) = %q, want %q", c.usd, c.unknown, got, c.want)
+		}
+	}
+}

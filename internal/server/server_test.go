@@ -139,6 +139,11 @@ func TestChatStartsAConversation(t *testing.T) {
 	if last.Data["answer"] != "hello back" {
 		t.Errorf("answer = %v, want hello back", last.Data["answer"])
 	}
+	// The fake reports tokens and no cost, as most providers do: the page
+	// must be told the cost is unknown, not handed a zero to print.
+	if last.Data["cost_unknown"] != true {
+		t.Errorf("cost_unknown = %v, want true for a provider that reports no cost", last.Data["cost_unknown"])
+	}
 	if last.Data["run_id"] != evs[0].Data["run_id"] {
 		t.Errorf("run id changed mid-stream: %v then %v", evs[0].Data["run_id"], last.Data["run_id"])
 	}

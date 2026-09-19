@@ -25,6 +25,9 @@ type transcriptResponse struct {
 	Turns int     `json:"turns"`
 	Steps int     `json:"steps"`
 	Cost  float64 `json:"cost_usd"`
+	// CostUnknown: some step's cost was not measured, so Cost is a lower
+	// bound, or no figure at all when it is zero.
+	CostUnknown bool `json:"cost_unknown,omitempty"`
 	// Workspace is the folder the conversation works in, shown so the
 	// person can always see where it can read and write.
 	Workspace string            `json:"workspace,omitempty"`
@@ -74,15 +77,16 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := transcriptResponse{
-		RunID:     state.RunID,
-		Title:     state.Task,
-		Model:     state.Model,
-		Turns:     state.Turns(),
-		Steps:     state.Steps,
-		Cost:      state.Cost,
-		Workspace: ws,
-		Pending:   state.HasPendingToolCalls(),
-		Messages:  entries(state.Messages),
+		RunID:       state.RunID,
+		Title:       state.Task,
+		Model:       state.Model,
+		Turns:       state.Turns(),
+		Steps:       state.Steps,
+		Cost:        state.Cost,
+		CostUnknown: state.UnpricedSteps > 0,
+		Workspace:   ws,
+		Pending:     state.HasPendingToolCalls(),
+		Messages:    entries(state.Messages),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

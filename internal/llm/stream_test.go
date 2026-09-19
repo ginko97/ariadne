@@ -475,3 +475,20 @@ func TestStreamEarlyBreakDoesNotWaitForTheRest(t *testing.T) {
 		t.Error("the body was not closed after the early break")
 	}
 }
+
+// A streamed usage chunk that says only "cost: 0" — a free model, tokens not
+// counted — is still a measurement, and the accumulator must keep it.
+func TestStreamKeepsAReportedZeroCost(t *testing.T) {
+	o, _ := streamingClient(sse(
+		`{"choices":[{"index":0,"delta":{"content":"hi"}}]}`,
+		`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`{"choices":[],"usage":{"cost":0}}`,
+	))
+	resp, err := Streaming{S: o}.Complete(context.Background(), Request{Model: "m"})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if !resp.Usage.CostReported {
+		t.Errorf("usage = %+v, want the reported zero cost kept", resp.Usage)
+	}
+}

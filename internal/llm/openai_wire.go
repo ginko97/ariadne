@@ -117,9 +117,17 @@ type oaChoice struct {
 type oaUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
-	// Cost is an OpenRouter extension, absent elsewhere. Decoding it costs
-	// nothing when the field is missing.
-	Cost float64 `json:"cost,omitempty"`
+	// Cost is an OpenRouter extension, absent elsewhere. A pointer, because
+	// absent and zero mean different things: see Usage.CostReported.
+	Cost *float64 `json:"cost,omitempty"`
+}
+
+func (u oaUsage) usage() Usage {
+	out := Usage{InputTokens: u.PromptTokens, OutputTokens: u.CompletionTokens}
+	if u.Cost != nil {
+		out.Cost, out.CostReported = *u.Cost, true
+	}
+	return out
 }
 
 type oaError struct {
@@ -295,11 +303,7 @@ func fromWire(body []byte) (Response, error) {
 		Model:    raw.Model,
 		Provider: raw.Provider,
 		Stop:     stopReason(c.FinishReason, len(c.Message.ToolCalls) > 0),
-		Usage: Usage{
-			InputTokens:  raw.Usage.PromptTokens,
-			OutputTokens: raw.Usage.CompletionTokens,
-			Cost:         raw.Usage.Cost,
-		},
+		Usage:    raw.Usage.usage(),
 	}, nil
 }
 

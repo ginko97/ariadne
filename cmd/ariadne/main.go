@@ -173,7 +173,7 @@ flags:
   -base-url       OpenAI-compatible endpoint (env ARIADNE_BASE_URL)
   -max-steps      ceiling on loop iterations (default 10)
   -allow          comma-separated tools this run may call (default: all)
-  -workspace      directory fetch and write_file are confined to (default workspace)
+  -workspace      directory the file tools are confined to (default workspace)
   -approve        tools needing a yes before each call (terminal; the browser under ui)
   -context-budget compact the conversation past this many prompt tokens (0: never)
   -stream         print tokens and tool calls as they arrive
@@ -264,7 +264,7 @@ func cmdRun(args []string) int {
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
 	allow := fs.String("allow", "", "comma-separated tools this run may call (default: all)")
-	workspace := fs.String("workspace", defaultWorkspace, "directory fetch and write_file are confined to")
+	workspace := fs.String("workspace", defaultWorkspace, "directory the file tools are confined to")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "comma-separated tools that need a yes on the terminal before each call")
 	trust := fs.String("trust", "", "MCP tools, web_fetch or edit_file that run without approval; every other one asks first")
@@ -376,7 +376,7 @@ func cmdResume(args []string) int {
 	baseURL := fs.String("base-url", "", "OpenAI-compatible endpoint (defaults to endpoint from checkpoint)")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
 	allow := fs.String("allow", "", "narrow the tools this run may call; it can never widen the grant in the checkpoint")
-	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (defaults to the checkpoint's)")
+	workspace := fs.String("workspace", "", "directory the file tools are confined to (defaults to the checkpoint's)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "add tools needing approval; a gate in the checkpoint cannot be dropped here")
 	trust := fs.String("trust", "", "MCP tools, web_fetch or edit_file that run without approval; every other one asks first")
@@ -505,7 +505,7 @@ func cmdChat(args []string) int {
 	baseURL := fs.String("base-url", "", "OpenAI-compatible endpoint (fresh: default "+defaultBaseURL+"; resumed: checkpoint's unless overridden)")
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
 	allow := fs.String("allow", "", "comma-separated tools this run may call (resume can only narrow it)")
-	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (fresh: default workspace; resumed: checkpoint's unless overridden)")
+	workspace := fs.String("workspace", "", "directory the file tools are confined to (fresh: default workspace; resumed: checkpoint's unless overridden)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "tools needing a yes on the terminal before each call (resume can only add)")
 	trust := fs.String("trust", "", "MCP tools, web_fetch or edit_file that run without approval; every other one asks first")
@@ -1199,7 +1199,7 @@ type agentOpts struct {
 	// and the loop should not learn what one is.
 	MCPTools []tool.Tool
 
-	// Workspace is the directory fetch and write_file are confined to. Carried
+	// Workspace is the directory the file tools are confined to. Carried
 	// rather than read from a const because it is now an operator's choice, and
 	// because a resumed run has to be given the same one it started with.
 	Workspace string
@@ -1481,8 +1481,8 @@ func execute(ctx context.Context, agent *loop.Agent, state *loop.State, streamed
 	if !streamed || !isTerminal(os.Stdout) {
 		fmt.Println(answer)
 	}
-	fmt.Fprintf(os.Stderr, "run %s  steps=%d  cost=%.4f  %s\n",
-		state.RunID, state.Steps, state.Cost, elapsed)
+	fmt.Fprintf(os.Stderr, "run %s  steps=%d  cost=%s  %s\n",
+		state.RunID, state.Steps, costText(state.Cost, state.UnpricedSteps > 0, 4), elapsed)
 	return exitOK
 }
 
@@ -1795,7 +1795,7 @@ func printDelta(w io.Writer) func(llm.Chunk) {
 			}
 			fmt.Fprintf(w, "→ %s\n", d.Name)
 		}
-		if c.Stop != "" || c.Usage.InputTokens > 0 || c.Usage.OutputTokens > 0 || c.Usage.Cost > 0 {
+		if c.Stop != "" || c.Usage.Reported() {
 			if open {
 				fmt.Fprintln(w)
 				open = false
@@ -1883,7 +1883,10 @@ func printStats(q trace.Query) int {
 	fmt.Printf("runs      %d\n", st.Runs)
 	fmt.Printf("events    %d\n", st.Events)
 	fmt.Printf("steps     %d\n", st.Steps)
-	fmt.Printf("cost      $%.5f\n", st.Cost)
+	fmt.Printf("cost      %s\n", costText(st.Cost, st.Unpriced > 0, 5))
+	if st.Unpriced > 0 {
+		fmt.Printf("unpriced  %d responses (the provider reported no cost)\n", st.Unpriced)
+	}
 	if st.Retried > 0 {
 		// Called out because the loop times the whole provider call, so this
 		// much of the elapsed time was not work.
@@ -1965,7 +1968,7 @@ func describe(e trace.Event) string {
 	case trace.KindApproval:
 		return fmt.Sprintf("%-10s %s", e.Tool, e.Content)
 	case trace.KindResponse:
-		s := fmt.Sprintf("stop=%-9s in=%-6d out=%-5d $%.6f", e.Stop, e.InTokens, e.OutTokens, e.Cost)
+		s := fmt.Sprintf("stop=%-9s in=%-6d out=%-5d %s", e.Stop, e.InTokens, e.OutTokens, costText(e.Cost, e.CostUnknown, 6))
 		if e.Text != "" {
 			s += "  " + clip(e.Text, 70)
 		}
@@ -1981,9 +1984,24 @@ func describe(e trace.Event) string {
 		if e.Error != "" {
 			return fmt.Sprintf("! %s", clip(e.Error, 100))
 		}
-		return fmt.Sprintf("ok  steps=%d  $%.5f", e.Step, e.Cost)
+		return fmt.Sprintf("ok  steps=%d  %s", e.Step, costText(e.Cost, e.CostUnknown, 5))
 	default:
 		return clip(e.Text+e.Content, 100)
+	}
+}
+
+// costText prints a cost so that unmeasured never reads as free. A provider
+// that reports no cost, with no price to fall back on, leaves zero in the
+// total; "$0.0000" would claim the run cost nothing. Nothing measured prints
+// "unknown", and a total that is missing some steps prints as a lower bound.
+func costText(usd float64, unknown bool, digits int) string {
+	switch {
+	case unknown && usd == 0:
+		return "unknown"
+	case unknown:
+		return fmt.Sprintf(">=$%.*f", digits, usd)
+	default:
+		return fmt.Sprintf("$%.*f", digits, usd)
 	}
 }
 

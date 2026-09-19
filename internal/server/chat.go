@@ -192,7 +192,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		"turns":  state.Turns(),
 		"steps":  state.Steps,
 		"cost":   state.Cost,
-		"model":  state.Model,
+		// The page shows "cost unknown" instead of a figure when set.
+		"cost_unknown": state.UnpricedSteps > 0,
+		"model":        state.Model,
 	})
 }
 
@@ -214,7 +216,7 @@ func deltaEvents(out *sseWriter) func(llm.Chunk) {
 			announced[d.Index] = true
 			out.event("tool", map[string]any{"name": d.Name})
 		}
-		if c.Stop != "" || c.Usage.InputTokens > 0 || c.Usage.OutputTokens > 0 || c.Usage.Cost > 0 {
+		if c.Stop != "" || c.Usage.Reported() {
 			clear(announced)
 		}
 	}

@@ -17,6 +17,16 @@ type Usage struct {
 	// cost ceiling does not depend on a table we have to keep in step with
 	// somebody else's pricing page.
 	Cost float64 `json:"cost,omitempty"`
+	// CostReported says the provider sent a cost at all. Without it a zero
+	// Cost is ambiguous: a free model on OpenRouter reports 0 and means it,
+	// while most providers say nothing, and "nothing" is not "free".
+	CostReported bool `json:"cost_reported,omitempty"`
+}
+
+// Reported says this carries anything from the provider: a streamed chunk
+// with usage in it, as opposed to one without.
+func (u Usage) Reported() bool {
+	return u.InputTokens > 0 || u.OutputTokens > 0 || u.Cost > 0 || u.CostReported
 }
 
 type StopReason string

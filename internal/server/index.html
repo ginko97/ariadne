@@ -232,7 +232,7 @@ async function open(id) {
   closeFolderPanel();
   showFolder();
   render(t.messages);
-  stats(t.turns, t.steps, t.cost_usd);
+  stats(t.turns, t.steps, t.cost_usd, t.cost_unknown);
   selectModel(t.model);
   if (t.pending) {
     showResumeCard();
@@ -240,15 +240,18 @@ async function open(id) {
   loadRuns();
 }
 
-function stats(turns, steps, cost) {
-  // Three states, and they must not look alike. A provider that does not price
-  // its own calls reports nothing, which is "unknown" rather than "free", so it
-  // shows no figure at all. A real cost below the rounding floor is not free
-  // either — two steps on a cheap model come to about $0.00002 — and printing
-  // $0.0000 for it is the exact string this distinction exists to avoid.
-  const money = cost > 0
-    ? (cost < 0.0001 ? ' · <$0.0001' : ` · $${cost.toFixed(4)}`)
-    : '';
+function stats(turns, steps, cost, unknown) {
+  // Unknown, free and tiny must not look alike. A provider that does not price
+  // its own calls reports nothing, which is "unknown" rather than "free", and
+  // the server says so; a total missing some steps is a lower bound. A real
+  // cost below the rounding floor is not free either — two steps on a cheap
+  // model come to about $0.00002 — and printing $0.0000 for it is the exact
+  // string this distinction exists to avoid.
+  const money = unknown
+    ? (cost > 0 ? ` · ≥$${cost < 0.0001 ? cost.toPrecision(1) : cost.toFixed(4)}` : ' · cost unknown')
+    : cost > 0
+      ? (cost < 0.0001 ? ' · <$0.0001' : ` · $${cost.toFixed(4)}`)
+      : '';
   statsEl.textContent = runID
     ? `${turns} turn${turns === 1 ? '' : 's'} · ${steps} step${steps === 1 ? '' : 's'}${money}`
     : '';
@@ -429,7 +432,7 @@ async function send(text, opts = {}) {
           // rather than append, so a provider that does not stream still shows one.
           if (!answer) answer = entry('answer', '');
           answer.textContent = d.answer;
-          stats(d.turns, d.steps, d.cost);
+          stats(d.turns, d.steps, d.cost, d.cost_unknown);
           selectModel(d.model);
         } else if (name === 'approval_required') {
           approvalCard(d);

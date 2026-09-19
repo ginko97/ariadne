@@ -5,6 +5,12 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Unknown cost says "unknown".** A provider that reports no cost (anything
+  but OpenRouter) used to show `cost=0.0000`, as if the conversation were free.
+  The terminal now prints `cost=unknown`, the browser `cost unknown`, and
+  `traces -stats` counts the unpriced responses; a total missing some steps is
+  shown as a lower bound (`>=$…`). A free model that reports a cost of zero
+  still shows as free. The run summary now prints the dollar sign (`cost=$0.0003`).
 - **`edit_file`**: change an exact piece of text in a file and leave the rest
   byte for byte. The text must occur once (or `replace_all`); a miss or an
   ambiguous match is refused with the count. Keeps Windows (CRLF) line endings
