@@ -11,12 +11,21 @@ import (
 	"github.com/ginko97/ariadne/internal/loop"
 )
 
-// windowsFolderDialog is the PowerShell that shows the folder picker. A topmost
-// owner form keeps the dialog in front of the browser that asked for it, and
-// UTF-8 output keeps a path with non-ASCII characters intact.
+// windowsFolderDialog is the PowerShell that shows the folder picker, and UTF-8
+// output keeps a path with non-ASCII characters intact.
+//
+// The dialog has to land in front of the browser that asked for it, and
+// Windows will not give the foreground to a background process's window: the
+// dialog opened, visible, behind the browser, and Browse looked like it did
+// nothing. Its owner is therefore shown — invisible, 1x1, off the taskbar —
+// and TopMost. A window owned by a topmost window is topmost too, and z-order
+// needs no permission the way the foreground does. (TopMost on an owner that
+// was never shown, as before, did nothing.)
 const windowsFolderDialog = `Add-Type -AssemblyName System.Windows.Forms;` +
 	`[Console]::OutputEncoding=[Text.Encoding]::UTF8;` +
-	`$o=New-Object System.Windows.Forms.Form -Property @{TopMost=$true};` +
+	`$o=New-Object System.Windows.Forms.Form -Property @{TopMost=$true;ShowInTaskbar=$false;` +
+	`FormBorderStyle='None';Opacity=0;Size=[System.Drawing.Size]::new(1,1);StartPosition='CenterScreen'};` +
+	`$o.Show();$o.Activate();` +
 	`$d=New-Object System.Windows.Forms.FolderBrowserDialog;` +
 	`$d.Description='Choose a folder for this conversation';` +
 	`$d.ShowNewFolderButton=$true;` +
