@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"iter"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // sse builds a response body from event payloads, ending the way the protocol
@@ -399,5 +401,77 @@ func TestAccumulatorKeepsWhoAnswered(t *testing.T) {
 	if got.Model != "openai/gpt-oss-20b" || got.Provider != "Darkbloom" {
 		t.Errorf("Model=%q Provider=%q, want them carried through the stream",
 			got.Model, got.Provider)
+	}
+}
+
+// endlessBody is a stream a provider never finishes: one real event, then
+// keep-alive comments forever.
+type endlessBody struct {
+	head   *strings.Reader
+	closed chan struct{}
+}
+
+func (b *endlessBody) Read(p []byte) (int, error) {
+	if b.head.Len() > 0 {
+		return b.head.Read(p)
+	}
+	select {
+	case <-b.closed:
+		return 0, io.ErrClosedPipe
+	default:
+	}
+	return copy(p, ": keep-alive\n"), nil
+}
+
+func (b *endlessBody) Close() error {
+	select {
+	case <-b.closed:
+	default:
+		close(b.closed)
+	}
+	return nil
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// Stopping early must not wait for the provider to finish. Cleanup drains the
+// body so the connection can be reused, and an unbounded drain of a stream the
+// provider keeps writing reads until the whole answer has been generated — or,
+// against this body, forever. The drain is capped; past the cap the connection
+// is closed rather than reused.
+func TestStreamEarlyBreakDoesNotWaitForTheRest(t *testing.T) {
+	body := &endlessBody{
+		head:   strings.NewReader("data: " + `{"choices":[{"index":0,"delta":{"content":"one"}}]}` + "\n\n"),
+		closed: make(chan struct{}),
+	}
+	o := NewOpenAI("key", WithBaseURL("https://example.test/v1"),
+		WithHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Status: "200 OK", Body: body,
+				Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Request: r}, nil
+		})}))
+
+	seq, err := o.Stream(context.Background(), Request{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range seq {
+			break
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		body.Close() // let the goroutine finish rather than leak it
+		t.Fatal("breaking out of the stream waited for a body that never ends")
+	}
+	select {
+	case <-body.closed:
+	default:
+		t.Error("the body was not closed after the early break")
 	}
 }

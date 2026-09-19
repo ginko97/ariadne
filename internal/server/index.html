@@ -344,8 +344,11 @@ async function send(text, opts = {}) {
   try {
     resp = await api('/api/chat', {
       method: 'POST',
+      // No model on resume: the server finishes the batch on the model that
+      // started it, and refuses another — so a dropdown changed in the
+      // meantime would only turn Resume into an error.
       body: JSON.stringify(opts.resume ? {
-        run_id: runID, resume: true, model: modelEl.value || undefined,
+        run_id: runID, resume: true,
       } : {
         run_id: runID, message: text, model: modelEl.value || undefined,
         workspace: runID ? undefined : (newWorkspace || undefined),
@@ -361,6 +364,9 @@ async function send(text, opts = {}) {
     const { error } = await resp.json().catch(() => ({ error: 'request refused' }));
     entry('tool_result', error, 'is_error');
     if (resp.status === 409 && (error || '').includes('unfinished tool call')) {
+      // The input was cleared when this was sent; put it back so resuming
+      // does not cost the person what they had just typed.
+      if (!opts.resume && text) $('input').value = text;
       showResumeCard();
     }
     setBusy(false);
