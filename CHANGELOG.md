@@ -5,6 +5,11 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **`list_files`**: list a folder in the workspace (folders first, then
+  files with size and date), so you no longer have to paste a file's exact
+  name. Read-only and confined like `fetch`; the listing is marked as outside
+  text, since a file name can be anything. Large folders show 500 entries
+  and the count of the rest.
 - **Long documents in parts.** `fetch` used to return only the first 256 KB of
   a document's text, so a book was read up to about page 112 and the rest was
   unavailable — a model asked to summarise one summarised the rest from the

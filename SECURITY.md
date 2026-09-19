@@ -9,7 +9,7 @@ plainly, what protects you and what does not.
   when you pass `-approve write_file`, every MCP tool, `web_fetch` and
   `edit_file` unless you list them in `-trust`, and `exec` always. The terminal shows a `[y/N]` prompt; the browser shows a card
   with the exact arguments. No answer is not a yes.
-- **The workspace.** `fetch`, `write_file` and `edit_file` cannot reach outside the
+- **The workspace.** `fetch`, `list_files`, `write_file` and `edit_file` cannot reach outside the
   workspace folder; the operating system enforces it (`os.Root`), including
   against Windows directory junctions.
 - **Your keys.** ariadne's own provider keys are redacted from anything a tool

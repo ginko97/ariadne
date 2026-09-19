@@ -1130,6 +1130,7 @@ func localTools(rememberFor, workspace string, withExec bool) []tool.Tool {
 	tools := []tool.Tool{
 		tool.Calc{},
 		tool.NewFetch(workspace),
+		tool.NewListFiles(workspace),
 		tool.NewWriteFile(workspace),
 	}
 	if rememberFor != "" {

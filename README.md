@@ -43,7 +43,7 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
 
 | | |
 | --- | --- |
-| Files | read, write and edit in one folder per conversation — pick it in the browser (**Folder…**), or `-workspace <folder>`; `edit_file` changes only the text it names and asks first |
+| Files | list, read, write and edit in one folder per conversation — pick it in the browser (**Folder…**), or `-workspace <folder>`; `edit_file` changes only the text it names and asks first |
 | Documents | read Word, Excel and PowerPoint files (`.docx`, `.xlsx`, `.pptx`) and their LibreOffice counterparts (`.odt`, `.ods`, `.odp`) — spreadsheets as rows, dates as dates, a long document in 256 KB parts; PDFs when [Poppler](https://poppler.freedesktop.org)'s `pdftotext` is installed |
 | The web | read a page by URL (`web_fetch`), asking before every fetch; never your own machine or local network |
 | Tools from anywhere | any MCP server: filesystem, search, git, ... (`-mcp-config`) |
