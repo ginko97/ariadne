@@ -81,8 +81,11 @@ func (Calc) Call(_ context.Context, _ string, args json.RawMessage) (llm.ToolRes
 		// % is present, which is exactly when someone is doing modular
 		// arithmetic and most likely to want a power. Refuse instead, and say
 		// what to write.
-		return fail("calc: %q is not supported — ^ is bitwise XOR here, not a power. "+
-			"Expand it, e.g. 2*2*2 instead of 2^3", op)
+		if op == "^" {
+			return fail("calc: %q is not supported — ^ is bitwise XOR here, not a power. "+
+				"Expand it, e.g. 2*2*2 instead of 2^3", op)
+		}
+		return fail("calc: bitwise operator %q is not supported", op)
 	}
 
 	tv, err := types.Eval(token.NewFileSet(), nil, token.NoPos, floatify(in.Expr))

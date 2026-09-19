@@ -47,6 +47,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "run_id is required to resume")
 		return
 	}
+	if req.Resume && req.Message != "" {
+		httpError(w, http.StatusBadRequest, "cannot send a message when resuming an interrupted turn")
+		return
+	}
 	req.Model = strings.TrimSpace(req.Model)
 	req.Workspace = strings.TrimSpace(req.Workspace)
 	if req.RunID != "" && !sanitiseRunID(req.RunID) {

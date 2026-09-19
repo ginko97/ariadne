@@ -618,6 +618,10 @@ func cmdChat(args []string) int {
 	runID := newRunID()
 	startModel := *model
 	if resuming {
+		if modelExplicit && state.HasPendingToolCalls() {
+			fmt.Fprintln(os.Stderr, "ariadne chat: cannot switch model while tool calls are pending")
+			return exitUsage
+		}
 		runID = state.RunID
 		startModel = resolveModel(*model, modelExplicit, state)
 	}
@@ -1526,10 +1530,15 @@ var providerKeys = []struct{ domain, env string }{
 // that is not a known provider's domain or a subdomain of one.
 func providerKeyName(baseURL string) string {
 	u, err := url.Parse(baseURL)
-	if err != nil {
-		return ""
+	host := ""
+	if err == nil {
+		host = strings.ToLower(u.Hostname())
 	}
-	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		if u2, err2 := url.Parse("//" + baseURL); err2 == nil {
+			host = strings.ToLower(u2.Hostname())
+		}
+	}
 	for _, p := range providerKeys {
 		if host == p.domain || strings.HasSuffix(host, "."+p.domain) {
 			return p.env
@@ -1777,7 +1786,7 @@ func printDelta(w io.Writer) func(llm.Chunk) {
 			}
 			fmt.Fprintf(w, "→ %s\n", d.Name)
 		}
-		if c.Stop != "" || c.Usage.InputTokens > 0 || c.Usage.OutputTokens > 0 {
+		if c.Stop != "" || c.Usage.InputTokens > 0 || c.Usage.OutputTokens > 0 || c.Usage.Cost > 0 {
 			if open {
 				fmt.Fprintln(w)
 				open = false

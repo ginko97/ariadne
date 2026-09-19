@@ -93,6 +93,27 @@ func TestPrintDeltaResetsBetweenTurns(t *testing.T) {
 	}
 }
 
+func TestPrintDeltaResetsOnCostOnlyChunk(t *testing.T) {
+	var out strings.Builder
+	p := printDelta(&out)
+
+	// Turn 1: tool at index 0, followed by cost-only usage chunk.
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c1", Name: "calc"}})
+	p(llm.Chunk{Usage: llm.Usage{Cost: 0.005}})
+
+	// Turn 2: tool at index 0 again.
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c2", Name: "fetch"}})
+	p(llm.Chunk{Stop: llm.StopToolUse})
+
+	got := out.String()
+	if !strings.Contains(got, "→ calc") {
+		t.Errorf("turn 1 tool was not announced: %s", got)
+	}
+	if !strings.Contains(got, "→ fetch") {
+		t.Errorf("turn 2 tool (at index 0) was suppressed: %s", got)
+	}
+}
+
 // splitList feeds --allow and --approve, where an empty flag has to mean
 // "unrestricted" rather than "restricted to nothing".
 func TestSplitList(t *testing.T) {
@@ -826,8 +847,10 @@ func TestAPIKeyGoesOnlyToItsOwnProvider(t *testing.T) {
 
 	for _, c := range []struct{ url, want string }{
 		{"https://openrouter.ai/api/v1", "k-openrouter"},
+		{"openrouter.ai/api/v1", "k-openrouter"},
 		{"https://generativelanguage.googleapis.com/v1beta/openai", "k-gemini"},
 		{"https://api.openai.com/v1", "k-openai"},
+		{"api.openai.com/v1", "k-openai"},
 		{"https://api.x.ai/v1", "k-xai"},
 		// Unrecognised: no provider's key, whichever are set.
 		{"https://api.groq.com/openai/v1", ""},
@@ -846,5 +869,35 @@ func TestAPIKeyGoesOnlyToItsOwnProvider(t *testing.T) {
 	t.Setenv("ARIADNE_API_KEY", "k-ariadne")
 	if got, name := apiKey("https://api.groq.com/openai/v1"); got != "k-ariadne" || name != "ARIADNE_API_KEY" {
 		t.Errorf("with ARIADNE_API_KEY set: %q %q", got, name)
+	}
+}
+
+func TestCmdChatRefusesModelSwitchWithPendingToolCalls(t *testing.T) {
+	t.Setenv("ARIADNE_API_KEY", "test-key-1234567890")
+	oldRuns := runsDir
+	runsDir = t.TempDir()
+	t.Cleanup(func() { runsDir = oldRuns })
+
+	store := &loop.Store{Dir: runsDir}
+	// State with pending tool call: assistant message has BlockToolUse, no matching tool_result.
+	st := &loop.State{
+		RunID: "run_pending_chat",
+		Model: "initial-model",
+		Task:  "some task",
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "calc 1+1"}}},
+			{Role: llm.RoleAssistant, Blocks: []llm.Block{
+				{Type: llm.BlockToolUse, ID: "call_1", Name: "calc", Args: json.RawMessage(`{"expr":"1+1"}`)},
+			}},
+		},
+	}
+	if err := store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resuming with explicit -model while tool calls are pending must fail with exitUsage.
+	code := cmdChat([]string{"-model", "different-model", "run_pending_chat"})
+	if code != exitUsage {
+		t.Errorf("cmdChat with explicit -model on pending run returned %d, want exitUsage (%d)", code, exitUsage)
 	}
 }

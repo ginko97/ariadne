@@ -637,3 +637,41 @@ func TestChatSwitchesModelWhenExplicitlyRequested(t *testing.T) {
 		t.Errorf("saved model = %q, want switched-model", st2.Model)
 	}
 }
+
+func TestChatRejectsMessageWhenResuming(t *testing.T) {
+	s, ts := newTestServer(t)
+
+	resp := post(t, s, ts, `{"run_id":"run_abc","resume":true,"message":"should fail"}`, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	body := bodyOf(t, resp)
+	if !strings.Contains(body, "cannot send a message when resuming") {
+		t.Errorf("error = %q, want message rejected when resuming", body)
+	}
+}
+
+func TestIsLoopbackHost(t *testing.T) {
+	cases := []struct {
+		host string
+		want bool
+	}{
+		{"localhost", true},
+		{"localhost.", true},
+		{"localhost:7357", true},
+		{"localhost.:7357", true},
+		{"127.0.0.1", true},
+		{"127.0.0.1:7357", true},
+		{"[::1]", true},
+		{"[::1]:7357", true},
+		{"example.com", false},
+		{"example.com:7357", false},
+		{"192.168.1.1", false},
+		{"192.168.1.1:7357", false},
+	}
+	for _, tc := range cases {
+		if got := isLoopbackHost(tc.host); got != tc.want {
+			t.Errorf("isLoopbackHost(%q) = %v, want %v", tc.host, got, tc.want)
+		}
+	}
+}

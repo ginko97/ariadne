@@ -126,7 +126,7 @@ func TestRegistryUnknownTool(t *testing.T) {
 // — silently, because floatify (which would have made ^ a type error) is
 // skipped whenever % is present.
 func TestCalcRefusesBitwiseOperators(t *testing.T) {
-	for _, expr := range []string{"2^3", "2^3 % 5", "10 % 3 + 2^3", "8 >> 1", "6 & 3", "6 | 3"} {
+	for _, expr := range []string{"2^3", "2^3 % 5", "10 % 3 + 2^3"} {
 		args, _ := json.Marshal(calcArgs{Expr: expr})
 		res, err := (Calc{}).Call(context.Background(), "c1", args)
 		if err != nil {
@@ -139,8 +139,27 @@ func TestCalcRefusesBitwiseOperators(t *testing.T) {
 		}
 		// The message has to tell the model what to write instead, or it will
 		// just try the same thing again.
-		if !strings.Contains(res.Content, "2*2*2") {
+		if !strings.Contains(res.Content, "2*2*2") || !strings.Contains(res.Content, "^ is bitwise XOR") {
 			t.Errorf("%q: message does not suggest an alternative: %s", expr, res.Content)
+		}
+	}
+
+	for _, expr := range []string{"8 >> 1", "6 & 3", "6 | 3"} {
+		args, _ := json.Marshal(calcArgs{Expr: expr})
+		res, err := (Calc{}).Call(context.Background(), "c1", args)
+		if err != nil {
+			t.Errorf("%q: want an IsError result, got a returned error: %v", expr, err)
+			continue
+		}
+		if !res.IsError {
+			t.Errorf("%q evaluated to %q instead of being refused", expr, res.Content)
+			continue
+		}
+		if !strings.Contains(res.Content, "bitwise operator") {
+			t.Errorf("%q: want bitwise operator error, got: %s", expr, res.Content)
+		}
+		if strings.Contains(res.Content, "2*2*2") {
+			t.Errorf("%q: error should not mention 2*2*2: %s", expr, res.Content)
 		}
 	}
 }

@@ -258,6 +258,8 @@ func publicOnly(address string) error {
 		return &addrRefused{host, "not a unicast address"}
 	case ip.Is4() && ip.As4()[0] == 0:
 		return &addrRefused{host, "in 0.0.0.0/8"}
+	case ip.Is4() && ip.As4() == [4]byte{255, 255, 255, 255}:
+		return &addrRefused{host, "a broadcast address"}
 	}
 	return nil
 }

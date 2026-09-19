@@ -177,6 +177,7 @@ func isLoopbackHost(host string) bool {
 		h = host // no port
 	}
 	h = strings.Trim(h, "[]")
+	h = strings.TrimSuffix(h, ".")
 	if strings.EqualFold(h, "localhost") {
 		return true
 	}
