@@ -5,6 +5,11 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **`web_fetch`**: read a web page by URL. It asks before every fetch, with the
+  whole URL shown, unless `-trust web_fetch`; refuses your own machine and
+  local network (loopback, private, link-local, carrier-grade NAT) on every
+  connection, including after redirects; sends no cookies or keys; strips
+  scripts, styles and comments; caps what it returns.
 - **Stop** in the browser ends the running turn — mid-answer or while a tool call
   waits for approval. What already ran is kept; a call that was waiting is asked
   again on Resume.

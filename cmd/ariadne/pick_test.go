@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ginko97/ariadne/internal/loop"
+	"github.com/ginko97/ariadne/internal/tool"
 )
 
 // In the browser a conversation's recorded folder always wins; the server's
@@ -62,5 +63,44 @@ func TestPickResultTellsACancelFromAFailure(t *testing.T) {
 		if (err != nil) != c.wantErr || got != c.want {
 			t.Errorf("%s: got %q, err %v; want %q, error %v", c.name, got, err, c.want, c.wantErr)
 		}
+	}
+}
+
+// web_fetch is offered to every agent and asks first unless -trust names it.
+// An agent built without saying anything - eval, a future command - gets it
+// gated, because the gate lives in newAgentFor rather than in a flag default.
+func TestWebFetchIsGatedUnlessTrusted(t *testing.T) {
+	base := agentOpts{Key: "k", Model: "m", BaseURL: "https://example.test/v1", RunID: "run_test", MaxSteps: 5, Store: &loop.Store{Dir: t.TempDir()}}
+
+	a := newAgentFor(base)
+	offered := false
+	for _, d := range a.Tools {
+		if d.Name == tool.WebFetchName {
+			offered = true
+		}
+	}
+	if !offered {
+		t.Fatal("web_fetch is not offered")
+	}
+	if !contains(a.RequireApproval, tool.WebFetchName) {
+		t.Errorf("web_fetch is not gated by default: %v", a.RequireApproval)
+	}
+
+	trusted := base
+	trusted.TrustWeb = true
+	if a := newAgentFor(trusted); contains(a.RequireApproval, tool.WebFetchName) {
+		t.Errorf("-trust web_fetch did not drop the gate: %v", a.RequireApproval)
+	}
+}
+
+func TestTrustAcceptsWebFetchButNotWithApprove(t *testing.T) {
+	if _, err := gateMCP(nil, []string{tool.WebFetchName}, nil); err != nil {
+		t.Errorf("-trust web_fetch refused: %v", err)
+	}
+	if _, err := gateMCP([]string{tool.WebFetchName}, []string{tool.WebFetchName}, nil); err == nil {
+		t.Error("web_fetch in both -approve and -trust was accepted")
+	}
+	if _, err := gateMCP(nil, []string{"write_file"}, nil); err == nil {
+		t.Error("-trust write_file was accepted; only web_fetch and MCP tools can be trusted")
 	}
 }

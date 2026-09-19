@@ -35,6 +35,7 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
 | | |
 | --- | --- |
 | Files | read and write in one folder per conversation — pick it in the browser (**Folder…**), or `-workspace <folder>` |
+| The web | read a page by URL (`web_fetch`), asking before every fetch; never your own machine or local network |
 | Tools from anywhere | any MCP server: filesystem, search, git, ... (`-mcp-config`) |
 | Run programs | `-exec`, asking before every single one |
 | Remember | notes that carry across conversations (`-remember`, in the terminal for now) |
@@ -224,6 +225,7 @@ Four controls went in afterwards, each measured against the same fixture:
 | untrusted-content fencing | marks tool output as data and says so in the system prompt | the model choosing to comply |
 | `-allow calc,fetch` | refuses unlisted tools at the loop; a grant can never be widened on resume | nothing |
 | `-approve write_file` | asks per call, with the arguments in view; denies when there is no terminal and when there is no approver | a human being there |
+| `web_fetch` | asks before every fetch, with the whole URL on the card, unless `-trust web_fetch`; refuses private, loopback and link-local addresses on every connection, redirects included; sends no cookies or keys | nothing, for the address rule; a human being there, for the rest |
 | MCP default gate, `-exec` | every MCP tool asks unless `-trust`ed; `exec` always asks, gets an environment allow-list, and ariadne's own API keys are redacted from every tool result. `exec` is **not** confined: an approved program can open any file you can, `.env` included, and only ariadne's own provider keys are redacted | a human being there |
 
 ```mermaid
@@ -231,16 +233,19 @@ flowchart TD
     M["model asks for a tool call"] --> A{"allowed? no -allow means every tool"}
     A -- no --> D["denied; the model is told why"]
     A -- yes --> G{"needs approval?"}
-    G -- "yes: -approve, every MCP tool unless -trust, exec always" --> P["card in the terminal or browser"]
-    P -- "deny, no answer, tab closed" --> D
+    G -- "yes: -approve, MCP tools and web_fetch unless -trust, exec always" --> P["card in the terminal or browser"]
+    P -- "deny, or no answer in 5 minutes" --> D
+    P -- "tab closed or Stop" --> WAIT["the call waits; asked again on Resume"]
     P -- approve --> T{"which tool"}
     G -- no --> T
     T -- "fetch, write_file" --> R["os.Root: cannot leave the workspace"]
     T -- "MCP tool" --> S["confined only by the server's own arguments"]
     T -- exec --> X["NOT confined: runs as you, env allow-list, timeout, 64 KB cap"]
+    T -- web_fetch --> W["public internet only: no private or local addresses, no cookies or keys"]
     R --> RD["ariadne's own API keys redacted"]
     S --> RD
     X --> RD
+    W --> RD
     RD --> F["untrusted output fenced as data"]
     F --> OUT["trace, checkpoint, and the next request to the provider"]
 ```
