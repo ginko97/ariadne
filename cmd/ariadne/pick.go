@@ -91,7 +91,14 @@ func pickResult(goos, stdout, stderr string, code int) (string, error) {
 	p := strings.TrimSpace(stdout)
 	// osascript ends a folder path with a slash; the rest of ariadne does not.
 	if len(p) > 1 {
-		p = strings.TrimRight(p, "/")
+		trimmed := strings.TrimRight(p, "/\\")
+		if len(trimmed) == 2 && trimmed[1] == ':' {
+			// A Windows drive root (e.g. "C:\") must keep its trailing slash;
+			// "C:" in Windows means the current directory on drive C.
+			p = trimmed + `\`
+		} else {
+			p = trimmed
+		}
 	}
 	return p, nil
 }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -266,6 +267,68 @@ func TestChatRefusesARunWithAnUnfinishedBatch(t *testing.T) {
 	resp := post(t, s, ts, `{"run_id":"run_pending","message":"something else"}`, nil)
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("status = %d, want 409: %s", resp.StatusCode, bodyOf(t, resp))
+	}
+}
+
+func TestChatResumesAnUnfinishedBatch(t *testing.T) {
+	store := &loop.Store{Dir: t.TempDir()}
+	fake := &llm.Fake{Responses: []llm.Response{endResponse("resumed answer")}}
+
+	s := New(store,
+		func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
+			return &loop.Agent{
+				Provider:   fake,
+				Model:      "test-model",
+				MaxSteps:   5,
+				Checkpoint: store.Save,
+				RunTool: func(ctx context.Context, call llm.ToolCall) (llm.ToolResult, error) {
+					return llm.ToolResult{Content: "2"}, nil
+				},
+			}, nil
+		},
+		func() string { return "run_unused" },
+	)
+	ts := httptest.NewServer(s.Routes())
+	t.Cleanup(ts.Close)
+
+	st := loop.NewState("run_to_resume", "do something")
+	st.Messages = append(st.Messages, llm.Message{
+		Role:   llm.RoleAssistant,
+		Blocks: []llm.Block{{Type: llm.BlockToolUse, ID: "c1", Name: "calc", Args: []byte(`{"expr":"1+1"}`)}},
+	})
+	if err := s.Store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := post(t, s, ts, `{"run_id":"run_to_resume","resume":true}`, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, bodyOf(t, resp))
+	}
+	body := bodyOf(t, resp)
+	if !strings.Contains(body, "resumed answer") {
+		t.Fatalf("body does not contain resumed answer:\n%s", body)
+	}
+
+	loaded, err := s.Store.Load("run_to_resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.HasPendingToolCalls() {
+		t.Error("resumed conversation still has pending tool calls")
+	}
+}
+
+func TestChatResumeRefusesWhenNoPendingBatch(t *testing.T) {
+	s, ts := newTestServer(t)
+
+	st := loop.NewState("run_done", "finished task")
+	if err := s.Store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := post(t, s, ts, `{"run_id":"run_done","resume":true}`, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", resp.StatusCode, bodyOf(t, resp))
 	}
 }
 

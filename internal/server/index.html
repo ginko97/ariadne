@@ -227,6 +227,9 @@ async function open(id) {
   render(t.messages);
   stats(t.turns, t.steps, t.cost_usd);
   selectModel(t.model);
+  if (t.pending) {
+    showResumeCard();
+  }
   loadRuns();
 }
 
@@ -296,20 +299,54 @@ function setBusy(val) {
   $('folderBtn').disabled = val;
 }
 
+function showResumeCard() {
+  const existing = $('resumeCard');
+  if (existing) existing.remove();
+
+  const el = document.createElement('div');
+  el.id = 'resumeCard';
+  el.className = 'e approval';
+
+  const q = document.createElement('div');
+  q.textContent = 'This conversation has an unfinished tool call from an interrupted turn.';
+
+  const row = document.createElement('div');
+  row.className = 'row';
+
+  const btn = document.createElement('button');
+  btn.className = 'primary';
+  btn.textContent = 'Resume turn';
+  btn.onclick = () => {
+    el.remove();
+    send('', { resume: true });
+  };
+
+  row.append(btn);
+  el.append(q, row);
+  log.append(el);
+  log.scrollTop = log.scrollHeight;
+}
+
 // EventSource cannot be used here: it only issues GET and cannot set headers,
 // and /api/chat is a POST behind a CSRF token because it spends money. So the
 // stream is read from the response body and framed by hand.
-async function send(text) {
+async function send(text, opts = {}) {
   if (busy) return;
   setBusy(true);
   warn('');
-  entry('prompt', text);
+  if (opts.resume) {
+    entry('notice', 'Resuming interrupted turn…');
+  } else {
+    entry('prompt', text);
+  }
 
   let answer = null, resp;
   try {
     resp = await api('/api/chat', {
       method: 'POST',
-      body: JSON.stringify({
+      body: JSON.stringify(opts.resume ? {
+        run_id: runID, resume: true, model: modelEl.value || undefined,
+      } : {
         run_id: runID, message: text, model: modelEl.value || undefined,
         workspace: runID ? undefined : (newWorkspace || undefined),
       }),
@@ -323,6 +360,9 @@ async function send(text) {
   if (!resp.ok) {
     const { error } = await resp.json().catch(() => ({ error: 'request refused' }));
     entry('tool_result', error, 'is_error');
+    if (resp.status === 409 && (error || '').includes('unfinished tool call')) {
+      showResumeCard();
+    }
     setBusy(false);
     return;
   }
@@ -377,6 +417,7 @@ async function send(text) {
             p.yes.disabled = p.no.disabled = true;
             p.note.textContent = 'timed out — denied';
             p.el.classList.add('settled');
+            pendingApprovals.delete(d.call_id);
           }
         } else if (name === 'error') {
           entry('tool_result', d.error, 'is_error');
@@ -408,7 +449,7 @@ $('new').onclick = newConversation;
 // ---- folder for a new conversation ----
 
 function showFolder() {
-  const f = runID ? convWorkspace : (newWorkspace || defaultWorkspace);
+  const f = (runID ? convWorkspace : newWorkspace) || defaultWorkspace;
   $('folder').textContent = f ? 'Folder: ' + f : '';
   $('folder').title = f ? f + ' — the folder this conversation can read and write' : '';
   $('folderBtn').hidden = !!runID;

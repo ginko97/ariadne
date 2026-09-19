@@ -28,6 +28,7 @@ type transcriptResponse struct {
 	// Workspace is the folder the conversation works in, shown so the
 	// person can always see where it can read and write.
 	Workspace string            `json:"workspace,omitempty"`
+	Pending   bool              `json:"pending,omitempty"`
 	Messages  []transcriptEntry `json:"messages"`
 }
 
@@ -67,6 +68,11 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ws := state.Workspace
+	if ws == "" {
+		ws = s.DefaultWorkspace
+	}
+
 	out := transcriptResponse{
 		RunID:     state.RunID,
 		Title:     state.Task,
@@ -74,7 +80,8 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
 		Turns:     state.Turns(),
 		Steps:     state.Steps,
 		Cost:      state.Cost,
-		Workspace: state.Workspace,
+		Workspace: ws,
+		Pending:   state.HasPendingToolCalls(),
 		Messages:  entries(state.Messages),
 	}
 

@@ -21,6 +21,9 @@ type chatRequest struct {
 	// for the reason resume keeps its checkpoint's — every path it has seen
 	// points into that folder.
 	Workspace string `json:"workspace,omitempty"`
+	// Resume finishes an interrupted turn (a batch with pending tool calls)
+	// without appending a new message.
+	Resume bool `json:"resume,omitempty"`
 }
 
 // handleChat runs one turn and streams it.
@@ -36,8 +39,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Message = strings.TrimSpace(req.Message)
-	if req.Message == "" {
+	if !req.Resume && req.Message == "" {
 		httpError(w, http.StatusBadRequest, "message is required")
+		return
+	}
+	if req.Resume && req.RunID == "" {
+		httpError(w, http.StatusBadRequest, "run_id is required to resume")
 		return
 	}
 	req.Model = strings.TrimSpace(req.Model)
@@ -99,12 +106,22 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 				"a conversation's folder cannot change; start a new conversation for another folder")
 			return
 		}
-		// An unfinished batch cannot take a new message: AddUserMessage
-		// refuses, and it is right to. Answered rather than flushed silently,
-		// because flushing here would stream the answer to whatever was asked
-		// before the interruption — not to what was just sent. `ariadne chat
-		// <run-id>` finishes it; a resume endpoint is the eventual home.
-		if state.HasPendingToolCalls() {
+		if req.Resume {
+			if !state.HasPendingToolCalls() {
+				httpError(w, http.StatusBadRequest,
+					"this conversation has no unfinished tool call to resume")
+				return
+			}
+			if req.Model != "" && req.Model != state.Model {
+				httpError(w, http.StatusBadRequest,
+					"cannot switch model while resuming an unfinished tool call")
+				return
+			}
+		} else if state.HasPendingToolCalls() {
+			// An unfinished batch cannot take a new message: AddUserMessage
+			// refuses, and it is right to. Answered rather than flushed silently,
+			// because flushing here would stream the answer to whatever was asked
+			// before the interruption — not to what was just sent.
 			httpError(w, http.StatusConflict,
 				"this conversation has an unfinished tool call; resume it before sending a new message")
 			return
@@ -152,7 +169,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	var answer string
 	var err error
-	if fresh {
+	if fresh || req.Resume {
 		answer, err = agent.Run(ctx, state)
 	} else {
 		answer, err = agent.ChatTurn(ctx, state, req.Message)

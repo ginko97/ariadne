@@ -47,6 +47,8 @@ func TestPickResultTellsACancelFromAFailure(t *testing.T) {
 		wantErr                    bool
 	}{
 		{"windows chose", "windows", "C:\\Users\\me\\proj\r\n", "", 0, "C:\\Users\\me\\proj", false},
+		{"windows chose with trailing backslash", "windows", "C:\\Users\\me\\proj\\\r\n", "", 0, "C:\\Users\\me\\proj", false},
+		{"windows chose drive root", "windows", "C:\\\r\n", "", 0, "C:\\", false},
 		{"windows cancel", "windows", "", "", 0, "", false},
 		{"windows powershell failed", "windows", "", "Add-Type : Cannot add type.", 1, "", true},
 		{"mac chose", "darwin", "/Users/me/proj/\n", "", 0, "/Users/me/proj", false},

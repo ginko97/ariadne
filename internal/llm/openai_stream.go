@@ -87,7 +87,7 @@ func (o *OpenAI) Stream(ctx context.Context, req Request) (iter.Seq2[Chunk, erro
 		// returning false. That is the reason for range-over-func here rather
 		// than a channel: cleanup cannot be forgotten by the consumer.
 		defer func() {
-			io.Copy(io.Discard, resp.Body)
+			io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
 			resp.Body.Close()
 		}()
 

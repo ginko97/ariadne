@@ -330,9 +330,8 @@ side can tell which one wrote a turn, because there is nothing to tell apart.
 nothing to install. It offers the model list from OpenRouter filtered to models that can
 actually call tools, and a model may change between turns but never inside one.
 
-What it does **not** do yet: there is no approval route over HTTP, so the browser cannot
-write memory. That half did not ship, and the release was renamed rather than its exit
-test rewritten.
+What it does **not** do yet: memory notes (`-remember`) are not yet offered in the browser
+interface; memory remains terminal-only.
 
 ---
 

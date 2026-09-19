@@ -205,3 +205,28 @@ func TestTranscriptDistinguishesCompactionNoticesFromPrompts(t *testing.T) {
 		t.Errorf("entry 2 kind = %q, want answer", got.Messages[2].Kind)
 	}
 }
+
+func TestTranscriptReportsPendingAndDefaultWorkspace(t *testing.T) {
+	s, ts := newTestServer(t)
+	s.DefaultWorkspace = "/default/workspace"
+
+	st := loop.NewState("run_pending_ts", "do something")
+	st.Messages = append(st.Messages, llm.Message{
+		Role:   llm.RoleAssistant,
+		Blocks: []llm.Block{{Type: llm.BlockToolUse, ID: "c1", Name: "calc", Args: []byte(`{}`)}},
+	})
+	if err := s.Store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, got := getTranscript(t, ts, "run_pending_ts")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if !got.Pending {
+		t.Error("got.Pending = false, want true")
+	}
+	if got.Workspace != "/default/workspace" {
+		t.Errorf("got.Workspace = %q, want /default/workspace", got.Workspace)
+	}
+}

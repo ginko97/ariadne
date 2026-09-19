@@ -880,12 +880,10 @@ func printAnswer(answer string, streamed bool) {
 
 // cmdUI serves the chat endpoint on loopback.
 //
-// Deliberately without -approve and -remember. Both would put a browser
-// request in front of a control that can only answer on the server's console:
-// -approve would block an HTTP handler on a console read, and -remember force-
-// gates the remember tool behind exactly that approval, so the model would be
-// offered a tool whose every call is denied. The approval UI is a later phase,
-// and until it exists the honest configuration is not to offer either.
+// Approvals are requested interactively in the browser over SSE and answered
+// via POST /api/approve. Deliberately without -remember: -remember force-gates
+// the remember tool behind approval, but writing memory notes is not yet offered
+// in the UI.
 func cmdUI(args []string) int {
 	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -1776,7 +1774,7 @@ func cmdTraces(args []string) int {
 	fs := flag.NewFlagSet("traces", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	run := fs.String("run", "", "limit to runs whose id contains this")
-	kinds := fs.String("kind", "", "comma-separated event kinds (run_start, request, response, tool_call, tool_result, tool_denied, approval, retry, compact, run_end)")
+	kinds := fs.String("kind", "", "comma-separated event kinds (run_start, request, response, tool_call, tool_result, tool_denied, tool_timeout, approval, retry, compact, run_end)")
 	tools := fs.String("tool", "", "comma-separated tool names")
 	errsOnly := fs.Bool("errors", false, "only events that record something going wrong")
 	stats := fs.Bool("stats", false, "aggregate instead of listing")
@@ -1916,7 +1914,7 @@ func describe(e trace.Event) string {
 		return fmt.Sprintf("model=%-20s msgs=%d", e.Model, e.Messages)
 	case trace.KindToolCall:
 		return fmt.Sprintf("%-10s %s", e.Tool, clip(string(e.Args), 90))
-	case trace.KindToolResult, trace.KindToolDenied:
+	case trace.KindToolResult, trace.KindToolDenied, trace.KindToolTimeout:
 		flag := ""
 		if e.IsError {
 			flag = "! "
