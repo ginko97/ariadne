@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,6 +95,28 @@ func TestNoteLengthAndCountAreBounded(t *testing.T) {
 	// what to lose, not the agent.
 	if err := s.Append(Note{Text: "one too many", RunID: "r"}); err == nil {
 		t.Error("the note limit was not enforced")
+	}
+}
+
+func TestNoteLengthUTF8(t *testing.T) {
+	s := store(t)
+
+	// A 200-rune note in Japanese (3 bytes per rune = 600 bytes).
+	// Must be accepted because 200 runes <= MaxNote (400).
+	japaneseNote := strings.Repeat("こんにちは世界", 28) // 7 * 28 = 196 runes
+	if err := s.Append(Note{Text: japaneseNote, RunID: "r_jp"}); err != nil {
+		t.Fatalf("UTF-8 note within rune limit failed: %v", err)
+	}
+
+	// A note with 401 runes must be rejected with the character count.
+	oversized := strings.Repeat("日", MaxNote+1)
+	err := s.Append(Note{Text: oversized, RunID: "r_jp_over"})
+	if err == nil {
+		t.Fatal("oversized UTF-8 note was accepted")
+	}
+	wantMsg := fmt.Sprintf("memory: note is %d characters, limit is %d", MaxNote+1, MaxNote)
+	if !strings.Contains(err.Error(), wantMsg) {
+		t.Errorf("error = %q, want containing %q", err.Error(), wantMsg)
 	}
 }
 
@@ -225,6 +248,33 @@ func TestAppendDoesNotDuplicateExistingHeader(t *testing.T) {
 	data, _ := os.ReadFile(s.Path)
 	if n := strings.Count(string(data), "# MEMORY"); n != 1 {
 		t.Errorf("header appears %d times, want 1", n)
+	}
+}
+
+func TestAppendPrependsNewlineIfMissing(t *testing.T) {
+	s := store(t)
+	// User manually edited MEMORY.md and saved without a trailing newline.
+	handwritten := "- [2026-09-01T12:00:00Z] [run_hand] user prefers python"
+	if err := os.WriteFile(s.Path, []byte(handwritten), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Append(Note{Text: "user also uses go", RunID: "run_agent"}); err != nil {
+		t.Fatal(err)
+	}
+
+	notes, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 2 {
+		t.Fatalf("got %d notes, want 2", len(notes))
+	}
+	if notes[0].Text != "user prefers python" {
+		t.Errorf("note 0 text = %q, want 'user prefers python'", notes[0].Text)
+	}
+	if notes[1].Text != "user also uses go" {
+		t.Errorf("note 1 text = %q, want 'user also uses go'", notes[1].Text)
 	}
 }
 

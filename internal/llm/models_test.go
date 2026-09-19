@@ -266,3 +266,66 @@ func TestModelsNeverUsesTheDefaultClient(t *testing.T) {
 		t.Errorf("source=%q rows=%d warning=%q; want a live fetch without the default client", source, len(rows), warning)
 	}
 }
+
+func TestModelsConcurrentGetDoesNotBlockStaleCache(t *testing.T) {
+	fetchStarted := make(chan struct{})
+	releaseFetch := make(chan struct{})
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case fetchStarted <- struct{}{}:
+		default:
+		}
+		<-releaseFetch
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(modelsFixture))
+	}))
+	defer ts.Close()
+
+	m := newCache(t, ts.URL)
+	m.TTL = 10 * time.Millisecond
+
+	// Populate initial cache
+	close(releaseFetch)
+	if _, source, _ := m.Get(context.Background()); source != "live" {
+		t.Fatalf("initial source = %q, want live", source)
+	}
+
+	// Wait for TTL to expire
+	time.Sleep(20 * time.Millisecond)
+
+	// Second fetch will block on releaseFetch2
+	releaseFetch2 := make(chan struct{})
+	defer close(releaseFetch2)
+	ts.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetchStarted <- struct{}{}
+		<-releaseFetch2
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(modelsFixture))
+	})
+
+	// Start background refresh
+	fetchDone := make(chan struct{})
+	go func() {
+		defer close(fetchDone)
+		m.Get(context.Background())
+	}()
+
+	// Wait until background fetch is actively in flight
+	<-fetchStarted
+
+	// Concurrent call during in-flight fetch should return stale cache immediately
+	start := time.Now()
+	rows, source, _ := m.Get(context.Background())
+	elapsed := time.Since(start)
+
+	if source != "cache" {
+		t.Errorf("source = %q during in-flight fetch, want cache", source)
+	}
+	if len(rows) != 3 {
+		t.Errorf("got %d rows, want 3", len(rows))
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("Get blocked for %v during in-flight fetch, want non-blocking cache read", elapsed)
+	}
+}

@@ -95,6 +95,9 @@ func (s *Server) approver(runID string, out *sseWriter) func(context.Context, ll
 			"args":    compactJSON(c.Args),
 		})
 
+		timer := time.NewTimer(approvalTimeout)
+		defer timer.Stop()
+
 		select {
 		case ok := <-ch:
 			return ok, nil
@@ -102,7 +105,7 @@ func (s *Server) approver(runID string, out *sseWriter) func(context.Context, ll
 			// The tab closed or the request was cancelled. Nobody is reading the
 			// prompt that was just sent, so nobody is going to answer it.
 			return false, ctx.Err()
-		case <-time.After(approvalTimeout):
+		case <-timer.C:
 			out.event("approval_timeout", map[string]any{"call_id": c.ID, "tool": c.Name})
 			return false, nil
 		}

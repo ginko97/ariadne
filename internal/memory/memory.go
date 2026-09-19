@@ -38,6 +38,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -70,8 +71,9 @@ func (s Store) Append(n Note) error {
 	if text == "" {
 		return fmt.Errorf("memory: a note cannot be empty")
 	}
-	if len(text) > MaxNote {
-		return fmt.Errorf("memory: note is %d characters, limit is %d", len(text), MaxNote)
+	runeCount := utf8.RuneCountInString(text)
+	if runeCount > MaxNote {
+		return fmt.Errorf("memory: note is %d characters, limit is %d", runeCount, MaxNote)
 	}
 
 	existing, err := s.Load()
@@ -99,7 +101,7 @@ func (s Store) Append(n Note) error {
 		}
 	}
 
-	f, err := os.OpenFile(s.Path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(s.Path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("memory: open: %w", err)
 	}
@@ -114,6 +116,15 @@ func (s Store) Append(n Note) error {
 		// guess what wrote it or whether editing it is allowed.
 		if _, err := fmt.Fprint(f, header); err != nil {
 			return fmt.Errorf("memory: write: %w", err)
+		}
+	} else {
+		// If the file was edited by hand and lacks a trailing newline, prepend
+		// one so the new note is not concatenated onto the end of the last line.
+		var last [1]byte
+		if _, err := f.ReadAt(last[:], fi.Size()-1); err == nil && last[0] != '\n' {
+			if _, err := fmt.Fprint(f, "\n"); err != nil {
+				return fmt.Errorf("memory: write: %w", err)
+			}
 		}
 	}
 	// Newlines are stripped from the text above, so one note is always one

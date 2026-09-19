@@ -358,14 +358,15 @@ func parseRetryAfter(header string) (time.Duration, bool) {
 	if header == "" {
 		return 0, false
 	}
-	if sec, err := strconv.ParseFloat(header, 64); err == nil && sec > 0 {
+	if sec, err := strconv.ParseFloat(header, 64); err == nil && sec >= 0 {
 		return time.Duration(sec * float64(time.Second)), true
 	}
 	if t, err := http.ParseTime(header); err == nil {
 		d := time.Until(t)
-		if d > 0 {
-			return d, true
+		if d < 0 {
+			d = 0
 		}
+		return d, true
 	}
 	return 0, false
 }

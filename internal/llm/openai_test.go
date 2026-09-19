@@ -510,3 +510,37 @@ func TestCompleteRefusesAnOversizedBody(t *testing.T) {
 		t.Errorf("made %d requests, want 1", n)
 	}
 }
+
+func TestParseRetryAfter(t *testing.T) {
+	if _, ok := parseRetryAfter(""); ok {
+		t.Error("empty header should not parse")
+	}
+	if _, ok := parseRetryAfter("garbage"); ok {
+		t.Error("garbage should not parse")
+	}
+	if _, ok := parseRetryAfter("-1"); ok {
+		t.Error("negative delay should not parse")
+	}
+
+	// Explicit zero delay
+	if d, ok := parseRetryAfter("0"); !ok || d != 0 {
+		t.Errorf("parseRetryAfter(\"0\") = %v, %v; want 0, true", d, ok)
+	}
+
+	// Positive seconds
+	if d, ok := parseRetryAfter("2.5"); !ok || d != 2500*time.Millisecond {
+		t.Errorf("parseRetryAfter(\"2.5\") = %v, %v; want 2.5s, true", d, ok)
+	}
+
+	// Date in the past: should return 0, true
+	past := time.Now().Add(-1 * time.Minute).UTC().Format(http.TimeFormat)
+	if d, ok := parseRetryAfter(past); !ok || d != 0 {
+		t.Errorf("parseRetryAfter(past) = %v, %v; want 0, true", d, ok)
+	}
+
+	// Date in the future
+	future := time.Now().Add(3 * time.Second).UTC().Format(http.TimeFormat)
+	if d, ok := parseRetryAfter(future); !ok || d <= 0 || d > 4*time.Second {
+		t.Errorf("parseRetryAfter(future) = %v, %v; want ~3s, true", d, ok)
+	}
+}

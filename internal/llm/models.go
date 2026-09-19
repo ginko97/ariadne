@@ -70,6 +70,7 @@ type ModelCache struct {
 	fetched  time.Time
 	failedAt time.Time
 	lastErr  string
+	fetching chan struct{}
 }
 
 func NewModelCache(fallback string) *ModelCache {
@@ -91,18 +92,20 @@ func NewModelCache(fallback string) *ModelCache {
 // looking at a measurement or a guess.
 func (m *ModelCache) Get(ctx context.Context) (rows []ModelRow, source string, warning string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.Unsupported != "" {
+		defer m.mu.Unlock()
 		return m.fallbackRows(), "fallback", m.Unsupported
 	}
 
 	if m.rows != nil && time.Since(m.fetched) < m.ttl() {
+		defer m.mu.Unlock()
 		return m.rows, "cache", ""
 	}
 
 	// Do not hammer upstream repeatedly when it is failing.
 	if !m.failedAt.IsZero() && time.Since(m.failedAt) < m.cooldown() {
+		defer m.mu.Unlock()
 		if m.rows != nil {
 			return m.rows, "cache", "refresh failed, showing the last list: " + m.lastErr
 		}
@@ -113,7 +116,39 @@ func (m *ModelCache) Get(ctx context.Context) (rows []ModelRow, source string, w
 			"could not reach the model list, offering the configured model only: " + m.lastErr
 	}
 
+	if m.fetching != nil {
+		waitCh := m.fetching
+		// If we already have cached rows, serve them immediately rather than blocking
+		// behind the in-flight network refresh.
+		if m.rows != nil {
+			m.mu.Unlock()
+			return m.rows, "cache", ""
+		}
+		m.mu.Unlock()
+		select {
+		case <-waitCh:
+			return m.Get(ctx)
+		case <-ctx.Done():
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			if m.Fallback == "" {
+				return []ModelRow{}, "fallback", ctx.Err().Error()
+			}
+			return m.fallbackRows(), "fallback", ctx.Err().Error()
+		}
+	}
+
+	waitCh := make(chan struct{})
+	m.fetching = waitCh
+	m.mu.Unlock()
+
 	fetched, err := m.fetch(ctx)
+
+	m.mu.Lock()
+	m.fetching = nil
+	close(waitCh)
+	defer m.mu.Unlock()
+
 	if err == nil {
 		m.rows, m.fetched, m.failedAt, m.lastErr = fetched, time.Now(), time.Time{}, ""
 		return m.rows, "live", ""
