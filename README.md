@@ -34,7 +34,7 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
 
 | | |
 | --- | --- |
-| Files | read and write in its workspace — a folder of its own, or `-workspace <folder>` |
+| Files | read and write in one folder per conversation — pick it in the browser (**Folder…**), or `-workspace <folder>` |
 | Tools from anywhere | any MCP server: filesystem, search, git, ... (`-mcp-config`) |
 | Run programs | `-exec`, asking before every single one |
 | Remember | notes that carry across conversations (`-remember`, in the terminal for now) |

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/ginko97/ariadne/internal/llm"
@@ -15,6 +16,11 @@ type chatRequest struct {
 	RunID   string `json:"run_id"` // empty starts a new conversation
 	Message string `json:"message"`
 	Model   string `json:"model,omitempty"`
+	// Workspace is the folder a new conversation works in. Only honoured
+	// when RunID is empty: a conversation's folder is fixed when it starts,
+	// for the reason resume keeps its checkpoint's — every path it has seen
+	// points into that folder.
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // handleChat runs one turn and streams it.
@@ -35,6 +41,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Model = strings.TrimSpace(req.Model)
+	req.Workspace = strings.TrimSpace(req.Workspace)
 	if req.RunID != "" && !sanitiseRunID(req.RunID) {
 		httpError(w, http.StatusBadRequest, "malformed run_id")
 		return
@@ -44,6 +51,16 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// whole turn including the one that creates the run.
 	runID := req.RunID
 	fresh := runID == ""
+
+	var workspace string
+	if fresh && req.Workspace != "" {
+		ws, err := checkWorkspace(req.Workspace)
+		if err != nil {
+			httpError(w, http.StatusBadRequest, "folder: "+err.Error())
+			return
+		}
+		workspace = ws
+	}
 	if fresh {
 		runID = s.NewRunID()
 	}
@@ -62,6 +79,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		// cmdChat's first turn use. Adding it afterwards would leave an empty
 		// message at index 0 that compaction can never drop.
 		state = loop.NewState(runID, req.Message)
+		state.Workspace = workspace
 	} else {
 		st, err := s.Store.Load(runID)
 		if err != nil {
@@ -73,6 +91,14 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		state = st
+		// Refused rather than ignored: a page that sent a folder believes
+		// the conversation will use it, and silently working somewhere else
+		// is the worse outcome.
+		if req.Workspace != "" && filepath.Clean(req.Workspace) != filepath.Clean(state.Workspace) {
+			httpError(w, http.StatusBadRequest,
+				"a conversation's folder cannot change; start a new conversation for another folder")
+			return
+		}
 		// An unfinished batch cannot take a new message: AddUserMessage
 		// refuses, and it is right to. Answered rather than flushed silently,
 		// because flushing here would stream the answer to whatever was asked

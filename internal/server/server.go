@@ -10,6 +10,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -67,6 +68,20 @@ type Server struct {
 	// the SSE stream the question went out on.
 	approvals *approvals
 
+	// DefaultWorkspace is the folder a new conversation gets when the page
+	// sends none — the server's -workspace, or the home directory's
+	// workspace. Only a default: a conversation's recorded folder always
+	// wins over it, and the page cannot change an existing one.
+	DefaultWorkspace string
+
+	// PickFolder opens the operating system's folder dialog and returns the
+	// chosen path, or "" if it was cancelled. Nil means this machine has no
+	// dialog, and the page offers typing a path instead.
+	PickFolder func(ctx context.Context) (string, error)
+
+	// picking keeps a second dialog from stacking behind an open one.
+	picking sync.Mutex
+
 	mu   sync.Mutex
 	live map[string]bool // run ids with a turn in flight
 }
@@ -95,6 +110,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/runs/{id}", s.handleTranscript)
 	mux.HandleFunc("POST /api/approve", s.handleApprove)
+	mux.HandleFunc("GET /api/workspace", s.handleWorkspace)
+	mux.HandleFunc("POST /api/workspace/check", s.handleWorkspaceCheck)
+	mux.HandleFunc("POST /api/workspace/pick", s.handleWorkspacePick)
 	mux.HandleFunc("GET /", s.handleIndex)
 	return guard(s.CSRFToken, mux)
 }

@@ -19,13 +19,16 @@ import (
 // marshalable would make the wire format follow the loop's internals, and every
 // later change to State would become a change to the page.
 type transcriptResponse struct {
-	RunID    string            `json:"run_id"`
-	Title    string            `json:"title"`
-	Model    string            `json:"model"`
-	Turns    int               `json:"turns"`
-	Steps    int               `json:"steps"`
-	Cost     float64           `json:"cost_usd"`
-	Messages []transcriptEntry `json:"messages"`
+	RunID string  `json:"run_id"`
+	Title string  `json:"title"`
+	Model string  `json:"model"`
+	Turns int     `json:"turns"`
+	Steps int     `json:"steps"`
+	Cost  float64 `json:"cost_usd"`
+	// Workspace is the folder the conversation works in, shown so the
+	// person can always see where it can read and write.
+	Workspace string            `json:"workspace,omitempty"`
+	Messages  []transcriptEntry `json:"messages"`
 }
 
 // transcriptEntry is one thing that happened, in order.
@@ -65,13 +68,14 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := transcriptResponse{
-		RunID:    state.RunID,
-		Title:    state.Task,
-		Model:    state.Model,
-		Turns:    state.Turns(),
-		Steps:    state.Steps,
-		Cost:     state.Cost,
-		Messages: entries(state.Messages),
+		RunID:     state.RunID,
+		Title:     state.Task,
+		Model:     state.Model,
+		Turns:     state.Turns(),
+		Steps:     state.Steps,
+		Cost:      state.Cost,
+		Workspace: state.Workspace,
+		Messages:  entries(state.Messages),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

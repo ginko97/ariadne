@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -896,7 +897,7 @@ func cmdUI(args []string) int {
 	approve := fs.String("approve", "", "tools needing approval in the browser before each call")
 	trust := fs.String("trust", "", "MCP tools that run without approval; every other MCP tool asks first")
 	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
-	workspace := fs.String("workspace", "", "directory fetch and write_file are confined to (fresh: default workspace; resumed: checkpoint's unless overridden)")
+	workspace := fs.String("workspace", "", "default folder for new conversations; the page can choose another, and an existing conversation always keeps its own")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
 	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")
@@ -945,6 +946,16 @@ func cmdUI(args []string) int {
 
 	store := &loop.Store{Dir: runsDir}
 
+	// The folder a new conversation gets when the page sends none. Absolute,
+	// because the page shows it and a relative path says nothing about where.
+	serverWorkspace := *workspace
+	if serverWorkspace == "" {
+		serverWorkspace = defaultWorkspace
+	}
+	if abs, err := filepath.Abs(serverWorkspace); err == nil {
+		serverWorkspace = abs
+	}
+
 	// One agent per request. The trace writer is opened here and closed by the
 	// returned cleanup, because a server has no end-of-main to defer to.
 	newAgent := func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
@@ -956,15 +967,7 @@ func cmdUI(args []string) int {
 			tw = nil
 		}
 
-		workspaceDir := *workspace
-		if state != nil {
-			workspaceDir = resolveWorkspace(*workspace, state)
-		} else if workspaceDir == "" {
-			workspaceDir = defaultWorkspace
-		}
-		if state != nil && state.Workspace == "" {
-			state.Workspace = workspaceDir
-		}
+		workspaceDir := conversationWorkspace(serverWorkspace, state)
 
 		budgetVal := *budget
 		if state != nil {
@@ -1005,6 +1008,8 @@ func cmdUI(args []string) int {
 	// api.openai.com would fill the picker with ids the endpoint rejects. The
 	// answer is one model and a reason, not a longer list of wrong ones.
 	srv.Models = llm.NewModelCache(*model)
+	srv.DefaultWorkspace = serverWorkspace
+	srv.PickFolder = pickFolder
 	if !strings.Contains(*baseURL, "openrouter.ai") {
 		srv.Models.Unsupported = noModelList(*baseURL)
 	}

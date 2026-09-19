@@ -21,6 +21,12 @@
   #bar { padding:.55rem .9rem; border-bottom:1px solid var(--edge); display:flex;
          gap:.6rem; align-items:center; }
   #bar select { max-width:22rem; font:inherit; }
+  #folder { max-width:28rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #bar button { font:inherit; cursor:pointer; }
+  #folderPanel { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;
+                 padding:.5rem .9rem; border-bottom:1px solid var(--edge); }
+  #folderPanel input { flex:1; min-width:14rem; font:inherit; padding:.35rem .5rem; }
+  #folderPanel button { font:inherit; cursor:pointer; }
   #log { flex:1; overflow-y:auto; padding:1rem; display:flex; flex-direction:column; gap:.7rem; }
   .e { max-width:52rem; white-space:pre-wrap; overflow-wrap:anywhere; }
   .prompt { align-self:flex-end; background:#8882; padding:.5rem .75rem; border-radius:.6rem; }
@@ -54,6 +60,15 @@
   <div id="bar">
     <select id="model" title="Model for the next turn"></select>
     <span id="stats" class="dim"></span>
+    <span id="folder" class="dim" title="The folder this conversation can read and write"></span>
+    <button type="button" id="folderBtn" title="Choose the folder for this new conversation">Folder…</button>
+  </div>
+  <div id="folderPanel" hidden>
+    <input id="folderInput" type="text" spellcheck="false" placeholder="Full path of a folder">
+    <button type="button" id="browse" hidden>Browse…</button>
+    <button type="button" id="useFolder" class="primary">Use</button>
+    <button type="button" id="cancelFolder">Cancel</button>
+    <span id="folderErr" class="is_error"></span>
   </div>
   <div id="warn" hidden></div>
   <div id="log"></div>
@@ -68,6 +83,11 @@ const CSRF = document.querySelector('meta[name=csrf]').content;
 const $ = id => document.getElementById(id);
 const log = $('log'), runsEl = $('runs'), modelEl = $('model'), statsEl = $('stats');
 let runID = null, busy = false;
+// The folder a new conversation will use (null: the server's default), the
+// server's default, and the folder of the conversation that is open. A
+// conversation's folder is fixed when it starts, so the button to change it
+// only exists before the first message.
+let newWorkspace = null, defaultWorkspace = '', convWorkspace = '';
 const pendingApprovals = new Map();
 
 const api = (path, opts = {}) => fetch(path, {
@@ -111,9 +131,9 @@ function selectModel(id) {
 }
 
 
-// A gated tool asks here and waits. Every path that is not an explicit yes is a
-// denial on the server — a closed tab, a five-minute silence, a restarted
-// process — so this only has to carry an answer, never to enforce one.
+// A gated tool asks here and waits. Nothing but an explicit yes runs the tool:
+// a five-minute silence is a denial, and a closed tab leaves the call pending
+// to be asked again — so this only has to carry an answer, never to enforce one.
 function approvalCard(d) {
   const el = document.createElement('div');
   el.className = 'e approval';
@@ -201,6 +221,9 @@ async function open(id) {
   if (!resp.ok) { warn('Could not open that conversation.'); return; }
   const t = await resp.json();
   runID = t.run_id;
+  convWorkspace = t.workspace || '';
+  closeFolderPanel();
+  showFolder();
   render(t.messages);
   stats(t.turns, t.steps, t.cost_usd);
   selectModel(t.model);
@@ -224,6 +247,9 @@ function stats(turns, steps, cost) {
 function newConversation() {
   if (busy) return;
   runID = null;
+  newWorkspace = null;
+  convWorkspace = '';
+  showFolder();
   log.replaceChildren();
   statsEl.textContent = '';
   warn('');
@@ -267,6 +293,7 @@ function setBusy(val) {
   busy = val;
   $('send').disabled = val;
   $('new').disabled = val;
+  $('folderBtn').disabled = val;
 }
 
 // EventSource cannot be used here: it only issues GET and cannot set headers,
@@ -282,7 +309,10 @@ async function send(text) {
   try {
     resp = await api('/api/chat', {
       method: 'POST',
-      body: JSON.stringify({ run_id: runID, message: text, model: modelEl.value || undefined }),
+      body: JSON.stringify({
+        run_id: runID, message: text, model: modelEl.value || undefined,
+        workspace: runID ? undefined : (newWorkspace || undefined),
+      }),
     });
   } catch (e) {
     entry('tool_result', 'Could not reach ariadne: ' + e.message, 'is_error');
@@ -318,7 +348,12 @@ async function send(text) {
         let d = {};
         try { d = JSON.parse(data); } catch {}
 
-        if (name === 'start') runID = d.run_id;
+        if (name === 'start') {
+          if (!runID) convWorkspace = newWorkspace || defaultWorkspace;
+          runID = d.run_id;
+          closeFolderPanel();
+          showFolder();
+        }
         else if (name === 'tool') {
           entry('tool_call', '→ ' + d.name);
           answer = null;
@@ -370,7 +405,76 @@ $('input').addEventListener('keydown', e => {
 });
 $('new').onclick = newConversation;
 
+// ---- folder for a new conversation ----
+
+function showFolder() {
+  const f = runID ? convWorkspace : (newWorkspace || defaultWorkspace);
+  $('folder').textContent = f ? 'Folder: ' + f : '';
+  $('folder').title = f ? f + ' — the folder this conversation can read and write' : '';
+  $('folderBtn').hidden = !!runID;
+}
+
+function closeFolderPanel() {
+  $('folderPanel').hidden = true;
+  $('folderErr').textContent = '';
+}
+
+async function loadWorkspace() {
+  try {
+    const d = await (await api('/api/workspace')).json();
+    defaultWorkspace = d.default || '';
+    $('browse').hidden = !d.can_pick;
+    showFolder();
+  } catch (e) { warn('Could not read the default folder: ' + e.message); }
+}
+
+// Checked on the server before it is used, so a typo is reported now rather
+// than after a message has been written.
+async function useFolder(path) {
+  $('folderErr').textContent = '';
+  const resp = await api('/api/workspace/check', { method: 'POST', body: JSON.stringify({ path }) });
+  const d = await resp.json().catch(() => ({ error: 'refused' }));
+  if (!resp.ok) { $('folderErr').textContent = d.error; return; }
+  newWorkspace = d.path;
+  closeFolderPanel();
+  showFolder();
+  $('input').focus();
+}
+
+$('folderBtn').onclick = () => {
+  if (busy || runID) return;
+  $('folderInput').value = newWorkspace || defaultWorkspace;
+  $('folderErr').textContent = '';
+  $('folderPanel').hidden = false;
+  $('folderInput').focus();
+  $('folderInput').select();
+};
+$('cancelFolder').onclick = closeFolderPanel;
+$('useFolder').onclick = () => useFolder($('folderInput').value);
+$('folderInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); useFolder($('folderInput').value); }
+  if (e.key === 'Escape') closeFolderPanel();
+});
+
+// The dialog opens on this computer, from the ariadne process: a browser never
+// tells a page the real path of a folder.
+$('browse').onclick = async () => {
+  $('folderErr').textContent = '';
+  $('browse').disabled = true;
+  try {
+    const resp = await api('/api/workspace/pick', { method: 'POST' });
+    const d = await resp.json().catch(() => ({ error: 'refused' }));
+    if (!resp.ok) { $('folderErr').textContent = d.error; return; }
+    if (d.cancelled) return;
+    $('folderInput').value = d.path;
+    await useFolder(d.path);
+  } finally {
+    $('browse').disabled = false;
+  }
+};
+
 loadModels();
 loadRuns();
+loadWorkspace();
 $('input').focus();
 </script>

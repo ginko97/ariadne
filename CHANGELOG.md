@@ -16,6 +16,11 @@ carry the longer story for each release.
   as before.
 - **OpenRouter is the default endpoint.**
 - **`ariadne ui` opens your browser** (`-no-open` to skip).
+- **Choose a folder per conversation in the browser.** **Folder…** before the
+  first message: type a full path or **Browse…** for your system's folder
+  dialog. The folder is fixed once the conversation starts and shown at the
+  top. `ariadne ui -workspace` is now only the default for new
+  conversations; a reopened one always keeps its own folder.
 - **`ariadne version`.**
 - **Release binaries** for Windows, macOS and Linux (amd64 and arm64), and CI
   on all three.
