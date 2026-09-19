@@ -473,6 +473,23 @@ func TestPrintDeltaResetsOnUsageChunk(t *testing.T) {
 	}
 }
 
+func TestPrintDeltaResetsOnCostReportedChunk(t *testing.T) {
+	var out strings.Builder
+	p := printDelta(&out)
+
+	// Turn 1 ends with zero-token CostReported usage (e.g. OpenRouter free model)
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c1", Name: "calc"}})
+	p(llm.Chunk{Usage: llm.Usage{CostReported: true}})
+
+	// Turn 2 calls tool at index 0 again; it must be announced because usage reset the state
+	p(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c2", Name: "calc"}})
+
+	got := out.String()
+	if n := strings.Count(got, "calc"); n != 2 {
+		t.Errorf("expected calc to be announced twice across responses, got %d times in:\n%s", n, got)
+	}
+}
+
 func TestApproveFromReader(t *testing.T) {
 	cases := []struct {
 		input string

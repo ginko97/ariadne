@@ -149,3 +149,22 @@ func TestStepRegressionsIgnoresNewTasks(t *testing.T) {
 		t.Fatalf("got %v, want none", got)
 	}
 }
+
+// StepRegressions lists tasks that still pass; tasks that fail (now or previously)
+// must not be reported as step regressions.
+func TestStepRegressionsIgnoresFailingTasks(t *testing.T) {
+	before := Scorecard{Results: []Result{
+		{TaskID: "hit-limit", Pass: true, Steps: 2},
+		{TaskID: "failed-both", Pass: false, Steps: 1},
+		{TaskID: "now-passing", Pass: false, Steps: 1},
+	}}
+	after := Scorecard{Results: []Result{
+		{TaskID: "hit-limit", Pass: false, Steps: 10},  // failed now: not a step regression
+		{TaskID: "failed-both", Pass: false, Steps: 5}, // failed both: not a step regression
+		{TaskID: "now-passing", Pass: true, Steps: 3},  // failed before: not a step regression
+	}}
+	if got := StepRegressions(before, after); len(got) != 0 {
+		t.Fatalf("got %v, want none", got)
+	}
+}
+

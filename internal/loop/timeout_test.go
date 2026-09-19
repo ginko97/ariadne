@@ -61,6 +61,9 @@ func TestToolTimeoutBoundsAToolThatIgnoresContext(t *testing.T) {
 			if e.Tool != "slow" {
 				t.Errorf("timeout names %q", e.Tool)
 			}
+			if e.Step != 1 {
+				t.Errorf("timeout step = %d, want 1", e.Step)
+			}
 		}
 	}
 	if timeouts != 1 {

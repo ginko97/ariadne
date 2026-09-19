@@ -507,7 +507,7 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 
 func (a *Agent) runOne(ctx context.Context, s *State, i int, c llm.ToolCall, mu *sync.Mutex) error {
 	toolStarted := time.Now()
-	res, err := a.callTool(ctx, c)
+	res, err := a.callTool(ctx, s.Steps, c)
 	if a.Redact != nil {
 		res.Content = a.Redact(res.Content)
 	}
@@ -580,7 +580,7 @@ func (a *Agent) runOne(ctx context.Context, s *State, i int, c llm.ToolCall, mu 
 // claiming the tool failed — "may still be running" is the true statement, and
 // a model told the truth can decide not to retry a payment. The call does get a
 // result, so a resumed run will not fire it a second time.
-func (a *Agent) callTool(ctx context.Context, c llm.ToolCall) (llm.ToolResult, error) {
+func (a *Agent) callTool(ctx context.Context, step int, c llm.ToolCall) (llm.ToolResult, error) {
 	if a.ToolTimeout <= 0 {
 		return a.RunTool(ctx, c)
 	}
@@ -616,7 +616,7 @@ func (a *Agent) callTool(ctx context.Context, c llm.ToolCall) (llm.ToolResult, e
 			return llm.ToolResult{}, ctx.Err()
 		}
 		a.emit(trace.Event{
-			Kind: trace.KindToolTimeout, Tool: c.Name, CallID: c.ID, Args: c.Args,
+			Kind: trace.KindToolTimeout, Step: step, Tool: c.Name, CallID: c.ID, Args: c.Args,
 			LatencyMS: a.ToolTimeout.Milliseconds(), IsError: true,
 			Content: fmt.Sprintf("timed out after %s", a.ToolTimeout),
 		})

@@ -90,6 +90,9 @@ func LoadFile(path string) error {
 		}
 		k = strings.TrimSpace(k)
 		v = strings.TrimSpace(v)
+		if k == "" {
+			continue
+		}
 		if len(v) >= 2 {
 			if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
 				v = v[1 : len(v)-1]

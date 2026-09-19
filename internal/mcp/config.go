@@ -94,6 +94,10 @@ func LoadConfig(path string) (*Config, error) {
 // already paid for that confusion once — the read side of memory enabled with a
 // dead write side.
 func Connect(ctx context.Context, cfg *Config) (tools []tool.Tool, closeAll func(), err error) {
+	if cfg == nil || len(cfg.Servers) == 0 {
+		return nil, func() {}, nil
+	}
+
 	var started []*Server
 	closeAll = func() {
 		for _, s := range started {

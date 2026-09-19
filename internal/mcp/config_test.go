@@ -127,3 +127,28 @@ func TestLoadConfigRejectsServerNamesThatCannotPrefixATool(t *testing.T) {
 		t.Errorf("a legal server name was refused: %v", err)
 	}
 }
+
+func TestConnectNilOrEmptyConfig(t *testing.T) {
+	ctx := context.Background()
+
+	// nil config must not panic and must return no tools and a safe close func
+	tools, closeAll, err := Connect(ctx, nil)
+	if err != nil {
+		t.Fatalf("Connect(nil): %v", err)
+	}
+	if len(tools) != 0 {
+		t.Errorf("got %d tools, want 0", len(tools))
+	}
+	closeAll() // must be safe to call
+
+	// empty config must return no tools and a safe close func
+	tools, closeAll, err = Connect(ctx, &Config{})
+	if err != nil {
+		t.Fatalf("Connect(empty): %v", err)
+	}
+	if len(tools) != 0 {
+		t.Errorf("got %d tools, want 0", len(tools))
+	}
+	closeAll()
+}
+

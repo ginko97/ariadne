@@ -139,11 +139,16 @@ func orUnknown(s string) string {
 func StepRegressions(before, sc Scorecard) []string {
 	was := map[string]int{}
 	for _, r := range before.Results {
-		was[r.TaskID] = r.Steps
+		if r.Pass {
+			was[r.TaskID] = r.Steps
+		}
 	}
 
 	var out []string
 	for _, r := range sc.Results {
+		if !r.Pass {
+			continue
+		}
 		prev, ok := was[r.TaskID]
 		if ok && r.Steps > prev {
 			out = append(out, fmt.Sprintf("%s %d->%d", r.TaskID, prev, r.Steps))

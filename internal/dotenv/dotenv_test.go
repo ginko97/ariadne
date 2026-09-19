@@ -143,3 +143,21 @@ func TestLoadPreservesMismatchedAndTrailingQuotes(t *testing.T) {
 		t.Errorf("TEST_DOTENV_P3 = %q, want \"double\"", got)
 	}
 }
+
+func TestLoadFileSkipsEmptyKeys(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.env")
+	// Lines like "=val" or "export =val" must be skipped without aborting
+	content := "=empty_key\nexport =empty_export\nTEST_DOTENV_VALID=loaded\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Unsetenv("TEST_DOTENV_VALID")
+
+	if err := LoadFile(p); err != nil {
+		t.Fatalf("LoadFile failed on empty key line: %v", err)
+	}
+	if got := os.Getenv("TEST_DOTENV_VALID"); got != "loaded" {
+		t.Errorf("TEST_DOTENV_VALID = %q, want loaded", got)
+	}
+}
+

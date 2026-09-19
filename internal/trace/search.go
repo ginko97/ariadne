@@ -267,14 +267,14 @@ func Summarise(dir string, q Query) (Stats, error) {
 		bad, err := scan(filepath.Join(dir, r, "trace.jsonl"), func(e Event) bool {
 			// Run-level lifecycle invariants hold across the whole file, regardless
 			// of what the event filter selects.
+			if e.Step > runSteps {
+				runSteps = e.Step
+			}
 			switch e.Kind {
 			case KindRunStart:
 				starts++
 			case KindRunEnd:
 				ends++
-				if e.Step > runSteps {
-					runSteps = e.Step
-				}
 				runFailed = (e.Error != "")
 			}
 

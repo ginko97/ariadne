@@ -303,6 +303,26 @@ func TestSummariseResumedRunDoesNotInflateSteps(t *testing.T) {
 	}
 }
 
+// An incomplete run (started, never ended) must still have its steps counted.
+func TestSummariseIncompleteRunCountsSteps(t *testing.T) {
+	dir := t.TempDir()
+	evStep1Resp := `{"run_id":"r","seq":2,"kind":"response","step":1,"stop":"tool_use"}`
+	evStep2Resp := `{"run_id":"r","seq":4,"kind":"response","step":2,"stop":"tool_use"}`
+	writeTrace(t, dir, "run_20260101T000000_crashed", evStart, evStep1Resp, evStep2Resp)
+
+	st, err := Summarise(dir, Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Incomplete) != 1 {
+		t.Fatalf("Incomplete = %v, want 1 incomplete run", st.Incomplete)
+	}
+	if st.Steps != 2 {
+		t.Errorf("Steps = %d, want 2 for incomplete run with 2 steps", st.Steps)
+	}
+}
+
+
 // Free-text query must match CallID, so searching for a specific call finds
 // tool results and approvals.
 func TestSearchMatchesCallID(t *testing.T) {
