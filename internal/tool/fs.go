@@ -252,8 +252,9 @@ func (WriteFile) Name() string { return "write_file" }
 
 func (WriteFile) Description() string {
 	return "Write text to a file, creating it or replacing its contents. " +
-		"Paths are relative to a workspace directory this tool cannot write " +
-		"outside of; absolute paths are refused."
+		"Plain text only: it cannot make a PDF, Word, Excel or PowerPoint file, so " +
+		"save documents as .md or .txt. Paths are relative to a workspace directory " +
+		"this tool cannot write outside of; absolute paths are refused."
 }
 
 func (WriteFile) Schema() json.RawMessage {
@@ -284,6 +285,14 @@ func (w WriteFile) Call(_ context.Context, _ string, args json.RawMessage) (llm.
 	}
 	if in.Path == "" {
 		return fail("write_file: path is required")
+	}
+	// Text under a document's name is a broken document: a PDF reader calls
+	// it damaged, Word refuses it. Refused with what to do instead, since the
+	// person asked for a file they can open.
+	if kind := documentKind(in.Path); kind != "" {
+		return fail("write_file: %q would not be a valid document: write_file writes plain text, "+
+			"not PDF, Word, Excel or PowerPoint. Save it as .md (Markdown) or .txt instead, "+
+			"and say so to the person", in.Path)
 	}
 
 	root, err := w.openForWrite()

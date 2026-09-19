@@ -406,3 +406,22 @@ func TestFetchReportsFormatBeforeSize(t *testing.T) {
 		}
 	}
 }
+
+// Plain text saved as hello.pdf is a broken PDF. write_file refuses a
+// document's extension, in any case, and says what to write instead; nothing
+// is created.
+func TestWriteFileRefusesDocumentFormats(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"hello.pdf", "report.DOCX", "sheet.xlsx", "deck.pptx", "old.doc", "notes.odt"} {
+		msg, isErr := call(t, NewWriteFile(dir), writeArgs{Path: name, Content: "# Summary"})
+		if !isErr || !strings.Contains(msg, ".md") {
+			t.Errorf("%s: error=%v %q; want a refusal pointing at .md", name, isErr, msg)
+		}
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s was created (%v)", name, err)
+		}
+	}
+	if msg, isErr := call(t, NewWriteFile(dir), writeArgs{Path: "summary.md", Content: "# Summary"}); isErr {
+		t.Errorf("summary.md refused: %s", msg)
+	}
+}

@@ -58,6 +58,12 @@
   textarea { flex:1; resize:none; font:inherit; padding:.5rem; min-height:2.6rem; max-height:11rem; }
   button.primary { font:inherit; padding:.5rem 1.1rem; cursor:pointer; }
   #warn { padding:.4rem .9rem; background:#fd42; font-size:.85em; }
+  #working { padding:.35rem .9rem; color:var(--dim); font-size:.85em; display:flex; gap:.5rem;
+             align-items:center; border-top:1px solid var(--edge); }
+  #working .spin { width:.8rem; height:.8rem; border:2px solid var(--edge); border-top-color:currentColor;
+                   border-radius:50%; animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { #working .spin { animation:none; } }
   [hidden] { display:none !important; }
 </style>
 
@@ -105,6 +111,7 @@
   </form>
   <div id="warn" hidden></div>
   <div id="log"></div>
+  <div id="working" hidden><span class="spin"></span><span id="workingWhat" role="status"></span><span id="workingTime" aria-hidden="true"></span></div>
   <form id="composer">
     <textarea id="input" rows="1" placeholder="Ask something…  (Enter to send, Shift+Enter for a newline)"></textarea>
     <button class="primary" id="send">Send</button>
@@ -218,6 +225,7 @@ function approvalCard(d) {
 
   async function answer(approve) {
     yes.disabled = no.disabled = true;
+    if (busy) working(approve ? 'running ' + d.tool : 'thinking');
     try {
       const resp = await api('/api/approve', {
         method: 'POST',
@@ -361,8 +369,33 @@ async function loadModels(reset) {
   } catch (e) { warn('Could not load the model list: ' + e.message); }
 }
 
+// The status line while a turn runs. A model can think for a minute before
+// the first word, and a page that shows nothing in that time looks stopped:
+// this says it is working, for how long, and on what — the last thing the
+// stream reported. It is the stream's account, not a progress bar: nobody
+// knows how long a model will take.
+let workingSince = 0, workingWhat = '', workingTimer = null;
+// The activity is announced to screen readers when it changes; the clock is
+// not, or it would be read out every second.
+function working(what) {
+  workingWhat = what;
+  $('workingWhat').textContent = 'Working… ' + what;
+  showWorking();
+}
+function showWorking() {
+  const s = Math.floor((Date.now() - workingSince) / 1000);
+  $('workingTime').textContent = s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+}
+
 function setBusy(val) {
   busy = val;
+  $('working').hidden = !val;
+  clearInterval(workingTimer);
+  if (val) {
+    workingSince = Date.now();
+    working('thinking');
+    workingTimer = setInterval(showWorking, 1000);
+  }
   $('send').disabled = val;
   $('send').hidden = val;
   $('stop').hidden = !val;
@@ -480,9 +513,10 @@ async function send(text, opts = {}) {
         }
         else if (name === 'tool') {
           entry('tool_call', '→ ' + d.name);
+          working('calling ' + d.name);
           answer = null;
         } else if (name === 'token') {
-          if (!answer) answer = entry('answer', '');
+          if (!answer) { answer = entry('answer', ''); working('writing the answer'); }
           answer.textContent += d.text;
           log.scrollTop = log.scrollHeight;
         } else if (name === 'done') {
@@ -494,6 +528,7 @@ async function send(text, opts = {}) {
           selectModel(d.model);
         } else if (name === 'approval_required') {
           approvalCard(d);
+          working('waiting for your approval');
           answer = null;
         } else if (name === 'approval_timeout') {
           const p = pendingApprovals.get(d.call_id);

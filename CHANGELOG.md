@@ -5,6 +5,13 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **"Working…" while a turn runs**: a status line above the message box with
+  the time so far and what is happening — thinking, calling a tool, waiting
+  for your approval, writing the answer — so a long turn no longer looks
+  stuck.
+- **`write_file` refuses `.pdf`, `.docx`, `.xlsx`, `.pptx` and the like.** It
+  writes plain text, so "save it as hello.pdf" made a file every PDF reader
+  called damaged. It now says to save as `.md` or `.txt` instead.
 - **Slash commands in the browser**: `/help`, `/new`, `/settings`,
   `/model [id]`, `/folder`, `/theme [system|light|dark]`, `/stop`. They are
   answered by the page, never sent to the model; `/help` used to be a paid
