@@ -25,6 +25,12 @@ plainly, what protects you and what does not.
   other non-public addresses, checked on the address actually connected to — so
   a redirect or a name that resolves to your router is refused too, even when
   you approved the fetch. It sends no cookies and no credentials.
+- **Answers cannot load anything by themselves.** The browser formats the
+  model's Markdown by building page elements, never by inserting HTML, so
+  markup quoted from a document is shown, not run. Images are never loaded:
+  a Markdown image would fetch its URL the moment it is shown, which is a
+  way to send what the model read to another server without a click. Links
+  are `http(s)` only, show their address, and send no referrer.
 - **Untrusted text is marked.** What `fetch`, `web_fetch`, MCP tools and `exec`
   return is wrapped as data, and the model is told not to follow instructions
   inside it.

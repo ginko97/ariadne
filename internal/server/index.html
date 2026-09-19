@@ -64,6 +64,23 @@
                    border-radius:50%; animation:spin 1s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { #working .spin { animation:none; } }
+  .answer.md { white-space:normal; }
+  .md > :first-child { margin-top:0; }
+  .md > :last-child { margin-bottom:0; }
+  .md p, .md ul, .md ol, .md pre, .md blockquote, .md .tablewrap { margin:.45rem 0; }
+  .md h3, .md h4, .md h5, .md h6 { margin:.9rem 0 .35rem; line-height:1.3; }
+  .md h3 { font-size:1.2em; } .md h4 { font-size:1.08em; } .md h5, .md h6 { font-size:1em; }
+  .md ul, .md ol { padding-left:1.4rem; }
+  .md code { font-family:ui-monospace,SFMono-Regular,monospace; font-size:.9em;
+             background:#8882; padding:.05rem .3rem; border-radius:.25rem; }
+  .md pre { background:#8881; padding:.6rem .75rem; border-radius:.4rem; overflow-x:auto; }
+  .md pre code { background:none; padding:0; white-space:pre; }
+  .md blockquote { border-left:3px solid var(--edge); padding-left:.7rem; color:var(--dim); }
+  .md .tablewrap { overflow-x:auto; }
+  .md table { border-collapse:collapse; }
+  .md th, .md td { border:1px solid var(--edge); padding:.25rem .55rem; text-align:left; vertical-align:top; }
+  .md th { background:#8881; }
+  .md hr { border:0; border-top:1px solid var(--edge); }
   [hidden] { display:none !important; }
 </style>
 
@@ -266,6 +283,7 @@ function render(entries) {
   for (const e of entries) {
     if (e.kind === 'tool_call') entry('tool_call', `→ ${e.tool}(${e.args || ''})`);
     else if (e.kind === 'tool_result') entry('tool_result', `← ${e.text}`, e.is_error ? 'is_error' : '');
+    else if (e.kind === 'answer') showAnswer(entry('answer', ''), e.text);
     else entry(e.kind, e.text);
   }
 }
@@ -523,7 +541,7 @@ async function send(text, opts = {}) {
           // The streamed text and the final answer are the same words; replace
           // rather than append, so a provider that does not stream still shows one.
           if (!answer) answer = entry('answer', '');
-          answer.textContent = d.answer;
+          showAnswer(answer, d.answer);
           stats(d.turns, d.steps, d.cost, d.cost_unknown);
           selectModel(d.model);
         } else if (name === 'approval_required') {
@@ -578,6 +596,184 @@ $('composer').onsubmit = e => {
   if (t.startsWith('/')) { command(t); return; }
   send(t);
 };
+
+// ---------------------------------------------------------------- markdown
+//
+// Answers are written in Markdown, and shown as plain text they were a page
+// of ** and ##. This renders the part models use — headings, bold, italic,
+// code, lists, tables, quotes, rules, links — and nothing else.
+//
+// Two rules make it safe to run on text that may quote a fetched page:
+//   - Every node is built with createElement and textContent. Nothing the
+//     model wrote is ever parsed as HTML, so <script> or <img onerror> in an
+//     answer is shown as the characters it is.
+//   - No images. A Markdown image loads by itself when shown, and its URL can
+//     carry what the model read to someone else's server with no click at all
+//     — a known way assistants leak data. It is shown as text instead. Links
+//     need a click, are http(s) only, show their URL, and send no referrer.
+function renderMarkdown(text) {
+  const frag = document.createDocumentFragment();
+  mdBlocks(text.replace(/\r\n?/g, '\n').split('\n'), frag);
+  return frag;
+}
+
+const mdEl = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
+const isTableSep = l => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l) && l.includes('-');
+const listItem = l => l.match(/^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/);
+const cells = l => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+
+function mdBlocks(lines, into) {
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+
+    const fence = line.match(/^\s*(```|~~~)/);
+    if (fence) {
+      const code = [];
+      for (i++; i < lines.length && !lines[i].trim().startsWith(fence[1]); i++) code.push(lines[i]);
+      i++;
+      const pre = mdEl('pre'), c = mdEl('code');
+      c.textContent = code.join('\n');
+      pre.append(c);
+      into.append(pre);
+      continue;
+    }
+
+    const h = line.match(/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/);
+    if (h) {
+      const e = mdEl('h' + Math.min(h[1].length + 2, 6));
+      mdInline(h[2], e);
+      into.append(e);
+      i++;
+      continue;
+    }
+
+    if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) { into.append(mdEl('hr')); i++; continue; }
+
+    if (line.includes('|') && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+      const table = mdEl('table'), thead = mdEl('thead'), tbody = mdEl('tbody'), hr = mdEl('tr');
+      for (const c of cells(line)) { const th = mdEl('th'); mdInline(c, th); hr.append(th); }
+      thead.append(hr);
+      for (i += 2; i < lines.length && lines[i].includes('|') && lines[i].trim(); i++) {
+        const tr = mdEl('tr');
+        for (const c of cells(lines[i])) { const td = mdEl('td'); mdInline(c, td); tr.append(td); }
+        tbody.append(tr);
+      }
+      table.append(thead, tbody);
+      const wrap = mdEl('div', 'tablewrap');
+      wrap.append(table);
+      into.append(wrap);
+      continue;
+    }
+
+    if (/^\s{0,3}>/.test(line)) {
+      const quoted = [];
+      for (; i < lines.length && /^\s{0,3}>/.test(lines[i]); i++) quoted.push(lines[i].replace(/^\s{0,3}>\s?/, ''));
+      const q = mdEl('blockquote');
+      mdBlocks(quoted, q);
+      into.append(q);
+      continue;
+    }
+
+    const first = listItem(line);
+    if (first) {
+      const base = first[1].length, ordered = /\d/.test(first[2]);
+      const list = mdEl(ordered ? 'ol' : 'ul');
+      if (ordered && parseInt(first[2], 10) !== 1) list.start = parseInt(first[2], 10);
+      let item = null, body = [];
+      const flush = () => {
+        if (!item) return;
+        mdInline(body[0], item);
+        if (body.length > 1) mdBlocks(body.slice(1), item);
+        list.append(item);
+      };
+      for (; i < lines.length; i++) {
+        const l = lines[i], m = listItem(l);
+        if (m && m[1].length === base && /\d/.test(m[2]) === ordered) {
+          flush();
+          item = mdEl('li');
+          body = [m[3]];
+        } else if (l.trim() && (l.length - l.trimStart().length) > base) {
+          body.push(l.slice(Math.min(base + 2, l.length - l.trimStart().length)));
+        } else if (!l.trim() && i + 1 < lines.length && (listItem(lines[i + 1]) || /^\s+\S/.test(lines[i + 1]))) {
+          continue;
+        } else {
+          break;
+        }
+      }
+      flush();
+      into.append(list);
+      continue;
+    }
+
+    // A paragraph runs to a blank line or the start of another block. Its
+    // single line breaks are kept: models use them for layout.
+    const p = mdEl('p');
+    for (let first = true; i < lines.length && lines[i].trim(); i++, first = false) {
+      const l = lines[i];
+      if (!first && (/^\s{0,3}(#{1,6}\s|>|```|~~~)/.test(l) || listItem(l) ||
+          (l.includes('|') && i + 1 < lines.length && isTableSep(lines[i + 1])))) break;
+      if (!first) p.append(mdEl('br'));
+      mdInline(l.trim(), p);
+    }
+    into.append(p);
+  }
+}
+
+// inline renders one line's emphasis, code and links into the element.
+function mdInline(text, into) {
+  const re = /(`+)([\s\S]*?[^`])\1(?!`)|!\[([^\]]*)\]\(([^)\s]*)[^)]*\)|\[([^\]]+)\]\(([^)\s]+)[^)]*\)|\*\*(?=\S)([\s\S]*?\S)\*\*|__(?=\S)([\s\S]*?\S)__|\*(?=[^\s*])([^*]*?[^\s*])\*|(^|[^\w])_(?=[^\s_])([^_]*?[^\s_])_(?!\w)|~~(?=\S)([\s\S]*?\S)~~/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    let start = m.index;
+    if (m[10] !== undefined) { start += m[10].length; }
+    if (start > last) into.append(text.slice(last, start));
+    if (m[1]) {
+      const c = mdEl('code'); c.textContent = m[2].replace(/^ (.*) $/, '$1'); into.append(c);
+    } else if (m[3] !== undefined) {
+      const s = mdEl('span', 'dim');
+      s.textContent = `[image not shown: ${m[3] || 'no description'}${m[4] ? ' — ' + m[4] : ''}]`;
+      into.append(s);
+    } else if (m[5] !== undefined) {
+      mdLink(m[5], m[6], into);
+    } else if (m[7] !== undefined || m[8] !== undefined) {
+      const b = mdEl('strong'); mdInline(m[7] ?? m[8], b); into.append(b);
+    } else if (m[9] !== undefined || m[11] !== undefined) {
+      const e = mdEl('em'); mdInline(m[9] ?? m[11], e); into.append(e);
+    } else if (m[12] !== undefined) {
+      const s = mdEl('s'); mdInline(m[12], s); into.append(s);
+    }
+    last = re.lastIndex;
+  }
+  if (last < text.length) into.append(text.slice(last));
+}
+
+function mdLink(label, url, into) {
+  if (!/^https?:\/\//i.test(url)) {
+    into.append(`[${label}](${url})`);
+    return;
+  }
+  const a = mdEl('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.referrerPolicy = 'no-referrer';
+  a.title = url;
+  mdInline(label, a);
+  into.append(a);
+  if (label !== url) {
+    const u = mdEl('span', 'dim');
+    u.textContent = ` (${url})`;
+    into.append(u);
+  }
+}
+
+// showAnswer puts a finished answer on the page, formatted.
+function showAnswer(e, text) {
+  e.classList.add('md');
+  e.replaceChildren(renderMarkdown(text || ''));
+}
 
 // ---------------------------------------------------------------- commands
 //

@@ -5,6 +5,10 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Formatted answers in the browser.** Headings, bold, lists, tables, code
+  and links are shown formatted instead of as `**` and `##`, in new answers
+  and reopened conversations. Images are never loaded (shown as text), and
+  nothing in an answer is ever treated as HTML.
 - **Switch between saved keys in Settings.** With OpenRouter and Gemini keys
   both set up, choosing the other provider in ⚙ with the key field empty uses
   that provider's own saved key; the field says "saved — leave empty to use
