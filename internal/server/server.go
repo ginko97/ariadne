@@ -79,6 +79,10 @@ type Server struct {
 	// dialog, and the page offers typing a path instead.
 	PickFolder func(ctx context.Context) (string, error)
 
+	// Setup reads and changes the provider from the page. Nil when the
+	// process was started with a provider and cannot change it. See setup.go.
+	Setup *Setup
+
 	// picking keeps a second dialog from stacking behind an open one.
 	picking sync.Mutex
 
@@ -113,6 +117,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/workspace", s.handleWorkspace)
 	mux.HandleFunc("POST /api/workspace/check", s.handleWorkspaceCheck)
 	mux.HandleFunc("POST /api/workspace/pick", s.handleWorkspacePick)
+	mux.HandleFunc("GET /api/setup", s.handleSetupStatus)
+	mux.HandleFunc("POST /api/setup", s.handleSetup)
+	mux.HandleFunc("POST /api/setup/ollama", s.handleSetupOllama)
 	mux.HandleFunc("GET /", s.handleIndex)
 	return guard(s.CSRFToken, mux)
 }

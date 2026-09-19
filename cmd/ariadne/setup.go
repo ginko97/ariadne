@@ -113,17 +113,14 @@ func runSetup(stdin io.Reader, out io.Writer, args []string) int {
 
 	if !*noCheck {
 		fmt.Fprintf(out, "checking %s with %s ... ", url, *model)
-		if err := checkKey(url, key, *model); err != nil {
+		if err := checkKey(context.Background(), url, key, *model); err != nil {
 			fmt.Fprintf(out, "failed\nariadne setup: %v\nnothing written; fix the key or model, or rerun with -no-check\n", err)
 			return exitFail
 		}
 		fmt.Fprintln(out, "ok")
 	}
 
-	vals := map[string]string{"ARIADNE_BASE_URL": url, keyName: key, "ARIADNE_MODEL": *model}
-	if keyName != "ARIADNE_API_KEY" {
-		vals["ARIADNE_API_KEY"] = ""
-	}
+	vals := configVals(url, key, *model)
 	if err := writeConfigEnv(configEnvFile, vals); err != nil {
 		fmt.Fprintf(out, "ariadne setup: %v\n", err)
 		return exitFail
@@ -155,7 +152,7 @@ func setupOllama(out io.Writer, ask func(string) string, url, model string, noCh
 		return exitUsage
 	}
 	if !noCheck {
-		models, err := ollamaModels(url)
+		models, err := ollamaModels(context.Background(), url)
 		if err != nil {
 			fmt.Fprintf(out, "ariadne setup: Ollama is not answering at %s: %v\n"+
 				"start it (open the Ollama app, or run `ollama serve`), then run setup again\n", ollamaRoot(url), err)
@@ -173,7 +170,7 @@ func setupOllama(out io.Writer, ask func(string) string, url, model string, noCh
 			}
 		}
 		fmt.Fprintf(out, "checking %s with %s ... ", url, model)
-		if err := checkKey(url, localNoKey, model); err != nil {
+		if err := checkKey(context.Background(), url, localNoKey, model); err != nil {
 			fmt.Fprintf(out, "failed\nariadne setup: %v\nnothing written; ariadne needs a model that can call tools\n", err)
 			return exitFail
 		}
@@ -184,15 +181,16 @@ func setupOllama(out io.Writer, ask func(string) string, url, model string, noCh
 	// it goes to every endpoint, so a key left from an earlier setup would be
 	// sent here, and would outrank the provider keys once -base-url points
 	// elsewhere.
-	vals := map[string]string{"ARIADNE_BASE_URL": url, "ARIADNE_MODEL": model, "ARIADNE_API_KEY": ""}
+	ollamaKey := ""
 	if !isLoopbackURL(url) {
 		// Ollama on another machine: apiKey gives only loopback a placeholder,
 		// so this one is stored. It is not a secret, and it goes to every
 		// endpoint, which is why the loopback case does not store it.
-		vals["ARIADNE_API_KEY"] = localNoKey
+		ollamaKey = localNoKey
 		fmt.Fprintf(out, "note: %s is not this machine, so ARIADNE_API_KEY=%s is stored for it;\n"+
 			"ARIADNE_API_KEY outranks every provider's key, so rerun setup before using another provider\n", url, localNoKey)
 	}
+	vals := configVals(url, ollamaKey, model)
 	if err := writeConfigEnv(configEnvFile, vals); err != nil {
 		fmt.Fprintf(out, "ariadne setup: %v\n", err)
 		return exitFail
@@ -210,6 +208,27 @@ func setupOllama(out io.Writer, ask func(string) string, url, model string, noCh
 	return exitOK
 }
 
+// configVals is what a configuration writes to config.env: the endpoint, the
+// model, and the key under the one name apiKey will send only to that
+// endpoint's host.
+//
+// ARIADNE_API_KEY goes to every endpoint and outranks every provider's key, so
+// it is written only when the key has no other name, and cleared otherwise —
+// a value left from an earlier setup would be sent to the new provider in
+// place of its own key. An empty value is how writeConfigEnv removes a line.
+// A loopback endpoint with no key stores none: apiKey supplies a placeholder.
+func configVals(url, key, model string) map[string]string {
+	vals := map[string]string{"ARIADNE_BASE_URL": url, "ARIADNE_MODEL": model, "ARIADNE_API_KEY": ""}
+	switch name := providerKeyName(url); {
+	case name != "":
+		vals[name] = key
+	case isLoopbackURL(url) && (key == "" || key == localNoKey):
+	default:
+		vals["ARIADNE_API_KEY"] = key
+	}
+	return vals
+}
+
 // ollamaRoot is the server behind an Ollama OpenAI-compatible URL: /v1 is
 // where conversations go, the native /api is where the pulled models are listed.
 func ollamaRoot(url string) string {
@@ -217,8 +236,8 @@ func ollamaRoot(url string) string {
 }
 
 // ollamaModels asks a running Ollama which models are pulled.
-func ollamaModels(url string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func ollamaModels(ctx context.Context, url string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ollamaRoot(url)+"/api/tags", nil)
 	if err != nil {
@@ -254,8 +273,8 @@ func ollamaModels(url string) ([]string, error) {
 // conversation offers tools, and a model that cannot take them (common among
 // local models) is refused with a 400 — better here, before anything is
 // written, than on the first real question.
-func checkKey(url, key, model string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+func checkKey(ctx context.Context, url, key, model string) error {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	client := llm.NewOpenAI(key, llm.WithBaseURL(url), llm.WithTimeout(60*time.Second), llm.WithMaxRetries(0))
 	_, err := client.Complete(ctx, llm.Request{

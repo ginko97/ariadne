@@ -35,7 +35,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(modelsResponse{
 		Models:     rows,
 		Source:     source,
-		Configured: s.Models.Fallback,
+		Configured: s.Models.Configured(),
 		Warning:    warning,
 	})
 }

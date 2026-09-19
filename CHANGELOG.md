@@ -5,6 +5,14 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Set up in the browser.** `ariadne ui` no longer exits when there is no
+  key: the page opens on a setup card (OpenRouter, OpenAI, Gemini, xAI,
+  Ollama with its model list, or any OpenAI-compatible endpoint). The key is
+  checked with one request and saved to `config.env`, like `ariadne setup`,
+  and takes effect without a restart. **⚙** changes provider, key or model
+  later; leaving the key empty keeps the saved one. The key is never sent
+  back to the page. A setting exported in your shell still wins, and the page
+  says so.
 - **Theme switch** in the browser: system, light or dark, remembered in that
   browser. The page now paints its own background, so a browser's dark
   default no longer shows through the light theme.

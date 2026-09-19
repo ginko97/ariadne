@@ -15,6 +15,12 @@ plainly, what protects you and what does not.
 - **Your keys.** ariadne's own provider keys are redacted from anything a tool
   returns, and a provider's key is only ever sent to that provider's host.
   `exec` runs with a short list of environment variables, not ariadne's.
+- **Setting up in the browser.** The key you type goes only to ariadne on
+  your machine: the page is served on `127.0.0.1` only, and the setup request
+  must carry the page's secret token and a local `Host` and `Origin`, so
+  another website cannot change your provider or key. The key is checked with
+  one request to the provider you chose, stored in `config.env`, and never
+  sent back to the page — not even masked, not even in an error message.
 - **Your network.** `web_fetch` refuses loopback, private, link-local and
   other non-public addresses, checked on the address actually connected to — so
   a redirect or a name that resolves to your router is refused too, even when

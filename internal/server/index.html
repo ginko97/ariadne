@@ -13,7 +13,14 @@
          font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif; }
   aside { border-right:1px solid var(--edge); display:flex; flex-direction:column; min-height:0; }
   aside header { padding:.7rem .9rem; border-bottom:1px solid var(--edge); display:flex; gap:.5rem; }
-  #theme { font:inherit; cursor:pointer; width:2.4rem; }
+  #theme, #settings { font:inherit; cursor:pointer; width:2.4rem; }
+  #setup { border-bottom:1px solid var(--edge); padding:.9rem; display:flex; flex-direction:column;
+           gap:.55rem; max-width:40rem; }
+  #setup h2 { margin:0; font-size:1.05em; }
+  #setup label { display:flex; flex-direction:column; gap:.2rem; font-size:.9em; }
+  #setup input, #setup select { font:inherit; padding:.35rem .5rem; }
+  #setup .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+  #setup button { font:inherit; cursor:pointer; padding:.35rem .9rem; }
   #runs { overflow-y:auto; flex:1; }
   #runs button { display:block; width:100%; text-align:left; background:none; border:0;
                  border-bottom:1px solid var(--edge); padding:.6rem .9rem; cursor:pointer;
@@ -57,6 +64,7 @@
 <aside>
   <header>
     <button class="primary" id="new" style="flex:1">New conversation</button>
+    <button type="button" id="settings" title="Provider, key and model">⚙</button>
     <button type="button" id="theme" title="Theme: follow the system, light, or dark"></button>
   </header>
   <div id="runs"></div>
@@ -76,6 +84,25 @@
     <button type="button" id="cancelFolder">Cancel</button>
     <span id="folderErr" class="is_error"></span>
   </div>
+  <form id="setup" hidden autocomplete="off">
+    <h2 id="setupTitle">Choose a model provider</h2>
+    <div id="setupStatus" class="dim"></div>
+    <label>Provider <select id="setupProvider"></select></label>
+    <label id="setupURLRow" hidden>Endpoint URL
+      <input id="setupURL" type="url" spellcheck="false" placeholder="https://…/v1"></label>
+    <label id="setupKeyRow">Key <span id="setupKeyName" class="dim"></span>
+      <input id="setupKey" type="password" spellcheck="false" autocomplete="off"></label>
+    <label>Model
+      <input id="setupModel" type="text" spellcheck="false" list="setupModels"></label>
+    <datalist id="setupModels"></datalist>
+    <div class="row">
+      <button type="submit" id="setupSave" class="primary">Check and save</button>
+      <button type="button" id="setupCancel">Cancel</button>
+      <span id="setupErr" class="is_error"></span>
+    </div>
+    <div class="dim">The key is checked with one small request to that provider, saved in
+      config.env on this computer, and never shown again, here or anywhere else.</div>
+  </form>
   <div id="warn" hidden></div>
   <div id="log"></div>
   <form id="composer">
@@ -301,7 +328,7 @@ function newConversation() {
   $('input').focus();
 }
 
-async function loadModels() {
+async function loadModels(reset) {
   try {
     const d = await (await api('/api/models')).json();
     // What is selected now outranks the default. The list is fetched without
@@ -311,7 +338,8 @@ async function loadModels() {
     // one. The next message would then carry a model the person did not choose,
     // switching the conversation underneath them. That is the same defect
     // f6854cf fixed on the server, arriving from the client instead.
-    const chosen = modelEl.value;
+    // After a provider change the old choice belongs to the old endpoint.
+    const chosen = reset ? '' : modelEl.value;
     modelEl.replaceChildren();
     for (const m of d.models) {
       const o = document.createElement('option');
@@ -585,6 +613,112 @@ $('browse').onclick = async () => {
   }
 };
 
+// ---------------------------------------------------------------- setup
+//
+// The provider, key and model, from the page. The key goes to this computer's
+// ariadne only, which checks it against the provider and stores it; the server
+// never sends it back, so the field is always empty when the card opens.
+let setup = null;
+
+function setupChoice() {
+  return (setup && setup.providers || []).find(p => p.id === $('setupProvider').value);
+}
+
+function showSetupFields() {
+  const p = setupChoice();
+  if (!p) return;
+  $('setupURLRow').hidden = !(p.id === 'other' || p.id === 'ollama');
+  if (p.id === 'ollama' && !$('setupURL').value) $('setupURL').value = p.base_url;
+  $('setupKeyRow').hidden = !p.needs_key;
+  $('setupKeyName').textContent = p.key_name ? '(' + p.key_name + ')' : '';
+  const same = setup.configured && setup.provider === p.id;
+  $('setupKey').placeholder = same && setup.key_set ? 'leave empty to keep the saved key' : '';
+  $('setupModel').placeholder = p.default_model || (p.id === 'ollama' ? 'first model Ollama lists' : '');
+  $('setupModels').replaceChildren();
+  if (p.id === 'ollama') loadOllamaModels();
+}
+
+async function loadOllamaModels() {
+  try {
+    const resp = await api('/api/setup/ollama', { method: 'POST', body: JSON.stringify({ base_url: $('setupURL').value }) });
+    const d = await resp.json();
+    if (!resp.ok) { $('setupErr').textContent = d.error; return; }
+    $('setupErr').textContent = '';
+    $('setupModels').replaceChildren(...d.models.map(m => Object.assign(document.createElement('option'), { value: m })));
+    if (!$('setupModel').value && d.models.length) $('setupModel').value = d.models[0];
+  } catch (e) { $('setupErr').textContent = e.message; }
+}
+
+function openSetup() {
+  if (!setup) return;
+  $('setupProvider').replaceChildren(...setup.providers.map(p =>
+    Object.assign(document.createElement('option'), { value: p.id, textContent: p.name })));
+  $('setupProvider').value = setup.configured ? setup.provider : 'openrouter';
+  $('setupURL').value = setup.configured && (setup.provider === 'other' || setup.provider === 'ollama') ? setup.base_url : '';
+  $('setupKey').value = '';
+  $('setupModel').value = setup.configured ? setup.model : '';
+  $('setupErr').textContent = '';
+  $('setupTitle').textContent = setup.configured ? 'Settings' : 'Choose a model provider';
+  $('setupStatus').textContent = setup.configured
+    ? `Using ${setup.base_url} with ${setup.model}` + (setup.key_set ? ' · key saved' : '')
+    : 'ariadne needs a model provider before it can answer.';
+  $('setupCancel').hidden = !setup.configured;
+  $('setup').hidden = false;
+  showSetupFields();
+  ($('setupKeyRow').hidden ? $('setupModel') : $('setupKey')).focus();
+}
+
+function closeSetup() {
+  $('setupKey').value = '';
+  $('setup').hidden = true;
+  $('input').focus();
+}
+
+function applySetupStatus(d) {
+  setup = d;
+  $('input').disabled = !d.configured;
+  $('send').disabled = !d.configured || busy;
+  for (const n of d.notes || []) warn(n);
+}
+
+async function loadSetup() {
+  try {
+    const resp = await api('/api/setup');
+    if (!resp.ok) { $('settings').hidden = true; return; } // this server cannot be set up from here
+    applySetupStatus(await resp.json());
+    if (!setup.configured) openSetup();
+  } catch (e) { warn('Could not read the setup: ' + e.message); }
+}
+
+$('settings').onclick = () => { if (!busy) (($('setup').hidden) ? openSetup() : closeSetup()); };
+$('setupCancel').onclick = closeSetup;
+$('setupProvider').onchange = () => { $('setupModel').value = ''; $('setupURL').value = ''; showSetupFields(); };
+$('setupURL').onchange = () => { if (setupChoice() && setupChoice().id === 'ollama') loadOllamaModels(); };
+$('setup').onsubmit = async e => {
+  e.preventDefault();
+  $('setupErr').textContent = '';
+  $('setupSave').disabled = true;
+  $('setupSave').textContent = 'Checking…';
+  try {
+    const resp = await api('/api/setup', { method: 'POST', body: JSON.stringify({
+      provider: $('setupProvider').value, base_url: $('setupURL').value,
+      key: $('setupKey').value, model: $('setupModel').value,
+    }) });
+    const d = await resp.json().catch(() => ({ error: 'refused' }));
+    if (!resp.ok) { $('setupErr').textContent = d.error; return; }
+    applySetupStatus(d);
+    closeSetup();
+    await loadModels(true);
+  } catch (err) {
+    $('setupErr').textContent = err.message;
+  } finally {
+    $('setupKey').value = '';
+    $('setupSave').disabled = false;
+    $('setupSave').textContent = 'Check and save';
+  }
+};
+
+loadSetup();
 loadModels();
 loadRuns();
 loadWorkspace();

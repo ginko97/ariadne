@@ -103,6 +103,7 @@ func main() {
 	// (an installed binary, written by `ariadne setup`). Each load leaves
 	// variables already set alone, so the order of calls is the precedence.
 	// Best effort: none of them has to exist.
+	snapshotShellEnv()
 	_ = dotenv.Load()
 	repo, _ := dotenv.Repo()
 	paths, err := config.Resolve(os.Getenv, repo, os.UserConfigDir)
@@ -163,7 +164,7 @@ usage:
   ariadne run    [flags] <task>
   ariadne resume [flags] <run-id>
   ariadne chat   [flags] [run-id]        talk; with no id, the first line typed is the task
-  ariadne ui     [flags]                 serve the chat endpoint on loopback
+  ariadne ui     [flags]                 talk in the browser; with no key, set one up there
   ariadne eval   [flags]                 score a task set, one row per model
   ariadne traces [flags] [text]          search the JSONL traces every run writes
   ariadne version                        print the version
@@ -948,11 +949,13 @@ func cmdUI(args []string) int {
 		return exitUsage
 	}
 
+	// No key is not fatal here, unlike the other commands: the page opens on
+	// its setup card, and conversations wait until a provider is chosen.
 	key, envName := apiKey(*baseURL)
 	if key == "" {
-		fmt.Fprintf(os.Stderr, "ariadne ui: no api key for %s — run `ariadne setup`, or set %s\n", *baseURL, envName)
-		return exitUsage
+		fmt.Fprintf(os.Stderr, "no api key for %s (%s): set one up in the page that opens\n", *baseURL, envName)
 	}
+	prov := &uiProvider{baseURL: *baseURL, key: key, model: *model}
 
 	store := &loop.Store{Dir: runsDir}
 
@@ -984,10 +987,13 @@ func cmdUI(args []string) int {
 			budgetVal = resolveBudget(*budget, state)
 		}
 
-		endpoint, endpointKey := conversationEndpoint(*baseURL, key, state)
+		// Read once per agent, so a setup saved mid-turn applies from the next
+		// turn rather than to half of this one.
+		curURL, curKey, curModel := prov.current()
+		endpoint, endpointKey := conversationEndpoint(curURL, curKey, state)
 
 		agent := newAgentFor(agentOpts{
-			Key: endpointKey, Model: *model, BaseURL: endpoint, RunID: runID,
+			Key: endpointKey, Model: curModel, BaseURL: endpoint, RunID: runID,
 			MaxSteps: *maxSteps, Budget: budgetVal, Exec: *allowExec, Trust: trusted,
 			ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 			Allow:     splitList(*allow),
@@ -1022,6 +1028,17 @@ func cmdUI(args []string) int {
 	srv.PickFolder = pickFolder
 	if !strings.Contains(*baseURL, "openrouter.ai") {
 		srv.Models.Unsupported = noModelList(*baseURL)
+	}
+	prov.models = srv.Models
+	srv.Setup = &server.Setup{
+		Status:    prov.status,
+		Configure: prov.configure,
+		OllamaModels: func(ctx context.Context, base string) ([]string, error) {
+			if base == "" {
+				base = ollamaURL
+			}
+			return ollamaModels(ctx, base)
+		},
 	}
 
 	// Host is a constant, not a flag: the loopback guarantee is structural

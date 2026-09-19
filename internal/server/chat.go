@@ -33,6 +33,10 @@ type chatRequest struct {
 // a failure can only be reported as an event. So: parse, claim, load, and only
 // then switch to text/event-stream.
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
+	if !s.configured() {
+		httpError(w, http.StatusServiceUnavailable, "no provider is set up yet: choose one in Settings")
+		return
+	}
 	var req chatRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpError(w, http.StatusBadRequest, "malformed request body")

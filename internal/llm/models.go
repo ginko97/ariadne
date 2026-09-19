@@ -171,6 +171,22 @@ func (m *ModelCache) Get(ctx context.Context) (rows []ModelRow, source string, w
 		"could not reach the model list, offering the configured model only: " + m.lastErr
 }
 
+// Reconfigure points the cache at a new configured model and endpoint, for a
+// server whose provider was changed while it runs. Under the lock, because Get
+// reads both fields there; setting them directly would race with it.
+func (m *ModelCache) Reconfigure(fallback, unsupported string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Fallback, m.Unsupported = fallback, unsupported
+}
+
+// Configured is the model the process is set up with.
+func (m *ModelCache) Configured() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.Fallback
+}
+
 // fallbackRows is the configured model alone: the one model known to work,
 // because every turn in this process already uses it.
 func (m *ModelCache) fallbackRows() []ModelRow {

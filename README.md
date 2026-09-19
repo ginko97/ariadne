@@ -22,9 +22,12 @@ go install github.com/ginko97/ariadne/cmd/ariadne@latest
 ## Start
 
 ```bash
-ariadne setup   # choose a provider (OpenRouter by default) and paste your key
-ariadne ui      # opens in your browser
+ariadne ui      # opens in your browser; with no key yet, it asks for one there
 ```
+
+Or choose the provider in the terminal first with `ariadne setup`. Either way the key is
+checked with one small request and saved in `config.env`; **⚙** in the page changes the
+provider, key or model later, and the page never shows the key again.
 
 With [Ollama](https://ollama.com) running, `ariadne setup -provider ollama` needs no key:
 it lists the models you have pulled and checks that the one you pick can call tools.
