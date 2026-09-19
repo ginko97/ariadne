@@ -77,7 +77,9 @@ func (Fetch) Description() string {
 	return "Fetch a document by path and return its text content: plain text " +
 		"files, and the text of Word, Excel and PowerPoint (.docx, .xlsx, .pptx), " +
 		"OpenDocument (.odt, .ods, .odp) and PDF files. Spreadsheets come back as " +
-		"tab-separated rows under a heading per sheet. Paths are relative to a " +
+		"tab-separated rows under a heading per sheet. Text over 256 KB comes in " +
+		"parts: the result says which part it is, and part=N asks for another. " +
+		"Paths are relative to a " +
 		"workspace directory this tool cannot read outside of; absolute paths are refused."
 }
 
@@ -85,7 +87,8 @@ func (Fetch) Schema() json.RawMessage {
 	return json.RawMessage(`{
   "type": "object",
   "properties": {
-    "path": {"type": "string", "description": "path of the document to fetch"}
+    "path": {"type": "string", "description": "path of the document to fetch"},
+    "part": {"type": "integer", "minimum": 1, "description": "which part of a long document to return; text over 256 KB comes in parts, and the result says how many there are. Default 1, the start"}
   },
   "required": ["path"],
   "additionalProperties": false
@@ -94,6 +97,7 @@ func (Fetch) Schema() json.RawMessage {
 
 type fetchArgs struct {
 	Path string `json:"path"`
+	Part int    `json:"part"`
 }
 
 func (f Fetch) Call(ctx context.Context, _ string, args json.RawMessage) (llm.ToolResult, error) {
@@ -107,6 +111,9 @@ func (f Fetch) Call(ctx context.Context, _ string, args json.RawMessage) (llm.To
 	}
 	if in.Path == "" {
 		return fail("fetch: path is required")
+	}
+	if in.Part == 0 {
+		in.Part = 1
 	}
 
 	root, err := f.open()
@@ -146,9 +153,13 @@ func (f Fetch) Call(ctx context.Context, _ string, args json.RawMessage) (llm.To
 			}
 			return fail("fetch: cannot read %q: %v", in.Path, err)
 		}
+		body, err := withPartNote(text, in.Part)
+		if err != nil {
+			return fail("fetch: %q: %v", in.Path, err)
+		}
 		// Untrusted, as any fetch: whoever wrote the document is not whoever
 		// asked the question.
-		return llm.ToolResult{Content: text, Untrusted: true}, nil
+		return llm.ToolResult{Content: body, Untrusted: true}, nil
 	}
 
 	// Format before size, and the order is the point. A PDF is a PDF at any
@@ -173,20 +184,25 @@ func (f Fetch) Call(ctx context.Context, _ string, args json.RawMessage) (llm.To
 
 	// Size is checked before reading the rest rather than after. ReadFile on a
 	// 20MB file has already spent the memory by the time anyone can object.
-	if fi, err := file.Stat(); err == nil && fi.Size() > maxFetchBytes {
+	// Up to maxDocumentText the file is read and served in parts; past it,
+	// not at all.
+	if fi, err := file.Stat(); err == nil && fi.Size() > maxDocumentText {
 		return fail("fetch: %q is %d bytes, over the %d-byte limit; "+
-			"a document this large cannot be read into the conversation",
-			in.Path, fi.Size(), maxFetchBytes)
+			"a document this large cannot be read into the conversation, even in parts",
+			in.Path, fi.Size(), maxDocumentText)
 	}
 
-	rest, err := io.ReadAll(io.LimitReader(file, maxFetchBytes-int64(n)))
+	rest, err := io.ReadAll(io.LimitReader(file, maxDocumentText-int64(n)))
 	if err != nil {
 		return fail("fetch: cannot read %q: %v", in.Path, err)
 	}
-	data := append(head[:n], rest...)
+	body, err := withPartNote(string(append(head[:n], rest...)), in.Part)
+	if err != nil {
+		return fail("fetch: %q: %v", in.Path, err)
+	}
 
 	// Untrusted: whoever wrote this document is not whoever asked the question.
-	return llm.ToolResult{Content: string(data), Untrusted: true}, nil
+	return llm.ToolResult{Content: body, Untrusted: true}, nil
 }
 
 // maxFetchBytes bounds one document.

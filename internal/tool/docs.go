@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Office documents are zip archives of XML, and a model cannot read either
@@ -26,12 +27,15 @@ import (
 // like any other fetch, and bounded like any other fetch. The bounds are three,
 // because a zip has three sizes: the file on disk (maxDocumentBytes), each part
 // once decompressed (maxPartBytes, which is what stops a zip bomb), and the text
-// that reaches the conversation (maxFetchBytes, as for a plain file). A document
-// whose text runs past the last is cut there and says so, rather than refused:
-// the first 256 KB of a long report is still worth reading, and the model is
-// told it has only part of it.
+// (maxDocumentText). What reaches the conversation is one maxFetchBytes part of
+// that text at a time, as for a plain file, with a note saying which part it is
+// and how to ask for the next — see textPart.
 
 const (
+	// maxDocumentText bounds the text fetch holds to serve a document in
+	// parts. Far past a long book (a 500-page one is about 1 MB of text), and
+	// short of what a machine notices.
+	maxDocumentText = 16 << 20
 	// maxDocumentBytes bounds the file itself. Compressed XML plus embedded
 	// images; a document past this is mostly pictures, which yield no text.
 	maxDocumentBytes = 50 << 20
@@ -96,13 +100,66 @@ func (t *textBuf) String() string {
 	return s
 }
 
+// textPart returns part n (1-based) of text, maxFetchBytes at most, and how
+// many parts there are. Parts are cut on rune boundaries and are the same on
+// every call, so part 2 always starts where part 1 ended.
+//
+// Parts exist because one message cannot hold a book: a single result is
+// resent with every later request, and one 20 MB read once made a checkpoint
+// no provider would accept. Before parts, the text past the first 256 KB was
+// simply not available; a model asked to summarise a book read the first 112
+// pages twice, got the same 112 pages both times, and summarised the rest
+// from the table of contents without saying so.
+func textPart(text string, n int) (string, int) {
+	var starts []int
+	for start := 0; start < len(text); {
+		starts = append(starts, start)
+		end := start + maxFetchBytes
+		if end >= len(text) {
+			break
+		}
+		for end > start && !utf8.RuneStart(text[end]) {
+			end--
+		}
+		start = end
+	}
+	if len(starts) == 0 {
+		return "", 1
+	}
+	if n < 1 || n > len(starts) {
+		return "", len(starts)
+	}
+	end := len(text)
+	if n < len(starts) {
+		end = starts[n]
+	}
+	return text[starts[n-1]:end], len(starts)
+}
+
+// withPartNote serves part n of text, saying which part it is when there is
+// more than one.
+func withPartNote(text string, n int) (string, error) {
+	body, parts := textPart(text, n)
+	switch {
+	case n < 1 || n > parts:
+		return "", fmt.Errorf("it has %d part(s) of text; ask for part 1 to %d", parts, parts)
+	case parts == 1:
+		return body, nil
+	case n < parts:
+		return fmt.Sprintf("%s\n\n[part %d of %d of this document's text. Fetch it again with part=%d to read on. "+
+			"Every part read stays in the conversation, so read only the parts you need.]", body, n, parts, n+1), nil
+	default:
+		return fmt.Sprintf("%s\n\n[part %d of %d: the end of this document's text.]", body, n, parts), nil
+	}
+}
+
 // readDocument returns the text of an Office or OpenDocument file.
 func readDocument(f io.ReaderAt, size int64, kind string) (string, error) {
 	zr, err := zip.NewReader(f, size)
 	if err != nil {
 		return "", fmt.Errorf("not a valid %s file: %v", kind, err)
 	}
-	out := &textBuf{max: maxFetchBytes}
+	out := &textBuf{max: maxDocumentText}
 	switch kind {
 	case ".docx":
 		err = docxText(zr, out)
@@ -976,7 +1033,7 @@ func readPDF(ctx context.Context, f io.Reader, size int64) (string, error) {
 		}
 		return "", fmt.Errorf("pdftotext: %v", err)
 	}
-	out := &textBuf{max: maxFetchBytes}
+	out := &textBuf{max: maxDocumentText}
 	buf := make([]byte, 32<<10)
 	for {
 		n, rerr := stdout.Read(buf)

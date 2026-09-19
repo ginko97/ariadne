@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -293,29 +294,36 @@ func TestWriteFileCreatesMissingRoot(t *testing.T) {
 // fetched once produced a 66MB checkpoint and a 400 on the next request, and
 // the run could never finish — compaction could not help, because the keep-floor
 // protects the most recent exchange, which was the oversized message.
-func TestFetchRefusesADocumentTooLargeForTheConversation(t *testing.T) {
+//
+// So no single result is ever larger than maxFetchBytes. A longer text file is
+// served in parts of that size; one past maxDocumentText is refused outright.
+func TestFetchNeverReturnsMoreThanOneMessageCanHold(t *testing.T) {
 	dir := t.TempDir()
-	big := make([]byte, maxFetchBytes+1)
-	for i := range big {
-		big[i] = 'a'
+	write := func(name string, n int) {
+		if err := os.WriteFile(filepath.Join(dir, name), bytes.Repeat([]byte("a"), n), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "huge.txt"), big, 0o600); err != nil {
-		t.Fatal(err)
+	write("long.txt", maxFetchBytes+1)
+	write("huge.txt", maxDocumentText+1)
+
+	res, err := NewFetch(dir).Call(context.Background(), "c1", json.RawMessage(`{"path":"long.txt"}`))
+	if err != nil || res.IsError {
+		t.Fatalf("a text file one byte over a part was refused: %v %q", err, res.Content)
+	}
+	body, note, _ := strings.Cut(res.Content, "\n\n[part 1 of 2")
+	if len(body) != maxFetchBytes || !strings.Contains(note, "part=2") {
+		t.Errorf("part 1 is %d bytes with note %q; want %d and a pointer to part 2", len(body), note, maxFetchBytes)
 	}
 
-	res, err := NewFetch(dir).Call(context.Background(), "c1",
-		json.RawMessage(`{"path":"huge.txt"}`))
+	res, err = NewFetch(dir).Call(context.Background(), "c1", json.RawMessage(`{"path":"huge.txt"}`))
 	if err != nil {
 		t.Fatalf("a refusal the model can act on is a result, not an error: %v", err)
 	}
-	if !res.IsError {
-		t.Fatal("an oversized document was read into the conversation")
+	if !res.IsError || !strings.Contains(res.Content, "limit") {
+		t.Fatalf("a file past the document limit was not refused with a reason: %q", clipped(res.Content))
 	}
-	if !strings.Contains(res.Content, "limit") {
-		t.Errorf("the refusal does not say why: %q", res.Content)
-	}
-	// The bytes must not come back at all — a truncated 20MB file is still far
-	// past what belongs in a prompt.
+	// The bytes must not come back at all.
 	if len(res.Content) > 500 {
 		t.Errorf("the refusal carried %d characters of the document", len(res.Content))
 	}

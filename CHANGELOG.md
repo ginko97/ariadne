@@ -5,6 +5,12 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Long documents in parts.** `fetch` used to return only the first 256 KB of
+  a document's text, so a book was read up to about page 112 and the rest was
+  unavailable — a model asked to summarise one summarised the rest from the
+  table of contents. Text now comes in 256 KB parts (`part=2`, …), each saying
+  which part it is and how to get the next, up to 16 MB of text. This applies
+  to plain text files too, which were refused outright past 256 KB.
 - **Set up in the browser.** `ariadne ui` no longer exits when there is no
   key: the page opens on a setup card (OpenRouter, OpenAI, Gemini, xAI,
   Ollama with its model list, or any OpenAI-compatible endpoint). The key is

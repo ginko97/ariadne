@@ -305,26 +305,51 @@ func TestFetchReadsOdp(t *testing.T) {
 	}
 }
 
-// Past the text cap a document is cut, not refused, and says so.
-func TestFetchTruncatesALongDocument(t *testing.T) {
+// fetchPart fetches one part of name and fails the test on an error result.
+func fetchPart(t *testing.T, dir, name string, part int) (string, bool) {
+	t.Helper()
+	args, _ := json.Marshal(map[string]any{"path": name, "part": part})
+	res, err := NewFetch(dir).Call(context.Background(), "c1", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.Content, res.IsError
+}
+
+// A document longer than one message is served in parts: each part within the
+// cap, cut on a rune boundary, saying which part it is and how to get the
+// next, and together they are the whole text — nothing skipped, nothing twice.
+func TestFetchServesALongDocumentInParts(t *testing.T) {
 	dir := t.TempDir()
 	para := `<w:p><w:r><w:t>` + strings.Repeat("é", 500) + `</w:t></w:r></w:p>`
 	doc := `<w:document ` + wordNS + `><w:body>` + strings.Repeat(para, 400) + `</w:body></w:document>`
 	writeZip(t, dir, "long.docx", [2]string{"word/document.xml", doc})
+	whole := strings.TrimRight(strings.Repeat(strings.Repeat("é", 500)+"\n", 400), "\n")
 
-	got := fetchDoc(t, dir, "long.docx")
-	body, note, ok := strings.Cut(got, "\n\n[truncated:")
-	if !ok {
-		t.Fatalf("a %d-byte text came back without a truncation note (%d bytes)", 400*1001, len(got))
+	one, errored := fetchPart(t, dir, "long.docx", 1)
+	body1, note1, ok := strings.Cut(one, "\n\n[part 1 of 2")
+	if errored || !ok || !strings.Contains(note1, "part=2") {
+		t.Fatalf("part 1 has no note pointing at part 2: error=%v, ends %q", errored, one[max(0, len(one)-160):])
 	}
-	if len(body) > maxFetchBytes {
-		t.Errorf("text is %d bytes, over the %d cap", len(body), maxFetchBytes)
+	two, errored := fetchPart(t, dir, "long.docx", 2)
+	body2, note2, ok := strings.Cut(two, "\n\n[part 2 of 2")
+	if errored || !ok || !strings.Contains(note2, "the end") {
+		t.Fatalf("part 2 is not marked as the end: error=%v, ends %q", errored, two[max(0, len(two)-160):])
 	}
-	if !strings.Contains(note, "first 256 KB") {
-		t.Errorf("note = %q", note)
+	for i, b := range []string{body1, body2} {
+		if len(b) > maxFetchBytes || !utf8.ValidString(b) {
+			t.Errorf("part %d: %d bytes, valid UTF-8 %v", i+1, len(b), utf8.ValidString(b))
+		}
 	}
-	if !strings.HasSuffix(strings.TrimRight(body, "\n"), "é") || !utf8.ValidString(body) {
-		t.Error("the cut split a UTF-8 sequence")
+	if body1+body2 != whole {
+		t.Errorf("the parts are not the whole text: %d + %d bytes, want %d", len(body1), len(body2), len(whole))
+	}
+	if msg, errored := fetchPart(t, dir, "long.docx", 3); !errored || !strings.Contains(msg, "2 part") {
+		t.Errorf("part 3 of 2: error=%v %q", errored, msg)
+	}
+	// Without part, fetch starts at the beginning, as it always did.
+	if first := fetchDoc(t, dir, "long.docx"); first != one {
+		t.Error("fetch with no part is not part 1")
 	}
 }
 
@@ -456,7 +481,7 @@ func TestFetchPDFFailures(t *testing.T) {
 	for mode, want := range map[string]string{
 		"empty": "no text layer",
 		"fail":  "Couldn't read xref table",
-		"huge":  "[truncated:",
+		"huge":  "[part 1 of 2",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			fakePdftotext(t, mode)
@@ -464,7 +489,7 @@ func TestFetchPDFFailures(t *testing.T) {
 			if !strings.Contains(res.Content, want) {
 				t.Errorf("got %q, want it to contain %q", clipped(res.Content), want)
 			}
-			if mode == "huge" && (res.IsError || len(res.Content) > maxFetchBytes+200) {
+			if mode == "huge" && (res.IsError || len(res.Content) > maxFetchBytes+300) {
 				t.Errorf("huge output: error=%v, %d bytes", res.IsError, len(res.Content))
 			}
 		})
@@ -541,8 +566,9 @@ func TestODFRepeatIsBounded(t *testing.T) {
 	}
 }
 
-// Once the text is full, pdftotext is stopped, not waited out: a 900-page PDF
-// would otherwise hold the turn for the whole conversion to keep 256 KB of it.
+// Once the text is full, pdftotext is stopped, not waited out: a PDF that
+// yields endless text would otherwise hold the turn until the timeout. The
+// cap is maxDocumentText, served as 64 parts of 256 KB.
 func TestFetchPDFStopsAtTheCap(t *testing.T) {
 	fakePdftotext(t, "endless")
 	saved := pdfTimeout
@@ -555,7 +581,7 @@ func TestFetchPDFStopsAtTheCap(t *testing.T) {
 	}
 	start := time.Now()
 	res := fetchResult(t, dir, "big.pdf")
-	if res.IsError || !strings.Contains(res.Content, "[truncated:") {
+	if _, n, _ := strings.Cut(res.Content, "[part 1 of "); res.IsError || len(n) < 2 || n[:2] < "64" {
 		t.Errorf("got error=%v %q", res.IsError, clipped(res.Content))
 	}
 	if d := time.Since(start); d > 15*time.Second {
