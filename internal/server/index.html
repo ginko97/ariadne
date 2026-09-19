@@ -75,6 +75,7 @@
   <form id="composer">
     <textarea id="input" rows="1" placeholder="Ask something…  (Enter to send, Shift+Enter for a newline)"></textarea>
     <button class="primary" id="send">Send</button>
+    <button type="button" id="stop" hidden title="Stop this turn. What already ran stays done.">Stop</button>
   </form>
 </main>
 
@@ -89,6 +90,12 @@ let runID = null, busy = false;
 // only exists before the first message.
 let newWorkspace = null, defaultWorkspace = '', convWorkspace = '';
 const pendingApprovals = new Map();
+// The request of the turn that is running, so Stop can abort it. Aborting is
+// the whole mechanism: the server runs the turn on the request's context, and
+// net/http cancels that when the connection closes (TestAbortingTheRequest-
+// StopsTheTurn). What already ran is checkpointed; a tool call waiting for
+// approval stays pending, to be asked again on Resume.
+let turn = null;
 
 const api = (path, opts = {}) => fetch(path, {
   ...opts,
@@ -295,6 +302,8 @@ async function loadModels() {
 function setBusy(val) {
   busy = val;
   $('send').disabled = val;
+  $('send').hidden = val;
+  $('stop').hidden = !val;
   $('new').disabled = val;
   $('folderBtn').disabled = val;
 }
@@ -340,10 +349,12 @@ async function send(text, opts = {}) {
     entry('prompt', text);
   }
 
-  let answer = null, resp;
+  let answer = null, resp, stopped = false;
+  turn = new AbortController();
   try {
     resp = await api('/api/chat', {
       method: 'POST',
+      signal: turn.signal,
       // No model on resume: the server finishes the batch on the model that
       // started it, and refuses another — so a dropdown changed in the
       // meantime would only turn Resume into an error.
@@ -355,7 +366,12 @@ async function send(text, opts = {}) {
       }),
     });
   } catch (e) {
-    entry('tool_result', 'Could not reach ariadne: ' + e.message, 'is_error');
+    if (e.name === 'AbortError') {
+      entry('notice', 'Stopped before the turn started.');
+    } else {
+      entry('tool_result', 'Could not reach ariadne: ' + e.message, 'is_error');
+    }
+    turn = null;
     setBusy(false);
     return;
   }
@@ -432,10 +448,24 @@ async function send(text, opts = {}) {
       }
     }
   } catch (e) {
-    entry('tool_result', 'Stream interrupted: ' + e.message, 'is_error');
+    if (e.name === 'AbortError') {
+      stopped = true;
+    } else {
+      entry('tool_result', 'Stream interrupted: ' + e.message, 'is_error');
+    }
   } finally {
+    turn = null;
     setBusy(false);
     loadRuns();
+  }
+  // Show what the conversation really holds now, not what had streamed: a
+  // partial answer was never saved, and a tool call stopped at its approval is
+  // pending — reopening renders the Resume card for it.
+  if (stopped && runID) {
+    await open(runID);
+    entry('notice', 'Stopped. Anything that already ran is kept.');
+  } else if (stopped) {
+    entry('notice', 'Stopped.');
   }
 }
 
@@ -451,6 +481,7 @@ $('input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('composer').requestSubmit(); }
 });
 $('new').onclick = newConversation;
+$('stop').onclick = () => { if (turn) turn.abort(); };
 
 // ---- folder for a new conversation ----
 

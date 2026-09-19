@@ -3,6 +3,18 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## Unreleased
+
+- **Stop** in the browser ends the running turn — mid-answer or while a tool call
+  waits for approval. What already ran is kept; a call that was waiting is asked
+  again on Resume.
+- **Resume turn** in the browser finishes a turn that was interrupted (a closed
+  tab, a crash, Stop). Before, such a conversation answered every new message
+  with an error.
+- A conversation is saved as soon as a turn starts, so stopping or crashing
+  during the first answer no longer loses the question.
+- A failing folder dialog now says so instead of looking like a cancel.
+
 ## v0.4.0 — 2026-09-19 — install it in five minutes
 
 - **`ariadne setup`**: pick a provider (OpenRouter by default), enter its key

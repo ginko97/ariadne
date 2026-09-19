@@ -263,10 +263,12 @@ func TestCheckpointCalledEveryStep(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Per call, not per step: after the assistant turn requests a tool (2
-	// messages, nothing executed), after the result lands (3), and after the
-	// final answer (4). The first of those is what makes resume safe.
-	want := []int{2, 3, 4}
+	// Per call, not per step: as the run starts, before any model call (1
+	// message, the question); after the assistant turn requests a tool (2,
+	// nothing executed); after the result lands (3); and after the final
+	// answer (4). The first keeps a question whose first answer never came;
+	// the second is what makes resume safe.
+	want := []int{1, 2, 3, 4}
 	if len(seen) != len(want) {
 		t.Fatalf("checkpoint called %d times with %v, want %d", len(seen), seen, len(want))
 	}
@@ -593,5 +595,46 @@ func TestRunRecordsWhoAnsweredWithoutChangingWhatItAsksFor(t *testing.T) {
 	}
 	if resp.Provider != "Darkbloom" {
 		t.Errorf("response event provider = %q, want Darkbloom", resp.Provider)
+	}
+}
+
+// hangingProvider is a model that has not answered yet: it waits for its
+// context to end.
+type hangingProvider struct{ called chan struct{} }
+
+func (p hangingProvider) Complete(ctx context.Context, _ llm.Request) (llm.Response, error) {
+	close(p.called)
+	<-ctx.Done()
+	return llm.Response{}, ctx.Err()
+}
+
+// A run stopped or killed during its very first model call still exists on
+// disk, with its question. Nothing else writes until the model answers, so
+// without the checkpoint at the start of Run a fresh conversation lived only
+// in memory until then: Stop in the browser left the page holding a run id
+// the server had never saved, and the next message got "no such conversation".
+func TestRunIsSavedBeforeTheFirstModelCall(t *testing.T) {
+	store := &Store{Dir: t.TempDir()}
+	p := hangingProvider{called: make(chan struct{})}
+	a := &Agent{Provider: p, Model: "test", MaxSteps: 5, Checkpoint: store.Save}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.Run(ctx, NewState("run_first_call", "a question worth keeping"))
+		done <- err
+	}()
+	<-p.called
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context.Canceled", err)
+	}
+
+	st, err := store.Load("run_first_call")
+	if err != nil {
+		t.Fatalf("the stopped run was never saved: %v", err)
+	}
+	if st.Task != "a question worth keeping" || len(st.Messages) != 1 {
+		t.Errorf("saved state = task %q, %d messages; want the question and nothing else", st.Task, len(st.Messages))
 	}
 }

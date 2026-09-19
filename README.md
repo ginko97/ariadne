@@ -45,8 +45,10 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
 - **It asks first.** Writing a file you gated, every MCP tool you have not trusted, and
   every program it wants to run: you see the exact arguments and say yes or no. No
   answer is not a yes.
-- **It survives a crash.** A conversation is checkpointed after every tool call. Kill the
-  process mid-task and it resumes without repeating what already ran.
+- **It survives a crash.** A conversation is saved when a turn starts and after every
+  tool call. Kill the process mid-task and it resumes without repeating what already ran.
+  In the browser, **Stop** ends a turn at any point, and **Resume turn** finishes one that
+  was interrupted — asking again for any approval it was waiting on.
 - **It keeps a record.** Every request, tool call, approval and cost is in a trace you
   can search: `ariadne traces`.
 - **It is honest about its limits.** [SECURITY.md](SECURITY.md) says what protects you

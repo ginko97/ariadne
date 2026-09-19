@@ -198,6 +198,16 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		Messages: len(s.Messages), Text: s.turnPrompt(),
 	})
 
+	// Before the first model call, not after it. Until the model answers
+	// nothing else writes, so a fresh run existed only in memory for however
+	// long the first call took: a crash there lost the question, and Stop in
+	// the browser left the page holding a run id the server had never saved —
+	// the next message got "no such conversation". The same write also keeps a
+	// follow-up message whose turn was stopped mid-answer.
+	if err := a.checkpoint(s); err != nil {
+		return "", a.endRun(s, err)
+	}
+
 	for {
 		// --- guards: top of every iteration, before any work ---
 		if err := ctx.Err(); err != nil {
