@@ -537,8 +537,78 @@ $('composer').onsubmit = e => {
   const t = $('input').value.trim();
   if (!t) return;
   $('input').value = '';
+  // "//" sends a message that starts with a slash; one "/" is a command for
+  // the page, answered here, never sent to the model.
+  if (t.startsWith('//')) { send(t.slice(1)); return; }
+  if (t.startsWith('/')) { command(t); return; }
   send(t);
 };
+
+// ---------------------------------------------------------------- commands
+//
+// Before these, "/help" went to the model as a message: it cost a model call
+// ($0.026 on one model) and the answer was the model's own account of the app,
+// right only as far as the model guessed it. These are the page's, and free.
+const HELP = `Commands (answered by this page, never sent to the model):
+  /help               this list
+  /new                start a new conversation
+  /settings           provider, key and model
+  /model [id]         show the model for the next message, or switch to id
+  /folder             the folder this conversation reads and writes
+  /theme [system|light|dark]
+  /stop               stop the turn that is running
+  //text              send a message that starts with a slash
+
+What ariadne can do, through its tools:
+  calc        exact arithmetic
+  fetch       read a file: text, Word, Excel, PowerPoint, LibreOffice, PDF;
+              long ones in 256 KB parts
+  list_files  see what is in the folder
+  write_file  create or replace a file
+  edit_file   change an exact piece of a file (asks first)
+  web_fetch   read a web page by URL (asks first)
+Tools that change something or reach out ask before each call, unless
+ariadne was started with -trust for them; the card shows exactly what will
+run. Files stay inside the conversation's folder.
+
+Keys: Enter sends, Shift+Enter is a new line.
+Every conversation is saved and can be reopened from the list; one that
+was interrupted shows Resume.`;
+
+function command(text) {
+  const [name, ...rest] = text.slice(1).split(/\s+/);
+  const arg = rest.join(' ');
+  const say = msg => entry('notice', msg);
+  switch (name.toLowerCase()) {
+    case 'help': case '?':
+      say(HELP); break;
+    case 'new':
+      newConversation(); break;
+    case 'settings':
+      openSetup(); break;
+    case 'model':
+      if (arg) { selectModel(arg); say('Next message uses ' + arg + '.'); }
+      else say('Next message uses ' + (modelEl.value || 'the configured model') + '. /model <id> switches.');
+      break;
+    case 'folder':
+      if (runID) say('This conversation reads and writes ' + (convWorkspace || 'the default folder') +
+        '. A conversation keeps its folder; /new, then /folder, to choose another.');
+      else $('folderBtn').onclick();
+      break;
+    case 'theme': {
+      const pick = { system: 'auto', auto: 'auto', light: 'light', dark: 'dark' }[arg.toLowerCase()];
+      if (arg && !pick) { say('/theme takes system, light or dark.'); break; }
+      if (pick) setTheme(pick); else $('theme').click();
+      say('Theme: ' + ({ auto: 'system', light: 'light', dark: 'dark' })[$('theme').dataset.theme] + '.');
+      break;
+    }
+    case 'stop':
+      if (turn) turn.abort(); else say('Nothing is running.');
+      break;
+    default:
+      say('Unknown command /' + name + '. /help lists them; //' + name + ' sends it as a message.');
+  }
+}
 $('input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('composer').requestSubmit(); }
 });

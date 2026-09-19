@@ -32,7 +32,8 @@ provider, key or model later, and the page never shows the key again.
 With [Ollama](https://ollama.com) running, `ariadne setup -provider ollama` needs no key:
 it lists the models you have pulled and checks that the one you pick can call tools.
 
-The page follows your system's light or dark mode; the button next to **New conversation**
+Type `/help` in the page for its commands (`/new`, `/model`, `/folder`, `/settings`, …);
+they are answered by the page and never sent to the model. The page follows your system's light or dark mode; the button next to **New conversation**
 switches between system, light and dark.
 
 `ariadne chat` does the same in the terminal. Your conversations, notes and settings

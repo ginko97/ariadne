@@ -5,6 +5,11 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Slash commands in the browser**: `/help`, `/new`, `/settings`,
+  `/model [id]`, `/folder`, `/theme [system|light|dark]`, `/stop`. They are
+  answered by the page, never sent to the model; `/help` used to be a paid
+  model call that described the app from guesswork. `//text` sends a message
+  that starts with a slash.
 - **`list_files`**: list a folder in the workspace (folders first, then
   files with size and date), so you no longer have to paste a file's exact
   name. Read-only and confined like `fetch`; the listing is marked as outside
