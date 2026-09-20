@@ -19,6 +19,32 @@ Or, with Go 1.25 or newer:
 go install github.com/ginko97/ariadne/cmd/ariadne@latest
 ```
 
+### On Windows, the first run warns you
+
+**The binaries are not code-signed.** Windows SmartScreen will say *"Windows
+protected your PC"* and *"unrecognized app"*. That is reputation, not
+detection: every unsigned executable with no download history gets it, and
+signing it properly costs money this project has not spent.
+
+Check what you downloaded instead of trusting the click. The release page
+publishes `checksums.txt`; compare it with what is on your disk:
+
+```powershell
+(Get-FileHash -Algorithm SHA256 .\ariadne_0.5.2_windows_amd64.zip).Hash.ToLower()
+```
+
+If that matches the line in `checksums.txt`, the file is the one the build
+produced. Then either click **More info → Run anyway**, or clear the download
+mark first, which stops the prompt for everything you unpack from it:
+
+```powershell
+Unblock-File .\ariadne_0.5.2_windows_amd64.zip
+```
+
+Double-clicking `ariadne.exe` opens the browser interface. Everything else
+needs a terminal: open PowerShell in the folder you unpacked into and run
+`ariadne setup`.
+
 ## Start
 
 ```bash

@@ -13,6 +13,13 @@ plainly, what protects you and what does not.
   a write replaces, the URL in full, the program and its arguments — with
   the exact arguments still there to open. No answer is not a yes, and with
   no terminal to ask, a gated call is denied.
+- **What is not protected: the download itself.** The release binaries are
+  **not code-signed**, so Windows SmartScreen warns about them and macOS
+  Gatekeeper may refuse them. The only integrity check this project offers is
+  `checksums.txt` on the release page — verify the archive against it before
+  running anything. A signed binary would prove who built it; a checksum only
+  proves the file did not change in transit from a page that could itself be
+  wrong. Judge the source first.
 - **Deleting is deleting.** Removing a conversation in the browser removes
   its folder: the checkpoint and the trace, which is every byte that
   conversation saw. Nothing is kept for later and nothing comes back.

@@ -5,6 +5,19 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Double-clicking `ariadne.exe` on Windows opens the browser interface.**
+  It used to print the list of commands into a console window that Windows
+  destroyed in the same instant, so a fresh download appeared to do nothing at
+  all. Only a launch with no arguments at all does this; running it from a
+  terminal still prints the commands, and nothing changes on macOS or Linux.
+- **The first line of `--help` says what ariadne is** — a personal AI
+  assistant that asks before it acts — instead of describing a run as a job,
+  which is positioning the project moved away from months ago.
+- **README says what Windows will do on first run**: SmartScreen warns
+  because the binaries are unsigned, with the `Get-FileHash` and
+  `Unblock-File` commands to check and clear it. `SECURITY.md` says plainly
+  that a checksum is not a signature.
+
 - **Every answer says which model wrote it.** A small line under the
   answer, in new conversations and reopened ones. It is the model that
   actually served the turn, which is not always the one that was asked

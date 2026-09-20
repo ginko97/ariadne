@@ -119,6 +119,15 @@ func main() {
 	mcp.ClientVersion = versionString()
 
 	if len(os.Args) < 2 {
+		if startUIInstead(launchedFromExplorer()) {
+			// Double-clicked. Usage printed here goes into a console that
+			// Windows destroys as this process returns, so the whole download
+			// ends in a window that blinks and vanishes. Start the thing the
+			// README tells people to start instead.
+			fmt.Fprintln(os.Stderr, "ariadne: no command given, so starting the browser interface.")
+			fmt.Fprintln(os.Stderr, "Close this window to stop it. For the commands, run: ariadne --help")
+			os.Exit(cmdUI(nil))
+		}
 		usage()
 		os.Exit(exitUsage)
 	}
@@ -157,7 +166,7 @@ func usage() { fmt.Fprint(os.Stderr, usageText) }
 // TestUsageNamesEveryFlag. It is hand-written, and it drifted: -mcp-config
 // shipped in 0ec4602 with no line here, the same way the README once omitted
 // chat and ui entirely.
-const usageText = `ariadne — an agent runtime where a run is a job
+const usageText = `ariadne — a personal AI assistant that asks before it acts
 
 usage:
   ariadne setup  [flags]                 choose a provider and store its key (start here)
