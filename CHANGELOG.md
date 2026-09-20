@@ -10,6 +10,9 @@ carry the longer story for each release.
   follows light and dark, which a `.ico` cannot, and declaring it also
   stops the browser asking for `/favicon.ico` on every load and being
   told 404.
+
+## v0.5.3 — 2026-09-20 — the download works on Windows
+
 - **Double-clicking `ariadne.exe` on Windows opens the browser interface.**
   It used to print the list of commands into a console window that Windows
   destroyed in the same instant, so a fresh download appeared to do nothing at
@@ -28,6 +31,18 @@ carry the longer story for each release.
   actually served the turn, which is not always the one that was asked
   for, and not always the one the picker shows — the picker is what the
   *next* message will use, so after a switch they differ on purpose.
+
+## v0.5.2 — 2026-09-20 — the tag that builds the archives
+
+- **No user-visible change.** `TestSandboxWindowsDriveEscape` asserted a
+  Windows rule on every platform, so `make check` had failed on Linux and
+  macOS since CI existed — and the release job runs that gate before
+  publishing anything, so no tag since v0.4.0 had produced a download.
+  This is the first release with binaries attached: six archives and
+  `checksums.txt`.
+
+## v0.5.1 — 2026-09-20 — the gate says what it is gating
+
 - **Delete a conversation.** The × on a conversation in the sidebar removes
   it for good — the checkpoint *and* its trace, so nothing about it is left
   in `ariadne traces` either. It asks first and cannot be undone. A
@@ -47,6 +62,9 @@ carry the longer story for each release.
   click away in the browser. A call that is about to be refused — text that
   is not in the file, or occurs twice — says so on the card instead of
   spending your yes.
+
+## v0.5.0 — 2026-09-20 — useful every day
+
 - **`edit_file` stopped failing on text the model had just read.** Every tool
   result was fenced with one newline more than the file holds, so a model that
   copied a line back into `old_text` was told "old_text was not found" — three

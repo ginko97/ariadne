@@ -1,6 +1,10 @@
 # Pushing a v* tag builds binaries for Windows, macOS and Linux and attaches
-# them, with checksums, to a GitHub release. Release notes are written on
-# GitHub; the tag message says what shipped and is visible in `git show <tag>`.
+# them, with checksums, to a GitHub release.
+#
+# The release notes are the tag's own message. They were meant to be written on
+# GitHub afterwards and never were, so every release page through v0.5.3 was
+# blank while the notes sat in the annotated tag where only `git show` finds
+# them. One source, written when the tag is cut.
 name: release
 
 on:
@@ -22,10 +26,15 @@ jobs:
           go-version-file: go.mod
       - name: tests before publishing anything
         run: make check
+      # Written outside the checkout: GoReleaser refuses to publish from a
+      # dirty tree, and an untracked file in the repo counts as dirty.
+      - name: release notes from the tag message
+        run: git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

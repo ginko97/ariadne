@@ -27,7 +27,9 @@ checksum:
   name_template: checksums.txt
 
 changelog:
-  # Commit subjects are not release notes; those are written by hand.
+  # Commit subjects are not release notes. The workflow passes the annotated
+  # tag's message with --release-notes, which is where this project writes
+  # them.
   disable: true
 
 release:

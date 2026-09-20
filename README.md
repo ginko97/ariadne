@@ -30,7 +30,7 @@ Check what you downloaded instead of trusting the click. The release page
 publishes `checksums.txt`; compare it with what is on your disk:
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\ariadne_0.5.2_windows_amd64.zip).Hash.ToLower()
+(Get-FileHash -Algorithm SHA256 .\ariadne_*_windows_amd64.zip).Hash.ToLower()
 ```
 
 If that matches the line in `checksums.txt`, the file is the one the build
@@ -38,7 +38,7 @@ produced. Then either click **More info → Run anyway**, or clear the download
 mark first, which stops the prompt for everything you unpack from it:
 
 ```powershell
-Unblock-File .\ariadne_0.5.2_windows_amd64.zip
+Unblock-File .\ariadne_*_windows_amd64.zip
 ```
 
 Double-clicking `ariadne.exe` opens the browser interface. Everything else
