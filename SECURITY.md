@@ -5,10 +5,14 @@ plainly, what protects you and what does not.
 
 ## What protects you
 
-- **Approval.** Tools that change things or reach out ask first: `write_file`
-  when you pass `-approve write_file`, every MCP tool, `web_fetch` and
-  `edit_file` unless you list them in `-trust`, and `exec` always. The terminal shows a `[y/N]` prompt; the browser shows a card
-  with the exact arguments. No answer is not a yes.
+- **Approval.** Tools that change things or reach out ask first: `write_file`,
+  `edit_file` and `web_fetch` unless you list them in `-trust`, every MCP
+  tool unless you trust it, and `exec` always — nothing can trust `exec`
+  away. The terminal shows a `[y/N]` prompt; the browser shows a card. Both
+  say what the call would do — the file and the lines an edit changes, what
+  a write replaces, the URL in full, the program and its arguments — with
+  the exact arguments still there to open. No answer is not a yes, and with
+  no terminal to ask, a gated call is denied.
 - **The workspace.** `fetch`, `list_files`, `write_file` and `edit_file` cannot reach outside the
   workspace folder; the operating system enforces it (`os.Root`), including
   against Windows directory junctions.

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -508,7 +509,7 @@ func TestApproveFromReader(t *testing.T) {
 	for _, tc := range cases {
 		r := bufio.NewReader(strings.NewReader(tc.input))
 		var out strings.Builder
-		got, err := approveFromReader(r, &out, call)
+		got, err := approveFromReader(r, &out, call, t.TempDir())
 		if err != nil {
 			t.Errorf("approveFromReader(%q) unexpected error: %v", tc.input, err)
 		}
@@ -528,7 +529,7 @@ func TestApproveSharedReaderPreservesInput(t *testing.T) {
 	}
 
 	var out strings.Builder
-	ok, err := approveFromReader(r, &out, llm.ToolCall{Name: "calc"})
+	ok, err := approveFromReader(r, &out, llm.ToolCall{Name: "calc"}, t.TempDir())
 	if err != nil || !ok {
 		t.Fatalf("approval: %v, %v", ok, err)
 	}
@@ -547,7 +548,7 @@ func TestApproveOnTerminalFailsClosedOnNonTerminal(t *testing.T) {
 	defer f.Close()
 
 	r := bufio.NewReader(f)
-	fn := approveOnTerminalReader(f, r)
+	fn := approveOnTerminalReader(f, r, t.TempDir())
 	approved, err := fn(context.Background(), llm.ToolCall{Name: "write_file"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -714,7 +715,7 @@ func TestGateMCPRefusesContradictionsAndBuiltins(t *testing.T) {
 		name           string
 		approve, trust []string
 	}{
-		{"a built-in cannot be trusted", nil, []string{"write_file"}},
+		{"an ungated built-in cannot be trusted", nil, []string{"fetch"}},
 		{"an unknown name cannot be trusted", nil, []string{"fs__wirte_file"}},
 		{"both approved and trusted", []string{"fs__write_file"}, []string{"fs__write_file"}},
 	} {
@@ -960,5 +961,63 @@ func TestEvalApprovesOnlyListedTools(t *testing.T) {
 	}
 	if got, _ := approveListed(nil)(context.Background(), llm.ToolCall{Name: "edit_file"}); got {
 		t.Error("no list approved edit_file")
+	}
+}
+
+// The terminal card says what the call does. Before this it printed the raw
+// arguments, so approving an edit meant reading three escaped strings on one
+// line and hoping.
+func TestTerminalApprovalShowsThePreviewNotTheJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("Owner: Ginko\nStatus: draft\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal(map[string]string{
+		"path": "notes.txt", "old_text": "Status: draft", "new_text": "Status: final",
+	})
+
+	var out strings.Builder
+	r := bufio.NewReader(strings.NewReader("n\n"))
+	if _, err := approveFromReader(r, &out, llm.ToolCall{Name: "edit_file", Args: args}, dir); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{"approve edit_file?", "edits notes.txt at line 2", "- Status: draft", "+ Status: final", "[y/N]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt is missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "old_text") {
+		t.Errorf("the raw arguments are still printed:\n%s", got)
+	}
+}
+
+// Unattended, a gated built-in is denied and the message names the flag that
+// would allow it. A script that used to write files should be told why it
+// stopped, not just that it did.
+func TestNonTerminalDenialNamesTheTrustFlag(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "not_a_tty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	stderr := os.Stderr
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = pw
+	fn := approveOnTerminalReader(f, bufio.NewReader(f), t.TempDir())
+	approved, err := fn(context.Background(), llm.ToolCall{Name: "write_file"})
+	pw.Close()
+	os.Stderr = stderr
+	if err != nil || approved {
+		t.Fatalf("approved = %v, err = %v; want a denial", approved, err)
+	}
+
+	said, _ := io.ReadAll(pr)
+	if !strings.Contains(string(said), "-trust write_file") {
+		t.Errorf("denial does not name the flag: %q", said)
 	}
 }

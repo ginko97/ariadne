@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -73,7 +75,7 @@ func TestApproverBlocksUntilASeparateRequestAnswers(t *testing.T) {
 	rec := newSyncRecorder()
 	out := &sseWriter{w: rec, f: rec}
 
-	approve := s.approver("run_a", out)
+	approve := s.approver("run_a", out, t.TempDir())
 	done := make(chan bool, 1)
 	go func() {
 		ok, _ := approve(context.Background(), llm.ToolCall{ID: "call_1", Name: "write_file"})
@@ -106,7 +108,7 @@ func TestApproverHonoursADenial(t *testing.T) {
 
 	done := make(chan bool, 1)
 	go func() {
-		ok, _ := s.approver("run_d", out)(context.Background(), llm.ToolCall{ID: "c", Name: "write_file"})
+		ok, _ := s.approver("run_d", out, t.TempDir())(context.Background(), llm.ToolCall{ID: "c", Name: "write_file"})
 		done <- ok
 	}()
 	waitFor(t, func() bool { return strings.Contains(rec.body(), "approval_required") })
@@ -133,7 +135,7 @@ func TestApproverDeniesWhenTheCallerDisappears(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan bool, 1)
 	go func() {
-		ok, _ := s.approver("run_gone", out)(ctx, llm.ToolCall{ID: "c", Name: "write_file"})
+		ok, _ := s.approver("run_gone", out, t.TempDir())(ctx, llm.ToolCall{ID: "c", Name: "write_file"})
 		done <- ok
 	}()
 	waitFor(t, func() bool { return strings.Contains(rec.body(), "approval_required") })
@@ -169,7 +171,7 @@ func TestApproveDoesNotCrossConversations(t *testing.T) {
 
 	done := make(chan bool, 1)
 	go func() {
-		ok, _ := s.approver("run_mine", out)(context.Background(), llm.ToolCall{ID: "shared", Name: "write_file"})
+		ok, _ := s.approver("run_mine", out, t.TempDir())(context.Background(), llm.ToolCall{ID: "shared", Name: "write_file"})
 		done <- ok
 	}()
 	waitFor(t, func() bool { return strings.Contains(rec.body(), "approval_required") })
@@ -412,11 +414,50 @@ func TestApproverReturnsContextErrorOnCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	ok, err := s.approver("run_cancel", out)(ctx, llm.ToolCall{ID: "c1", Name: "write_file"})
+	ok, err := s.approver("run_cancel", out, t.TempDir())(ctx, llm.ToolCall{ID: "c1", Name: "write_file"})
 	if ok {
 		t.Error("cancelled call was approved")
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("got error %v, want context.Canceled", err)
+	}
+}
+
+// The card the page draws has to say what the call does. The event used to
+// carry the arguments alone, so approving an edit meant reading escaped JSON.
+func TestApprovalEventCarriesAPreview(t *testing.T) {
+	s, ts := newTestServer(t)
+	rec := newSyncRecorder()
+	out := &sseWriter{w: rec, f: rec}
+
+	ws := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ws, "notes.txt"), []byte("Owner: Ginko\nStatus: draft\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal(map[string]string{
+		"path": "notes.txt", "old_text": "Status: draft", "new_text": "Status: final",
+	})
+
+	go func() {
+		s.approver("run_p", out, ws)(context.Background(), llm.ToolCall{ID: "c1", Name: "edit_file", Args: args})
+	}()
+	waitFor(t, func() bool { return strings.Contains(rec.body(), "approval_required") })
+	approveVia(t, s, ts, "run_p", "c1", false)
+
+	body := rec.body()
+	for _, want := range []string{
+		`"preview"`,
+		`"text":"edits notes.txt at line 2"`,
+		`"kind":"removed","text":"Status: draft"`,
+		`"kind":"added","text":"Status: final"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the approval event is missing %s:\n%s", want, body)
+		}
+	}
+	// The arguments stay, because the preview is a summary and the page keeps
+	// the exact call one click away.
+	if !strings.Contains(body, `"args"`) {
+		t.Errorf("the arguments were dropped from the event:\n%s", body)
 	}
 }

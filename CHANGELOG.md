@@ -5,6 +5,21 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **`write_file` asks before it writes.** It was the one tool that changed
+  your files without a card: `edit_file`, which touches only the text it
+  names, asked, while a whole-file overwrite did not. Both now ask.
+  `-trust write_file` gives back the old behaviour — and scripts that run
+  unattended need it, because a gated call with no terminal to ask is
+  denied, and the denial now names the flag.
+- **Approval cards say what the call would do.** Instead of
+  `{"new_text":"...","path":"...","old_text":"..."}`, an edit shows the file
+  and the line it lands on with the old text and the new, a write says
+  whether it creates a file or what it replaces and shows the first lines,
+  `web_fetch` shows the whole URL, `exec` one argument per line, and a note
+  to remember is shown as a sentence. The exact arguments are still one
+  click away in the browser. A call that is about to be refused — text that
+  is not in the file, or occurs twice — says so on the card instead of
+  spending your yes.
 - **`edit_file` stopped failing on text the model had just read.** Every tool
   result was fenced with one newline more than the file holds, so a model that
   copied a line back into `old_text` was told "old_text was not found" — three

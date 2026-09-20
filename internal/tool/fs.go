@@ -240,6 +240,10 @@ func isBinary(data []byte) bool {
 
 // ---------------------------------------------------------------- write_file
 
+// WriteFileName is the tool's name, exported because the wiring gates it by
+// default and -trust names it.
+const WriteFileName = "write_file"
+
 // WriteFile creates or replaces a file.
 //
 // The first tool here with a side effect, which makes it the first tool where
@@ -252,7 +256,7 @@ func NewWriteFile(root string) WriteFile { return WriteFile{sandbox{root}} }
 
 var _ Tool = WriteFile{}
 
-func (WriteFile) Name() string { return "write_file" }
+func (WriteFile) Name() string { return WriteFileName }
 
 func (WriteFile) Description() string {
 	return "Write text to a file, creating it or replacing its contents. " +

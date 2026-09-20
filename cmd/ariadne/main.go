@@ -186,9 +186,9 @@ flags:
   -mcp-config     JSON file listing MCP servers to start (env ARIADNE_MCP_CONFIG)
                   each server's tools are named <server>__<tool>, and every one
                   asks for approval unless named in -trust
-  -trust          MCP tools, web_fetch or edit_file that run without approval,
-                  e.g. fs__read_text_file (web_fetch and edit_file ask every time
-                  unless named here)
+  -trust          MCP tools, or a gated built-in, that run without approval,
+                  e.g. fs__read_text_file. web_fetch, edit_file and write_file
+                  ask every time unless named here; exec always asks
 
 chat flags: same as run/resume. While chatting, ` + "`/help`" + ` lists the commands.
 
@@ -270,7 +270,7 @@ func cmdRun(args []string) int {
 	workspace := fs.String("workspace", defaultWorkspace, "directory the file tools are confined to")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "comma-separated tools that need a yes on the terminal before each call")
-	trust := fs.String("trust", "", "MCP tools, web_fetch or edit_file that run without approval; every other one asks first")
+	trust := fs.String("trust", "", "MCP tools, or a gated built-in (web_fetch, edit_file, write_file), that run without approval; every other one asks first")
 	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
@@ -382,7 +382,7 @@ func cmdResume(args []string) int {
 	workspace := fs.String("workspace", "", "directory the file tools are confined to (defaults to the checkpoint's)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "add tools needing approval; a gate in the checkpoint cannot be dropped here")
-	trust := fs.String("trust", "", "MCP tools, web_fetch or edit_file that run without approval; every other one asks first")
+	trust := fs.String("trust", "", "MCP tools, or a gated built-in (web_fetch, edit_file, write_file), that run without approval; every other one asks first")
 	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
 	budget := fs.Int("context-budget", 0, "compact the conversation when the prompt exceeds this many tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
@@ -511,7 +511,7 @@ func cmdChat(args []string) int {
 	workspace := fs.String("workspace", "", "directory the file tools are confined to (fresh: default workspace; resumed: checkpoint's unless overridden)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
 	approve := fs.String("approve", "", "tools needing a yes on the terminal before each call (resume can only add)")
-	trust := fs.String("trust", "", "MCP tools, web_fetch or edit_file that run without approval; every other one asks first")
+	trust := fs.String("trust", "", "MCP tools, or a gated built-in (web_fetch, edit_file, write_file), that run without approval; every other one asks first")
 	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
 	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
@@ -659,7 +659,7 @@ func cmdChat(args []string) int {
 		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem, Exec: *allowExec, Trust: trusted,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: gated,
-		ApproveFn: approveOnTerminalReader(os.Stdin, stdinReader),
+		ApproveFn: approveOnTerminalReader(os.Stdin, stdinReader, workspaceDir),
 		Workspace: workspaceDir,
 		MCPTools:  mcpTools,
 		Store:     store, Trace: tw,
@@ -906,7 +906,7 @@ func cmdUI(args []string) int {
 	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
 	allow := fs.String("allow", "", "comma-separated tools a conversation may call (default: all)")
 	approve := fs.String("approve", "", "tools needing approval in the browser before each call")
-	trust := fs.String("trust", "", "MCP tools, web_fetch or edit_file that run without approval; every other one asks first")
+	trust := fs.String("trust", "", "MCP tools, or a gated built-in (web_fetch, edit_file, write_file), that run without approval; every other one asks first")
 	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
 	workspace := fs.String("workspace", "", "default folder for new conversations; the page can choose another, and an existing conversation always keeps its own")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
@@ -1296,7 +1296,7 @@ func newAgentFor(o agentOpts) *loop.Agent {
 
 	approveFn := o.ApproveFn
 	if approveFn == nil {
-		approveFn = approveOnTerminal(os.Stdin)
+		approveFn = approveOnTerminal(os.Stdin, o.Workspace)
 	}
 
 	return &loop.Agent{
@@ -1389,14 +1389,17 @@ func redactSecrets(getenv func(string) string) func(string) string {
 	return r.Replace
 }
 
-// defaultGated are the built-in tools that ask before every call unless -trust
-// names them. Built-ins added after the rule that a new tool which changes
-// state or reaches the network is gated by default; write_file predates it and
-// asks only under -approve.
+// defaultGated is tool.DefaultGated, aliased here because this package reads it
+// in four places. The list lives in internal/tool so the approval preview and
+// the eval task sets read the same one; see the note there for why each tool is
+// on it.
 //
-// web_fetch is the outbound channel: the model chooses the URL, so one GET can
-// carry out anything it has read. edit_file changes a file in place.
-var defaultGated = []string{tool.WebFetchName, tool.EditFileName}
+// write_file joined it in v0.5.1. It predated the rule that a tool which changes
+// state is gated by default, and the exemption survived until a turn whose whole
+// point was watching ariadne ask: run_20260920T071031_84a3d1 rewrote a file
+// through write_file with no card shown, while edit_file — which touches only the
+// text it names — asked.
+var defaultGated = tool.DefaultGated
 
 // gateMCP returns the tools that need approval: those named in -approve, and
 // every MCP tool not named in -trust.
@@ -1427,7 +1430,7 @@ func gateMCP(approve, trust []string, remote []tool.Tool) ([]string, error) {
 		}
 		if !isRemote[n] {
 			if !strings.Contains(n, mcp.Separator) {
-				return nil, fmt.Errorf("-trust %q: only MCP tools, web_fetch and edit_file can be trusted; other built-in tools are gated with -approve", n)
+				return nil, fmt.Errorf("-trust %q: only MCP tools and the gated built-ins (%s) can be trusted; other built-in tools are gated with -approve", n, strings.Join(defaultGated, ", "))
 			}
 			names := make([]string, 0, len(remote))
 			for _, r := range remote {
@@ -1809,22 +1812,51 @@ func closeTrace(tw *trace.Writer) {
 // Known limit: a Ctrl-C while the prompt is waiting is not seen until the read
 // returns, because os.Stdin has no deadline. The context is accepted so the
 // interface does not have to change when that is fixed.
-func approveOnTerminal(in *os.File) func(context.Context, llm.ToolCall) (bool, error) {
-	return approveOnTerminalReader(in, bufio.NewReader(in))
+func approveOnTerminal(in *os.File, workspace string) func(context.Context, llm.ToolCall) (bool, error) {
+	return approveOnTerminalReader(in, bufio.NewReader(in), workspace)
 }
 
-func approveOnTerminalReader(in *os.File, reader *bufio.Reader) func(context.Context, llm.ToolCall) (bool, error) {
+func approveOnTerminalReader(in *os.File, reader *bufio.Reader, workspace string) func(context.Context, llm.ToolCall) (bool, error) {
 	return func(_ context.Context, c llm.ToolCall) (bool, error) {
 		if !isTerminal(in) {
-			fmt.Fprintf(os.Stderr, "denied %s: approval required and no terminal to ask\n", c.Name)
+			// A gated built-in names the flag that would let it run
+			// unattended, because "denied" with no way forward reads as a bug
+			// in a script that used to work.
+			hint := ""
+			if tool.Gated(c.Name) {
+				hint = fmt.Sprintf(" (-trust %s to run it without asking)", c.Name)
+			}
+			fmt.Fprintf(os.Stderr, "denied %s: approval required and no terminal to ask%s\n", c.Name, hint)
 			return false, nil
 		}
-		return approveFromReader(reader, os.Stderr, c)
+		return approveFromReader(reader, os.Stderr, c, workspace)
 	}
 }
 
-func approveFromReader(reader *bufio.Reader, out io.Writer, c llm.ToolCall) (bool, error) {
-	fmt.Fprintf(out, "\napprove %s %s ? [y/N] ", c.Name, c.Args)
+// previewMark is how a preview line's kind reads in a terminal. The browser
+// styles the same kinds with colour instead.
+func previewMark(kind string) string {
+	switch kind {
+	case "added":
+		return "+ "
+	case "removed":
+		return "- "
+	case "warn":
+		return "! "
+	}
+	return "  "
+}
+
+func approveFromReader(reader *bufio.Reader, out io.Writer, c llm.ToolCall, workspace string) (bool, error) {
+	// What the call does, not the JSON it arrived as: the arguments of an edit
+	// are three escaped strings on one line, and a gate nobody reads is not a
+	// gate. tool.Preview reads the file to say what would change; it is shown
+	// here and discarded, never sent to the model.
+	fmt.Fprintf(out, "\napprove %s?\n", c.Name)
+	for _, l := range tool.Preview(c.Name, c.Args, workspace) {
+		fmt.Fprintf(out, "  %s%s\n", previewMark(l.Kind), l.Text)
+	}
+	fmt.Fprint(out, "[y/N] ")
 	line, err := reader.ReadString('\n')
 	if err != nil {
 		// EOF on a terminal means the operator closed the input rather than

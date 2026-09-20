@@ -122,11 +122,51 @@ func (e EditFile) Call(_ context.Context, _ string, args json.RawMessage) (llm.T
 	}
 	content := string(data)
 
+	m := resolveEdit(content, in.OldText, in.NewText)
+	oldText, newText, n := m.Old, m.New, m.Count
+	switch {
+	case n == 0:
+		return fail("edit_file: old_text was not found in %s; it must match exactly, including whitespace and indentation", in.Path)
+	case n > 1 && !in.ReplaceAll:
+		return fail("edit_file: old_text occurs %d times in %s; include more surrounding text to make it unique, or set replace_all", n, in.Path)
+	}
+
+	line := m.Line
+	count := 1
+	if in.ReplaceAll {
+		count = -1
+	}
+	updated := strings.Replace(content, oldText, newText, count)
+
+	if err := writeAtomically(root, in.Path, []byte(updated), info.Mode().Perm()); err != nil {
+		return fail("edit_file: %v", err)
+	}
+	if in.ReplaceAll && n > 1 {
+		return llm.ToolResult{Content: fmt.Sprintf("edited %s: replaced %d occurrences, the first at line %d", in.Path, n, line)}, nil
+	}
+	return llm.ToolResult{Content: fmt.Sprintf("edited %s: replaced 1 occurrence at line %d", in.Path, line)}, nil
+}
+
+// editMatch is where an edit_file call lands: the text that will actually be
+// replaced, the replacement in the file's own line endings, how many times it
+// occurs, and the 1-based line of the first occurrence.
+//
+// Separate from Call because the approval preview has to show the operator the
+// same match the tool will make. A preview that finds a match the tool then
+// refuses, or that shows LF where the file has CRLF, is worse than no preview.
+type editMatch struct {
+	Old, New string
+	Count    int
+	Line     int
+}
+
+// resolveEdit finds old_text in content, forgiving the two ways a model's copy
+// of a file differs from the file it read.
+func resolveEdit(content, oldText, newText string) editMatch {
+	n := strings.Count(content, oldText)
 	// A model writes "\n"; a file saved on Windows has "\r\n". When the text
 	// only matches with the file's own line endings, both sides are converted,
 	// so an edit to a CRLF file keeps it CRLF instead of leaving mixed endings.
-	oldText, newText := in.OldText, in.NewText
-	n := strings.Count(content, oldText)
 	if n == 0 && strings.Contains(content, "\r\n") && !strings.Contains(oldText, "\r\n") {
 		crlfOld := strings.ReplaceAll(oldText, "\n", "\r\n")
 		if m := strings.Count(content, crlfOld); m > 0 {
@@ -151,27 +191,11 @@ func (e EditFile) Call(_ context.Context, _ string, args json.RawMessage) (llm.T
 	if strings.Contains(content, "\r\n") {
 		newText = strings.ReplaceAll(strings.ReplaceAll(newText, "\r\n", "\n"), "\n", "\r\n")
 	}
-	switch {
-	case n == 0:
-		return fail("edit_file: old_text was not found in %s; it must match exactly, including whitespace and indentation", in.Path)
-	case n > 1 && !in.ReplaceAll:
-		return fail("edit_file: old_text occurs %d times in %s; include more surrounding text to make it unique, or set replace_all", n, in.Path)
+	match := editMatch{Old: oldText, New: newText, Count: n}
+	if n > 0 {
+		match.Line = strings.Count(content[:strings.Index(content, oldText)], "\n") + 1
 	}
-
-	line := strings.Count(content[:strings.Index(content, oldText)], "\n") + 1
-	count := 1
-	if in.ReplaceAll {
-		count = -1
-	}
-	updated := strings.Replace(content, oldText, newText, count)
-
-	if err := writeAtomically(root, in.Path, []byte(updated), info.Mode().Perm()); err != nil {
-		return fail("edit_file: %v", err)
-	}
-	if in.ReplaceAll && n > 1 {
-		return llm.ToolResult{Content: fmt.Sprintf("edited %s: replaced %d occurrences, the first at line %d", in.Path, n, line)}, nil
-	}
-	return llm.ToolResult{Content: fmt.Sprintf("edited %s: replaced 1 occurrence at line %d", in.Path, line)}, nil
+	return match
 }
 
 // rootFS is what writeAtomically needs from an *os.Root.

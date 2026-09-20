@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ginko97/ariadne/internal/llm"
+	"github.com/ginko97/ariadne/internal/tool"
 )
 
 // approvalTimeout bounds how long a turn waits for somebody to answer.
@@ -82,7 +83,7 @@ func (a *approvals) decide(key string, approve bool) bool {
 // reasons rather than a happy path with error handling: a closed tab, a person
 // who never answers, and a server that restarted are all "no", and none of them
 // should be distinguishable from "no" by the tool that was asked for.
-func (s *Server) approver(runID string, out *sseWriter) func(context.Context, llm.ToolCall) (bool, error) {
+func (s *Server) approver(runID string, out *sseWriter, workspace string) func(context.Context, llm.ToolCall) (bool, error) {
 	return func(ctx context.Context, c llm.ToolCall) (bool, error) {
 		key := approvalKey(runID, c.ID)
 		ch := s.approvals.wait(key)
@@ -93,6 +94,11 @@ func (s *Server) approver(runID string, out *sseWriter) func(context.Context, ll
 			"call_id": c.ID,
 			"tool":    c.Name,
 			"args":    compactJSON(c.Args),
+			// What the call would do, in words: the path and the lines an edit
+			// changes, the URL in full, a note as a sentence. The args stay in
+			// the event because the page still shows them under the preview —
+			// this replaces reading them, not the ability to.
+			"preview": tool.Preview(c.Name, c.Args, workspace),
 		})
 
 		timer := time.NewTimer(approvalTimeout)

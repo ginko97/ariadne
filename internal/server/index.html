@@ -51,6 +51,14 @@
               max-width:52rem; }
   .approval code { font-family:ui-monospace,SFMono-Regular,monospace; font-size:.85em;
                    overflow-wrap:anywhere; }
+  .approval .preview { font-family:ui-monospace,SFMono-Regular,monospace; font-size:.85em;
+                       white-space:pre-wrap; overflow-wrap:anywhere; margin:0;
+                       max-height:22rem; overflow:auto; }
+  .approval .preview div { padding:0 .2rem; }
+  .approval .added { background:#2a02; color:#1a7f37; }
+  .approval .removed { background:#c332; color:#b32; }
+  .approval .warn { color:var(--err); font-weight:600; }
+  .approval details { font-size:.85em; color:var(--dim); }
   .approval .row { display:flex; gap:.5rem; align-items:center; }
   .approval button { font:inherit; padding:.3rem .9rem; cursor:pointer; }
   .approval.settled { border-left-color:var(--edge); color:var(--dim); }
@@ -228,8 +236,28 @@ function approvalCard(d) {
 
   const q = document.createElement('div');
   q.textContent = `Allow ${d.tool}?`;
-  const args = document.createElement('code');
-  args.textContent = d.args || '';
+
+  // What the call would do, in words, built by the server. textContent only:
+  // a preview line carries a path, a URL or a line of somebody's file, and
+  // none of that is ever treated as markup.
+  const preview = document.createElement('div');
+  preview.className = 'preview';
+  for (const line of d.preview || []) {
+    const row = document.createElement('div');
+    if (line.kind && line.kind !== 'plain') row.className = line.kind;
+    row.textContent = line.text;
+    preview.append(row);
+  }
+
+  // The raw arguments stay one click away: the preview is what the decision
+  // is made on, but a preview is a summary and the exact call is the truth.
+  const args = document.createElement('details');
+  const summary = document.createElement('summary');
+  summary.textContent = 'arguments';
+  const code = document.createElement('code');
+  code.textContent = d.args || '';
+  args.append(summary, code);
+  if (!preview.childElementCount) args.open = true;
 
   const row = document.createElement('div');
   row.className = 'row';
@@ -270,7 +298,7 @@ function approvalCard(d) {
   no.onclick = () => answer(false);
 
   row.append(yes, no, note);
-  el.append(q, args, row);
+  el.append(q, preview, args, row);
   log.append(el);
   log.scrollTop = log.scrollHeight;
   // Held so a timeout can settle the card rather than leaving two live buttons

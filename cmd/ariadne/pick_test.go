@@ -104,8 +104,8 @@ func TestTrustAcceptsWebFetchButNotWithApprove(t *testing.T) {
 	if _, err := gateMCP([]string{tool.WebFetchName}, []string{tool.WebFetchName}, nil); err == nil {
 		t.Error("web_fetch in both -approve and -trust was accepted")
 	}
-	if _, err := gateMCP(nil, []string{"write_file"}, nil); err == nil {
-		t.Error("-trust write_file was accepted; only web_fetch and MCP tools can be trusted")
+	if _, err := gateMCP(nil, []string{"fetch"}, nil); err == nil {
+		t.Error("-trust fetch was accepted; only the gated built-ins and MCP tools can be trusted")
 	}
 }
 
@@ -130,5 +130,46 @@ func TestEditFileIsGatedUnlessTrusted(t *testing.T) {
 	}
 	if _, err := gateMCP(nil, []string{tool.EditFileName}, nil); err != nil {
 		t.Errorf("-trust edit_file refused: %v", err)
+	}
+}
+
+// write_file asks before every call, and only -trust takes the gate off.
+//
+// The regression this locks: write_file predated the gating rule and was
+// exempt from it, so a model could replace a file whole with no card shown
+// while edit_file, which touches only the text it names, asked.
+func TestWriteFileIsGatedUnlessTrusted(t *testing.T) {
+	base := agentOpts{Key: "k", Model: "m", BaseURL: "https://example.test/v1", RunID: "run_test", MaxSteps: 5, Store: &loop.Store{Dir: t.TempDir()}}
+
+	a := newAgentFor(base)
+	offered := false
+	for _, d := range a.Tools {
+		if d.Name == tool.WriteFileName {
+			offered = true
+		}
+	}
+	if !offered {
+		t.Fatal("write_file is not offered")
+	}
+	if !contains(a.RequireApproval, tool.WriteFileName) {
+		t.Errorf("write_file is not gated by default: %v", a.RequireApproval)
+	}
+
+	trusted := base
+	trusted.Trust = []string{tool.WriteFileName}
+	a = newAgentFor(trusted)
+	if contains(a.RequireApproval, tool.WriteFileName) {
+		t.Errorf("-trust write_file did not drop the gate: %v", a.RequireApproval)
+	}
+	// One name, one gate. Trusting the noisiest tool must not quietly open the
+	// other two.
+	for _, still := range []string{tool.EditFileName, tool.WebFetchName} {
+		if !contains(a.RequireApproval, still) {
+			t.Errorf("trusting write_file also dropped %s's gate: %v", still, a.RequireApproval)
+		}
+	}
+
+	if _, err := gateMCP(nil, []string{tool.WriteFileName}, nil); err != nil {
+		t.Errorf("-trust write_file refused: %v", err)
 	}
 }

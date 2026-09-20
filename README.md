@@ -52,7 +52,7 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
 
 | | |
 | --- | --- |
-| Files | list, read, write and edit in one folder per conversation — pick it in the browser (**Folder…**), or `-workspace <folder>`; `edit_file` changes only the text it names and asks first. It saves text (`.md`, `.txt`), not PDF or Word files |
+| Files | list, read, write and edit in one folder per conversation — pick it in the browser (**Folder…**), or `-workspace <folder>`. Writing and editing ask first, showing the lines that would change; `edit_file` touches only the text it names. It saves text (`.md`, `.txt`), not PDF or Word files |
 | Documents | read Word, Excel and PowerPoint files (`.docx`, `.xlsx`, `.pptx`) and their LibreOffice counterparts (`.odt`, `.ods`, `.odp`) — spreadsheets as rows, dates as dates, a long document in 256 KB parts; PDFs when [Poppler](https://poppler.freedesktop.org)'s `pdftotext` is installed |
 | The web | read a page by URL (`web_fetch`), asking before every fetch; never your own machine or local network |
 | Tools from anywhere | any MCP server: filesystem, search, git, ... (`-mcp-config`) |
@@ -62,9 +62,10 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
 
 ## Why it is different
 
-- **It asks first.** Reading a web page, editing a file, writing one you gated, every MCP
-  tool you have not trusted, and every program it wants to run: you see the exact
-  arguments and say yes or no. No answer is not a yes.
+- **It asks first.** Reading a web page, writing a file, editing one, every MCP tool
+  you have not trusted, and every program it wants to run: you see what it would do —
+  the lines an edit changes, what a write replaces, the whole URL — and say yes or no.
+  No answer is not a yes.
 - **It survives a crash.** A conversation is saved when a turn starts and after every
   tool call. Kill the process mid-task and it resumes without repeating what already ran.
   In the browser, **Stop** ends a turn at any point, and **Resume turn** finishes one that
@@ -305,7 +306,7 @@ Four controls went in afterwards, each measured against the same fixture:
 | `os.Root` sandbox | confines `fetch`/`write_file` at the syscall layer | nothing |
 | untrusted-content fencing | marks tool output as data and says so in the system prompt | the model choosing to comply |
 | `-allow calc,fetch` | refuses unlisted tools at the loop; a grant can never be widened on resume | nothing |
-| `-approve write_file` | asks per call, with the arguments in view; denies when there is no terminal and when there is no approver | a human being there |
+| `write_file`, `edit_file` | ask per call unless `-trust`ed, showing what the file would become; deny when there is no terminal and when there is no approver | a human being there |
 | `web_fetch` | asks before every fetch, with the whole URL on the card, unless `-trust web_fetch`; refuses private, loopback and link-local addresses on every connection, redirects included; sends no cookies or keys | nothing, for the address rule; a human being there, for the rest |
 | MCP default gate, `-exec` | every MCP tool asks unless `-trust`ed; `exec` always asks, gets an environment allow-list, and ariadne's own API keys are redacted from every tool result. `exec` is **not** confined: an approved program can open any file you can, `.env` included, and only ariadne's own provider keys are redacted | a human being there |
 
@@ -487,7 +488,8 @@ ariadne chat <run-id>                 # pick a conversation back up
 ariadne ui                            # talk in a browser
 
 ariadne run "What is 15% of 240?"
-ariadne run -stream -allow calc,fetch -approve write_file "..."
+ariadne run -stream -allow calc,fetch "..."
+ariadne run -trust write_file "..."           # unattended: write without asking
 ariadne run -context-budget 8000 -remember "..."
 ariadne resume <run-id>
 ariadne run -workspace ~/code/project "..."   # point the file tools somewhere
