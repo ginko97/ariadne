@@ -321,10 +321,14 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 			Cost: cost, CostUnknown: !known, Text: resp.Text(),
 		})
 
-		// Whatever the model said is now part of the conversation, in every branch.
+		// Whatever the model said is now part of the conversation, in every
+		// branch. Stamped with the served model rather than s.Model: the
+		// conversation may be switched to another model later, and this is the
+		// record of what answered at the time.
 		s.Messages = append(s.Messages, llm.Message{
 			Role:   llm.RoleAssistant,
 			Blocks: resp.Blocks,
+			Model:  served,
 		})
 
 		switch resp.Stop {

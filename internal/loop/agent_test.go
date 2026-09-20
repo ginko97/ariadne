@@ -717,3 +717,61 @@ func TestFenceKeepsContentExactlyAsItIs(t *testing.T) {
 		t.Errorf("content without a trailing newline should get one:\n%q", without)
 	}
 }
+
+// An answer records which model wrote it, so a conversation that switched
+// models can still say what said what.
+//
+// The served model, not the requested one: a provider may answer with
+// something other than what was asked for, and the record should be what
+// happened.
+func TestAssistantMessageRecordsTheModelThatWroteIt(t *testing.T) {
+	p := &llm.Fake{Responses: []llm.Response{
+		{Blocks: []llm.Block{{Type: llm.BlockText, Text: "first"}}, Stop: llm.StopEnd, Model: "vendor/served-a"},
+		{Blocks: []llm.Block{{Type: llm.BlockText, Text: "second"}}, Stop: llm.StopEnd},
+	}}
+	store := &Store{Dir: t.TempDir()}
+	a := &Agent{Provider: p, Model: "vendor/asked-for", MaxSteps: 4, Checkpoint: store.Save}
+
+	s := NewState("run_model_stamp", "one")
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddUserMessage("two"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	for _, m := range s.Messages {
+		if m.Role == llm.RoleAssistant {
+			got = append(got, m.Model)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("assistant messages = %d, want 2", len(got))
+	}
+	if got[0] != "vendor/served-a" {
+		t.Errorf("first answer recorded %q, want the served model", got[0])
+	}
+	// A provider that reports no model falls back to the one asked for, rather
+	// than leaving the answer unattributed.
+	if got[1] != "vendor/asked-for" {
+		t.Errorf("second answer recorded %q, want the requested model", got[1])
+	}
+
+	// And it survives the checkpoint, which is what a reopened conversation reads.
+	loaded, err := store.Load("run_model_stamp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range loaded.Messages {
+		if m.Role == llm.RoleAssistant && m.Model == "" {
+			t.Error("an answer lost its model in the checkpoint")
+		}
+		if m.Role != llm.RoleAssistant && m.Model != "" {
+			t.Errorf("a %s message carries a model: %q", m.Role, m.Model)
+		}
+	}
+}

@@ -198,7 +198,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		"cost":   state.Cost,
 		// The page shows "cost unknown" instead of a figure when set.
 		"cost_unknown": state.UnpricedSteps > 0,
-		"model":        state.Model,
+		// The model the conversation is on, for the picker...
+		"model": state.Model,
+		// ...and the one that wrote this answer, which the page puts under it.
+		// They differ when a provider serves something other than what was
+		// asked for, and after a switch, when the picker is already ahead.
+		"answered_by": answeredBy(state),
 	})
 }
 

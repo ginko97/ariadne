@@ -5,6 +5,11 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Every answer says which model wrote it.** A small line under the
+  answer, in new conversations and reopened ones. It is the model that
+  actually served the turn, which is not always the one that was asked
+  for, and not always the one the picker shows — the picker is what the
+  *next* message will use, so after a switch they differ on purpose.
 - **Delete a conversation.** The × on a conversation in the sidebar removes
   it for good — the checkpoint *and* its trace, so nothing about it is left
   in `ariadne traces` either. It asks first and cannot be undone. A

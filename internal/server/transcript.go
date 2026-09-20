@@ -41,7 +41,10 @@ type transcriptResponse struct {
 // asking something, and the loop handing back tool results. Collapsing them
 // would render a wall of JSON as though the person had typed it.
 type transcriptEntry struct {
-	Kind    string `json:"kind"` // "prompt", "answer", "tool_call", "tool_result"
+	Kind string `json:"kind"` // "prompt", "answer", "tool_call", "tool_result"
+	// Model is set on an answer: the model that wrote it, which may not be
+	// the one the conversation is on now.
+	Model   string `json:"model,omitempty"`
 	Text    string `json:"text,omitempty"`
 	Tool    string `json:"tool,omitempty"`
 	Args    string `json:"args,omitempty"`
@@ -137,7 +140,11 @@ func entries(msgs []llm.Message) []transcriptEntry {
 						kind = "notice"
 					}
 				}
-				out = append(out, transcriptEntry{Kind: kind, Text: b.Text})
+				entry := transcriptEntry{Kind: kind, Text: b.Text}
+				if kind == "answer" {
+					entry.Model = m.Model
+				}
+				out = append(out, entry)
 
 			case llm.BlockToolUse:
 				out = append(out, transcriptEntry{
@@ -152,6 +159,21 @@ func entries(msgs []llm.Message) []transcriptEntry {
 		}
 	}
 	return out
+}
+
+// answeredBy is the model that produced the conversation's last answer, or
+// empty when nothing has answered yet.
+//
+// Read backwards from the end rather than taken from state.Model, because a
+// turn is the last thing that happened before a model switch as often as it is
+// the first thing after one.
+func answeredBy(state *loop.State) string {
+	for i := len(state.Messages) - 1; i >= 0; i-- {
+		if state.Messages[i].Role == llm.RoleAssistant {
+			return state.Messages[i].Model
+		}
+	}
+	return ""
 }
 
 // handleDelete removes a conversation and everything it wrote: checkpoint and

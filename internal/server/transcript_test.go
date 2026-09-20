@@ -334,3 +334,59 @@ func TestDeleteRefusesABusyConversation(t *testing.T) {
 		t.Errorf("delete after release = %d, want 200", resp.StatusCode)
 	}
 }
+
+// A reopened conversation says which model wrote each answer, including after
+// a switch — the picker shows what the next turn will use, which is a
+// different question.
+func TestTranscriptNamesTheModelPerAnswer(t *testing.T) {
+	s, ts := newTestServer(t)
+
+	st := loop.NewState("run_20260920T150000_eeeeee", "who are you?")
+	// Switched again after the last answer: the conversation is on a model
+	// that has not said anything yet, which is exactly when "the model" and
+	// "the model that answered" are different questions.
+	st.Model = "vendor/next"
+	st.Messages = append(st.Messages,
+		llm.Message{Role: llm.RoleAssistant, Model: "vendor/old",
+			Blocks: []llm.Block{{Type: llm.BlockText, Text: "answered by the old one"}}},
+		llm.Message{Role: llm.RoleUser,
+			Blocks: []llm.Block{{Type: llm.BlockText, Text: "and now?"}}},
+		llm.Message{Role: llm.RoleAssistant, Model: "vendor/new",
+			Blocks: []llm.Block{{Type: llm.BlockText, Text: "answered by the new one"}}},
+	)
+	if err := s.Store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, got := getTranscript(t, ts, st.RunID)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+
+	var answers []transcriptEntry
+	for _, e := range got.Messages {
+		if e.Kind == "answer" {
+			answers = append(answers, e)
+		}
+	}
+	if len(answers) != 2 {
+		t.Fatalf("answers = %d, want 2", len(answers))
+	}
+	if answers[0].Model != "vendor/old" || answers[1].Model != "vendor/new" {
+		t.Errorf("models = %q, %q; want vendor/old, vendor/new", answers[0].Model, answers[1].Model)
+	}
+	for _, e := range got.Messages {
+		if e.Kind == "prompt" && e.Model != "" {
+			t.Errorf("a prompt carries a model: %q", e.Model)
+		}
+	}
+
+	// answeredBy reads the last answer, not the model the conversation is on.
+	if by := answeredBy(st); by != "vendor/new" {
+		t.Errorf("answeredBy = %q, want vendor/new (state.Model is %q)", by, st.Model)
+	}
+	empty := loop.NewState("run_20260920T150001_ffffff", "nothing yet")
+	if by := answeredBy(empty); by != "" {
+		t.Errorf("answeredBy on a conversation with no answer = %q, want empty", by)
+	}
+}

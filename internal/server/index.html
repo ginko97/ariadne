@@ -87,6 +87,7 @@
   @keyframes spin { to { transform:rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { #working .spin { animation:none; } }
   .answer.md { white-space:normal; }
+  .by { color:var(--dim); font-size:.78em; margin-top:.15rem; }
   .md > :first-child { margin-top:0; }
   .md > :last-child { margin-bottom:0; }
   .md p, .md ul, .md ol, .md pre, .md blockquote, .md .tablewrap { margin:.45rem 0; }
@@ -325,7 +326,7 @@ function render(entries) {
   for (const e of entries) {
     if (e.kind === 'tool_call') entry('tool_call', `→ ${e.tool}(${e.args || ''})`);
     else if (e.kind === 'tool_result') entry('tool_result', `← ${e.text}`, e.is_error ? 'is_error' : '');
-    else if (e.kind === 'answer') showAnswer(entry('answer', ''), e.text);
+    else if (e.kind === 'answer') showAnswer(entry('answer', ''), e.text, e.model);
     else entry(e.kind, e.text);
   }
 }
@@ -648,7 +649,7 @@ async function send(text, opts = {}) {
           // The streamed text and the final answer are the same words; replace
           // rather than append, so a provider that does not stream still shows one.
           if (!answer) answer = entry('answer', '');
-          showAnswer(answer, d.answer);
+          showAnswer(answer, d.answer, d.answered_by || d.model);
           stats(d.turns, d.steps, d.cost, d.cost_unknown);
           selectModel(d.model);
         } else if (name === 'approval_required') {
@@ -877,9 +878,18 @@ function mdLink(label, url, into) {
 }
 
 // showAnswer puts a finished answer on the page, formatted.
-function showAnswer(e, text) {
+function showAnswer(e, text, model) {
   e.classList.add('md');
   e.replaceChildren(renderMarkdown(text || ''));
+  // Which model wrote this. Left off when the answer predates the field
+  // rather than guessed from the picker — the picker is what the *next* turn
+  // will use, and after a switch that is a different model entirely.
+  if (model) {
+    const by = document.createElement('div');
+    by.className = 'by';
+    by.textContent = model;
+    e.append(by);
+  }
 }
 
 // ---------------------------------------------------------------- commands

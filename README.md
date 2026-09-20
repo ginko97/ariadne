@@ -42,7 +42,7 @@ it lists the models you have pulled and checks that the one you pick can call to
 | **Working…** | shown while a turn runs: how long, and whether it is thinking, calling a tool, waiting for you, or writing |
 | **Stop** / **Resume turn** | end a turn at any point; finish one that was interrupted, without repeating what already ran |
 | **×** on a conversation | delete it for good — the conversation and its record of every tool call and cost. It asks first; a running turn is refused until it stops |
-| answers | formatted (headings, lists, tables, code); images are never loaded |
+| answers | formatted (headings, lists, tables, code); images are never loaded. Each one says which model wrote it — the model that served the turn, not what the picker shows |
 | ◐ | theme: system, light or dark |
 
 `ariadne chat` does the same in the terminal. Your conversations, notes and settings
