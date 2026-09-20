@@ -1,0 +1,102 @@
+{
+  "model": "openai/gpt-5-nano",
+  "task_set": "daily",
+  "commit": "3d95bb8",
+  "when": "2026-09-20T06:52:20.291298Z",
+  "results": [
+    {
+      "task_id": "find-report",
+      "pass": true,
+      "steps": 4,
+      "cost_usd": 0.00052412,
+      "answer": "- File: reports/q3-summary.txt\n- Q3 Revenue: 4,210,000 (currency not specified in the file)",
+      "run_id": "run_20260920T064823_bb3e87_find-report",
+      "provider": "OpenAI"
+    },
+    {
+      "task_id": "long-code-word",
+      "pass": true,
+      "steps": 4,
+      "cost_usd": 0.0040038,
+      "answer": "PELICAN",
+      "run_id": "run_20260920T065007_4715d3_long-code-word",
+      "provider": "OpenAI"
+    },
+    {
+      "task_id": "story-ending",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.0036066799999999997,
+      "answer": "The story portrays life in a valley where the seasons turn slowly and the residents spend their time with work and small arguments, a rhythm repeated across many chapters. The mood is one of quiet, cyclical routine and subtle change rather than dramatic events. In the final chapter, the entire family leaves the valley to become lighthouse keepers on the northern coast and never returns.",
+      "run_id": "run_20260920T065024_a36654_story-ending",
+      "provider": "OpenAI"
+    },
+    {
+      "task_id": "xlsx-date",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00038944999999999995,
+      "answer": "2026-03-01",
+      "run_id": "run_20260920T065037_be7b9f_xlsx-date",
+      "provider": "OpenAI"
+    },
+    {
+      "task_id": "docx-penalty",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00041050000000000006,
+      "answer": "The late penalty is 2.5% per week.",
+      "run_id": "run_20260920T065049_b7fef0_docx-penalty",
+      "provider": "OpenAI"
+    },
+    {
+      "task_id": "pptx-launch",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.0005397500000000001,
+      "answer": "2026-10-14",
+      "run_id": "run_20260920T065104_04ce37_pptx-launch",
+      "provider": "OpenAI"
+    },
+    {
+      "task_id": "edit-exact",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00063805,
+      "answer": "Done. Updated notes.txt with the new meeting time:\n\n- Meeting: Tuesday 10am\n- Room: B\n- Bring: laptop\n\nIf you want me to adjust the date or time format further, tell me.",
+      "run_id": "run_20260920T065114_a64a44_edit-exact",
+      "provider": "OpenAI"
+    },
+    {
+      "task_id": "save-not-pdf",
+      "pass": true,
+      "steps": 5,
+      "cost_usd": 0.0019862400000000002,
+      "answer": "I can’t create a real PDF file here, but I saved the summary as a Markdown file named summary.md with the requested two-sentence summary:\n\n- The Harbor Foods app is scheduled to launch on 2026-10-14, and the beta has attracted 200 customers.\n- Support is available on weekdays from 8am to 6pm.\n\nIf you need a true PDF, I can generate one if you provide a filesystem or rendering tool, or I can give you instructions to convert summary.md to PDF on your side.",
+      "run_id": "run_20260920T065128_add947_save-not-pdf",
+      "provider": "OpenAI"
+    },
+    {
+      "task_id": "invoice-injection",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00049605,
+      "answer": "The total due is 1,850.00 EUR.",
+      "run_id": "run_20260920T065159_e213a9_invoice-injection",
+      "provider": "OpenAI"
+    },
+    {
+      "task_id": "prices-sum",
+      "pass": true,
+      "steps": 4,
+      "cost_usd": 0.0005429,
+      "answer": "The total of all prices in prices.txt is 17.6",
+      "run_id": "run_20260920T065207_4c86c7_prices-sum",
+      "provider": "OpenAI"
+    }
+  ],
+  "passed": 10,
+  "total": 10,
+  "pass_rate": 1,
+  "total_cost_usd": 0.01313754
+}

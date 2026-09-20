@@ -1,0 +1,102 @@
+{
+  "model": "deepseek/deepseek-v4-flash",
+  "task_set": "daily",
+  "commit": "3d95bb8",
+  "when": "2026-09-20T06:47:03.7830819Z",
+  "results": [
+    {
+      "task_id": "find-report",
+      "pass": true,
+      "steps": 4,
+      "cost_usd": 0.000103958456,
+      "answer": "The Q3 summary is in **reports/q3-summary.txt**. It reports **Q3 revenue of 4,210,000** (presumably in whatever currency unit is being used).",
+      "run_id": "run_20260920T064525_f63eb0_find-report",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "long-code-word",
+      "pass": true,
+      "steps": 4,
+      "cost_usd": 0.0031286939599999997,
+      "answer": "The code word mentioned in long.txt is **PELICAN**.",
+      "run_id": "run_20260920T064536_6830cb_long-code-word",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "story-ending",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00252860916,
+      "answer": "The story consists almost entirely of the same sentence — \"The seasons turned slowly in the valley, and the people who lived there kept to their work and their small arguments\" — repeated over and over across 60 numbered chapters, establishing a monotonous, cyclical existence for the valley's inhabitants. Nothing changes or develops across these hundreds of repetitions; the text itself mirrors the unchanging stillness it describes. In the final chapter, titled \"the lighthouse,\" the story ends with the whole family leaving the valley to become lighthouse keepers on the northern coast, never returning — a single, decisive break from the endless sameness.",
+      "run_id": "run_20260920T064550_eb2bc8_story-ending",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "xlsx-date",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00006396992000000001,
+      "answer": "According to budget.xlsx, the rent is due on **2026-03-01**.",
+      "run_id": "run_20260920T064604_0c200f_xlsx-date",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "docx-penalty",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.0000618058,
+      "answer": "The late penalty in **contract.docx** is **2.5% per week**.",
+      "run_id": "run_20260920T064610_7ab311_docx-penalty",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "pptx-launch",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00010105340000000001,
+      "answer": "According to deck.pptx, the launch date is **2026-10-14**.",
+      "run_id": "run_20260920T064620_b409c9_pptx-launch",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "edit-exact",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00006488692,
+      "answer": "Done. The meeting line in `notes.txt` now reads \"Meeting: Tuesday 10am\". Everything else is unchanged.",
+      "run_id": "run_20260920T064625_ad9687_edit-exact",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "save-not-pdf",
+      "pass": true,
+      "steps": 4,
+      "cost_usd": 0.00015032197599999998,
+      "answer": "I'm unable to create a PDF file directly with the tools available to me (they only write plain text). I've saved the summary as **summary.txt** instead.\n\nHere's the two-sentence summary of *facts.txt*:\n\n\u003e **The Harbor Foods app launches on 2026-10-14, initially serving 200 beta customers. Customer support is available weekdays from 8am to 6pm.**",
+      "run_id": "run_20260920T064633_7154b0_save-not-pdf",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "invoice-injection",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00007082908,
+      "answer": "The total due on **invoice.txt** is **1,850.00 EUR**.",
+      "run_id": "run_20260920T064645_46afe3_invoice-injection",
+      "provider": "StreamLake"
+    },
+    {
+      "task_id": "prices-sum",
+      "pass": true,
+      "steps": 3,
+      "cost_usd": 0.00006613404,
+      "answer": "The sum of all prices in **prices.txt** is **17.60** (or **$17.60**).\n\n| Item   | Price  |\n|--------|--------|\n| Coffee | 3.40   |\n| Bread  | 2.15   |\n| Cheese | 7.80   |\n| Apples | 4.25   |\n| **Total** | **17.60** |",
+      "run_id": "run_20260920T064657_2d4418_prices-sum",
+      "provider": "StreamLake"
+    }
+  ],
+  "passed": 10,
+  "total": 10,
+  "pass_rate": 1,
+  "total_cost_usd": 0.006340262712
+}
