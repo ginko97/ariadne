@@ -192,22 +192,77 @@ func TestSandboxWithSymlinkedRoot(t *testing.T) {
 	}
 }
 
+// windowsPaths are absolute on Windows and ordinary names anywhere else.
+var windowsPaths = []string{
+	`C:\windows\system32\calc.exe`,
+	`D:\secret.txt`,
+	`\\server\share\file.txt`,
+	`C:/windows/system32/drivers/etc/hosts`,
+}
+
 // Drive prefixes and UNC paths must not escape the sandbox root. Asserted
 // through the tool rather than against an internal helper, so the test still
 // means something when the confinement mechanism is replaced.
+//
+// Windows only, because the property is: these strings name somewhere else on
+// this machine, so the tools must refuse them. On Unix they name nothing —
+// see the test below, which asserts what is true there instead. This ran
+// everywhere until 2026-09-20 and had failed on every Linux and macOS CI run
+// since CI existed.
 func TestSandboxWindowsDriveEscape(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("drive letters and UNC paths are absolute only on Windows")
+	}
 	dir := t.TempDir()
-	for _, p := range []string{
-		`C:\windows\system32\calc.exe`,
-		`D:\secret.txt`,
-		`\\server\share\file.txt`,
-		`C:/windows/system32/drivers/etc/hosts`,
-	} {
+	for _, p := range windowsPaths {
 		if _, isErr := call(t, NewWriteFile(dir), writeArgs{Path: p, Content: "x"}); !isErr {
 			t.Errorf("write_file %q was not refused", p)
 		}
 		if _, isErr := call(t, NewFetch(dir), fetchArgs{Path: p}); !isErr {
 			t.Errorf("fetch %q was not refused", p)
+		}
+	}
+}
+
+// The same strings on Unix, where a backslash is an ordinary character and
+// "C:" is an ordinary directory name.
+//
+// Refusing them is not the property here — they are not paths to anywhere, so
+// there is nothing to refuse. The property is that they stay names: whatever
+// the tool does with one, it happens inside the root, and the file the string
+// looks like it names is untouched. A workspace carried between machines can
+// hold a file written by the Windows build, so treating the name as a name is
+// also the behaviour that keeps it readable.
+func TestSandboxWindowsPathsAreNamesOnUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("covered by TestSandboxWindowsDriveEscape")
+	}
+	dir := t.TempDir()
+
+	// The one string that names a real file on a Unix box, if the leading
+	// "C:" were ever dropped. Stat it before and after rather than trusting
+	// the sandbox to be the only thing that could have written it.
+	const real = "/etc/hosts"
+	before, statErr := os.Stat(real)
+
+	for _, p := range windowsPaths {
+		got, isErr := call(t, NewWriteFile(dir), writeArgs{Path: p, Content: "x"})
+		if isErr {
+			continue // refusing an odd name is allowed; escaping is not
+		}
+		// It wrote something, so it must be inside the root.
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(p))); err != nil {
+			t.Errorf("write_file %q reported success (%s) but wrote nothing inside the sandbox: %v", p, got, err)
+		}
+	}
+
+	if statErr == nil {
+		after, err := os.Stat(real)
+		if err != nil {
+			t.Fatalf("%s disappeared during the test: %v", real, err)
+		}
+		if after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
+			t.Errorf("%s changed: the sandbox wrote outside itself", real)
 		}
 	}
 }
