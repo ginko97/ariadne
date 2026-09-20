@@ -22,11 +22,25 @@
   #setup .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
   #setup button { font:inherit; cursor:pointer; padding:.35rem .9rem; }
   #runs { overflow-y:auto; flex:1; }
+  #runs .row { display:flex; align-items:stretch; }
   #runs button { display:block; width:100%; text-align:left; background:none; border:0;
                  border-bottom:1px solid var(--edge); padding:.6rem .9rem; cursor:pointer;
                  font:inherit; color:inherit; }
   #runs button:hover { background:#8881; }
   #runs button[aria-current="true"] { background:#8882; font-weight:600; }
+  /* After the rule above, and narrow: the generic one sets width:100%, which a
+     flex row then splits between the title and a single character. */
+  #runs .del { visibility:hidden; width:auto; flex:none; padding:0 .7rem; color:var(--dim);
+               font-size:1.1em; line-height:1; }
+  #runs .row:hover .del, #runs .del:focus { visibility:visible; }
+  #runs .del:hover { color:var(--err); }
+  #runs .confirm { display:flex; flex-direction:column; gap:.4rem; padding:.6rem .9rem;
+                   border-bottom:1px solid var(--edge); border-left:3px solid var(--err);
+                   font-size:.85em; }
+  #runs .confirm .row { gap:.4rem; }
+  #runs .confirm button { width:auto; flex:none; border:1px solid var(--edge);
+                          border-radius:.25rem; padding:.2rem .7rem; }
+  #runs .confirm .yes { color:var(--err); }
   #runs .meta, .dim { color:var(--dim); font-size:.8em; font-weight:400; }
   #runs .title { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   main { display:flex; flex-direction:column; min-height:0; min-width:0; }
@@ -328,9 +342,74 @@ async function loadRuns() {
         `${r.turns} turn${r.turns === 1 ? '' : 's'} · ${r.model || ''}`;
       if (r.run_id === runID) b.setAttribute('aria-current', 'true');
       b.onclick = () => open(r.run_id);
-      runsEl.append(b);
+
+      // Delete is per row rather than a menu, and confirms with the title,
+      // because it takes the trace with it and nothing brings either back.
+      const del = document.createElement('button');
+      del.className = 'del';
+      del.textContent = '\u00d7';
+      del.title = 'Delete this conversation and its record';
+      del.setAttribute('aria-label', 'Delete ' + (r.title || 'this conversation'));
+      del.onclick = (e) => { e.stopPropagation(); askRemove(row, r); };
+
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.append(b, del);
+      runsEl.append(row);
     }
   } catch (e) { warn('Could not list conversations: ' + e.message); }
+}
+
+// askRemove replaces the row with a confirmation, in the page.
+//
+// Not confirm(): an embedded browser may answer it for you — this one silently
+// says no — and a delete that quietly does nothing is worse than no delete. It
+// is also the dialog the rest of the app already avoids; approvals ask in the
+// page too.
+function askRemove(row, r) {
+  const ask = document.createElement('div');
+  ask.className = 'confirm';
+
+  const what = document.createElement('div');
+  what.textContent = 'Delete this conversation and its record of every tool call and cost? This cannot be undone.';
+
+  const buttons = document.createElement('div');
+  buttons.className = 'row';
+  const yes = document.createElement('button');
+  yes.className = 'yes';
+  yes.textContent = 'Delete';
+  const no = document.createElement('button');
+  no.textContent = 'Keep';
+
+  const restore = () => row.replaceChildren(...kept);
+  const kept = [...row.children];
+  no.onclick = restore;
+  yes.onclick = async () => {
+    yes.disabled = no.disabled = true;
+    await remove(r);
+  };
+
+  buttons.append(yes, no);
+  ask.append(what, buttons);
+  row.replaceChildren(ask);
+  yes.focus();
+}
+
+// remove deletes a conversation for good: checkpoint, trace and all.
+async function remove(r) {
+  try {
+    const resp = await api('/api/runs/' + r.run_id, { method: 'DELETE' });
+    if (!resp.ok) {
+      // 409 is the one worth reading: a turn is still running in another tab.
+      const { error } = await resp.json().catch(() => ({ error: 'refused' }));
+      warn('Could not delete: ' + error);
+      return;
+    }
+    // Deleting the conversation on screen leaves the page showing something
+    // that no longer exists, so it goes back to an empty one.
+    if (r.run_id === runID) newConversation();
+    loadRuns();
+  } catch (e) { warn('Could not delete: ' + e.message); }
 }
 
 async function open(id) {

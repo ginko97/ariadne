@@ -153,3 +153,51 @@ func entries(msgs []llm.Message) []transcriptEntry {
 	}
 	return out
 }
+
+// handleDelete removes a conversation and everything it wrote: checkpoint and
+// trace both.
+//
+// Irreversible, so it takes the claim first. A run in the middle of a turn is
+// refused with 409 — the same refusal a second turn gets — rather than having
+// its directory pulled out from under a loop that is still writing
+// checkpoints into it.
+//
+// The claim is held for the delete and released after, which is why this is not
+// simply Store.Delete behind a route: the store knows nothing about which runs
+// a server is currently running.
+//
+// Mutating, so guard already required the CSRF token: without it any page you
+// visit could delete your conversations by their ids, and ids appear in the
+// listing this same server hands out.
+func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	if !sanitiseRunID(runID) {
+		httpError(w, http.StatusBadRequest, "malformed run_id")
+		return
+	}
+
+	release, ok := s.claim(runID)
+	if !ok {
+		httpError(w, http.StatusConflict, "that conversation is busy; stop the turn first")
+		return
+	}
+	defer release()
+
+	if _, err := s.Store.LoadCheckpoint(runID); err != nil {
+		if errors.Is(err, loop.ErrNoCheckpoint) {
+			httpError(w, http.StatusNotFound, "no such conversation")
+			return
+		}
+		// An unreadable checkpoint is still a conversation to delete — that is
+		// arguably the one you most want gone — so this falls through rather
+		// than refusing.
+	}
+
+	if err := s.Store.Delete(runID); err != nil {
+		httpError(w, http.StatusInternalServerError, "failed to delete conversation")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "deleted": runID})
+}

@@ -450,3 +450,55 @@ func TestStoreList(t *testing.T) {
 		t.Error("Updated timestamp should be non-zero from WrittenAt")
 	}
 }
+
+// Deleting a conversation takes the trace with it. A checkpoint removed while
+// every byte the run saw stays on disk is not a delete.
+func TestDeleteRemovesTheWholeRun(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{Dir: dir}
+
+	st := &State{RunID: "run_20260920T120000_aaaaaa", Task: "delete me"}
+	if err := s.Save(st); err != nil {
+		t.Fatal(err)
+	}
+	trace := filepath.Join(dir, st.RunID, "trace.jsonl")
+	if err := os.WriteFile(trace, []byte("{\"kind\":\"run_start\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Delete(st.RunID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, st.RunID)); !os.IsNotExist(err) {
+		t.Errorf("the run directory is still there: %v", err)
+	}
+	if _, err := os.Stat(trace); !os.IsNotExist(err) {
+		t.Error("the trace outlived the conversation")
+	}
+	if runs, _, err := s.List(); err != nil || len(runs) != 0 {
+		t.Errorf("List = %v (%v), want empty", runs, err)
+	}
+
+	// Deleting what is already gone is the outcome asked for, not an error.
+	if err := s.Delete(st.RunID); err != nil {
+		t.Errorf("second delete: %v", err)
+	}
+}
+
+// The id is a path component, so a bad one must be refused rather than joined.
+func TestDeleteRefusesABadRunID(t *testing.T) {
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "keep.txt")
+	if err := os.WriteFile(victim, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{Dir: dir}
+	for _, id := range []string{"", "..", "../..", "run_../../etc", "keep.txt"} {
+		if err := s.Delete(id); err == nil {
+			t.Errorf("delete %q was accepted", id)
+		}
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Errorf("a refused delete still removed something: %v", err)
+	}
+}

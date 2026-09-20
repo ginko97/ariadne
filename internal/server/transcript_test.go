@@ -253,3 +253,84 @@ func TestTranscriptSaysWhenCostIsUnknown(t *testing.T) {
 		t.Error("CostUnknown = true for a run whose every step was priced")
 	}
 }
+
+func deleteRun(t *testing.T, ts *httptest.Server, runID, token string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/runs/"+runID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "" {
+		req.Header.Set("X-Ariadne-CSRF", token)
+	}
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+// A conversation deleted from the page is gone from the store, and the same
+// request cannot be made by another site: DELETE is mutating, so the guard
+// requires the token.
+func TestDeleteRemovesAConversation(t *testing.T) {
+	s, ts := newTestServer(t)
+
+	st := loop.NewState("run_20260920T130000_bbbbbb", "delete me")
+	if err := s.Store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	if resp := deleteRun(t, ts, st.RunID, s.CSRFToken); resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete status = %d, want 200", resp.StatusCode)
+	}
+	if _, err := s.Store.Load(st.RunID); err == nil {
+		t.Error("the conversation is still loadable after a 200")
+	}
+
+	// Gone, not merely hidden.
+	if resp := deleteRun(t, ts, st.RunID, s.CSRFToken); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("deleting it twice = %d, want 404", resp.StatusCode)
+	}
+
+	// Without the token it is refused, like every other mutating request.
+	keep := loop.NewState("run_20260920T130001_cccccc", "keep me")
+	if err := s.Store.Save(keep); err != nil {
+		t.Fatal(err)
+	}
+	if resp := deleteRun(t, ts, keep.RunID, ""); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("delete without the CSRF token = %d, want 403", resp.StatusCode)
+	}
+	if _, err := s.Store.Load(keep.RunID); err != nil {
+		t.Error("a refused delete removed the conversation anyway")
+	}
+}
+
+// A turn in progress is not deleted out from under itself: the loop is still
+// writing checkpoints into that directory.
+func TestDeleteRefusesABusyConversation(t *testing.T) {
+	s, ts := newTestServer(t)
+
+	st := loop.NewState("run_20260920T140000_dddddd", "busy")
+	if err := s.Store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+	release, ok := s.claim(st.RunID)
+	if !ok {
+		t.Fatal("could not claim the run")
+	}
+
+	if resp := deleteRun(t, ts, st.RunID, s.CSRFToken); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("delete of a busy run = %d, want 409", resp.StatusCode)
+	}
+	if _, err := s.Store.Load(st.RunID); err != nil {
+		t.Errorf("the busy conversation was deleted anyway: %v", err)
+	}
+
+	// And once the turn is over it can be deleted.
+	release()
+	if resp := deleteRun(t, ts, st.RunID, s.CSRFToken); resp.StatusCode != http.StatusOK {
+		t.Errorf("delete after release = %d, want 200", resp.StatusCode)
+	}
+}

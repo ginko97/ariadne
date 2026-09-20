@@ -5,6 +5,10 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Delete a conversation.** The × on a conversation in the sidebar removes
+  it for good — the checkpoint *and* its trace, so nothing about it is left
+  in `ariadne traces` either. It asks first and cannot be undone. A
+  conversation with a turn still running is refused until it stops.
 - **`write_file` asks before it writes.** It was the one tool that changed
   your files without a card: `edit_file`, which touches only the text it
   names, asked, while a whole-file overwrite did not. Both now ask.

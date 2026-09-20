@@ -212,3 +212,32 @@ func (s *Store) Load(runID string) (*State, error) {
 	}
 	return cp.State, nil
 }
+
+// Delete removes a conversation: its checkpoint, its trace, the directory and
+// everything in it.
+//
+// Everything, deliberately. A run is one folder, and the trace is the part
+// worth being explicit about — it holds every byte the conversation saw, the
+// fetched documents included, so a conversation deleted with its trace left
+// behind is not deleted in the sense anybody means. Nothing here is
+// recoverable, which is why the caller confirms first and why a run somebody
+// is in the middle of is refused elsewhere rather than here.
+//
+// Deleting a run that does not exist is not an error: the outcome asked for is
+// that it is gone, and it is.
+func (s *Store) Delete(runID string) error {
+	if !ValidRunID(runID) {
+		return fmt.Errorf("loop: refusing to delete run id %q", runID)
+	}
+	dir := filepath.Join(s.Dir, runID)
+	// Stat first so a typo cannot remove a directory that was never a run.
+	// RemoveAll on an absent path succeeds silently, which is right for a
+	// delete and wrong for a guard.
+	if fi, err := os.Stat(dir); err == nil && !fi.IsDir() {
+		return fmt.Errorf("loop: %s is not a run directory", runID)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("loop: delete run %s: %w", runID, err)
+	}
+	return nil
+}

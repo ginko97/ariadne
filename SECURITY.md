@@ -13,6 +13,9 @@ plainly, what protects you and what does not.
   a write replaces, the URL in full, the program and its arguments — with
   the exact arguments still there to open. No answer is not a yes, and with
   no terminal to ask, a gated call is denied.
+- **Deleting is deleting.** Removing a conversation in the browser removes
+  its folder: the checkpoint and the trace, which is every byte that
+  conversation saw. Nothing is kept for later and nothing comes back.
 - **The workspace.** `fetch`, `list_files`, `write_file` and `edit_file` cannot reach outside the
   workspace folder; the operating system enforces it (`os.Root`), including
   against Windows directory junctions.
