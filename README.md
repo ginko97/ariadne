@@ -144,7 +144,12 @@ finished the job — without re-running the tool call that had already completed
 The checkpoint under `runs/<run-id>/` is written **after every tool call**, not every
 step. Writes are atomic: temp file, `Sync`, then `rename`. `rename` is atomic over an
 existing file so a reader never sees a partial checkpoint, and the `Sync` is what stops a
-power cut leaving a perfectly-renamed empty one.
+power cut leaving a perfectly-renamed empty one. The directory is flushed after the
+rename too, because `rename` returning means the new name is *visible*, not that it is
+*written* — without that, a power cut can lose the name while keeping the bytes. On
+Windows there is no directory flush to ask for: the rename's durability is the
+filesystem's journal, which is a weaker guarantee, and saying so is better than implying
+one rule everywhere.
 
 ```mermaid
 sequenceDiagram

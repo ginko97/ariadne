@@ -123,11 +123,17 @@ func (s *Store) List() ([]Summary, int, error) {
 
 // Save writes st atomically to <Dir>/<RunID>/checkpoint.json.
 //
-// Temp file, Sync, rename. Rename is atomic over an existing file on both
-// Windows and Unix, so a reader never sees a partial write. The Sync is the
-// step that is easy to skip and expensive to skip: rename orders the directory
-// entry, not the bytes, so without it a power cut can leave a perfectly-renamed
-// empty file — which looks valid, and is worse than no checkpoint at all.
+// Temp file, Sync, rename, then sync the directory. Rename is atomic over an
+// existing file on both Windows and Unix, so a reader never sees a partial
+// write. The Sync is the step that is easy to skip and expensive to skip:
+// rename orders the directory entry, not the bytes, so without it a power cut
+// can leave a perfectly-renamed empty file — which looks valid, and is worse
+// than no checkpoint at all.
+//
+// The directory sync is the other half, and it was missing until 2026-09-21:
+// rename(2) returning means the new name is visible to readers, not that the
+// entry has reached the disk. See syncDirectory for what each platform
+// actually guarantees — they differ, and Windows gets less.
 func (s *Store) Save(st *State) error {
 	if !ValidRunID(st.RunID) {
 		return fmt.Errorf("loop: refusing to save run id %q", st.RunID)
@@ -172,8 +178,20 @@ func (s *Store) Save(st *State) error {
 		os.Remove(tmp)
 		return fmt.Errorf("loop: rename checkpoint: %w", err)
 	}
+	// The rename is visible now, but not necessarily on disk. Flushing the
+	// directory is what makes the new name survive a power cut; without it the
+	// bytes are safe under a name nothing points at.
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("loop: sync checkpoint dir: %w", err)
+	}
 	return nil
 }
+
+// syncDir is syncDirectory, indirected so a test can see that Save calls it.
+// Durability against a real power cut cannot be asserted in a unit test; that
+// the step is taken, and that its failure is reported rather than swallowed,
+// can be.
+var syncDir = syncDirectory
 
 // LoadCheckpoint reads the checkpoint envelope for runID.
 func (s *Store) LoadCheckpoint(runID string) (*Checkpoint, error) {

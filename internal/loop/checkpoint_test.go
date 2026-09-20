@@ -502,3 +502,43 @@ func TestDeleteRefusesABadRunID(t *testing.T) {
 		t.Errorf("a refused delete still removed something: %v", err)
 	}
 }
+
+// A checkpoint is not durable until the directory holding its name is too.
+//
+// The power cut itself cannot be staged in a unit test, so what is asserted is
+// the step and its failure handling: Save flushes the run's own directory
+// after the rename, and a filesystem that refuses reports an error instead of
+// returning a success that will not survive the next outage.
+func TestSaveFlushesTheDirectoryAfterTheRename(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{Dir: dir}
+	st := &State{RunID: "run_20260921T090000_aaaaaa", Task: "durable"}
+
+	var synced []string
+	real := syncDir
+	syncDir = func(d string) error {
+		synced = append(synced, d)
+		return real(d)
+	}
+	t.Cleanup(func() { syncDir = real })
+
+	if err := s.Save(st); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	want := filepath.Join(dir, st.RunID)
+	if len(synced) != 1 || synced[0] != want {
+		t.Errorf("synced %v, want exactly [%s] — the rename is visible but not on disk without it", synced, want)
+	}
+
+	// The checkpoint is still readable, which is the part a caller sees.
+	if got, err := s.Load(st.RunID); err != nil || got.Task != "durable" {
+		t.Fatalf("load after save: %v, %+v", err, got)
+	}
+
+	// A refusal is reported. Swallowing it would mean claiming a durability
+	// the filesystem just said it could not provide.
+	syncDir = func(string) error { return errors.New("no fsync here") }
+	if err := s.Save(st); err == nil {
+		t.Error("a directory that cannot be flushed was reported as a successful save")
+	}
+}
