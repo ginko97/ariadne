@@ -53,3 +53,33 @@ func TestIndexDoesNotSwallowUnknownPaths(t *testing.T) {
 		t.Errorf("status = %d for an unknown path, want 404", resp.StatusCode)
 	}
 }
+
+// The tab has an icon, and it is in the page rather than a file.
+//
+// Two things this pins. The page is one embedded file with no build step, so
+// the icon is an inline SVG data URI — a second asset would mean a second
+// route, a second cache rule and a second thing to forget. And it is declared,
+// which is also what stops the browser asking for /favicon.ico on every load
+// and being told 404 by the catch-all handler.
+func TestIndexDeclaresAnInlineIcon(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	resp, err := ts.Client().Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := bodyOf(t, resp)
+
+	if !strings.Contains(body, `rel="icon"`) {
+		t.Error("the page declares no icon, so the tab shows a blank document")
+	}
+	if !strings.Contains(body, "data:image/svg+xml,") {
+		t.Error("the icon is not inline; the page is meant to be one file")
+	}
+	// It has to adapt, because the page itself does: a dark stroke on a dark
+	// tab strip is the same as no icon.
+	if !strings.Contains(body, "prefers-color-scheme:dark") {
+		t.Error("the icon does not follow the colour scheme")
+	}
+}

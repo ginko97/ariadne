@@ -5,6 +5,11 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **The browser tab has an icon.** A spiral — Ariadne's thread — drawn as
+  an inline SVG, so the page is still one file with no build step. It
+  follows light and dark, which a `.ico` cannot, and declaring it also
+  stops the browser asking for `/favicon.ico` on every load and being
+  told 404.
 - **Double-clicking `ariadne.exe` on Windows opens the browser interface.**
   It used to print the list of commands into a console window that Windows
   destroyed in the same instant, so a fresh download appeared to do nothing at
