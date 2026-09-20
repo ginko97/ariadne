@@ -5,6 +5,13 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **`edit_file` stopped failing on text the model had just read.** Every tool
+  result was fenced with one newline more than the file holds, so a model that
+  copied a line back into `old_text` was told "old_text was not found" — three
+  times in a row in one conversation, on a file it had read correctly. The
+  fence no longer adds that newline, `edit_file` forgives one extra trailing
+  newline, and a replacement in a CRLF file is written with CRLF instead of
+  leaving one line ending differently.
 - **Formatted answers in the browser.** Headings, bold, lists, tables, code
   and links are shown formatted instead of as `**` and `##`, in new answers
   and reopened conversations. Images are never loaded (shown as text), and

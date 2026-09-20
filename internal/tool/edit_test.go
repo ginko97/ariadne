@@ -155,3 +155,33 @@ func TestEditFileLeavesNoTemporaryFileAndKeepsPermissions(t *testing.T) {
 		t.Errorf("permissions changed from %v to %v", before.Mode().Perm(), after.Mode().Perm())
 	}
 }
+
+// A model that has just read a file hands its text back with one newline more
+// than the file holds; that is not a different piece of text. Seen in
+// run_20260920T070511_e1059b, where three edits in a row were refused.
+func TestEditFileToleratesAnExtraTrailingNewline(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("Project notes\r\nOwner: Ginko\r\nStatus: draft\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, isErr := call(t, NewEditFile(dir), editArgs{
+		Path:    "notes.txt",
+		OldText: "Project notes\r\nOwner: Ginko\r\nStatus: draft\r\n\n",
+		NewText: "Example Domain\nProject notes\r\nOwner: Ginko\r\nStatus: draft\r\n\n",
+	})
+	if isErr {
+		t.Fatalf("an edit differing by one trailing newline was refused: %s", got)
+	}
+	data, _ := os.ReadFile(path)
+	if want := "Example Domain\r\nProject notes\r\nOwner: Ginko\r\nStatus: draft\r\n"; string(data) != want {
+		t.Errorf("file = %q, want %q", data, want)
+	}
+
+	// Text that is genuinely absent is still refused.
+	if _, isErr := call(t, NewEditFile(dir), editArgs{
+		Path: "notes.txt", OldText: "Status: final\n", NewText: "Status: draft",
+	}); !isErr {
+		t.Error("absent text was accepted")
+	}
+}

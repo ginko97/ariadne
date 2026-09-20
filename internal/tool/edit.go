@@ -133,6 +133,24 @@ func (e EditFile) Call(_ context.Context, _ string, args json.RawMessage) (llm.T
 			oldText, newText, n = crlfOld, strings.ReplaceAll(newText, "\n", "\r\n"), m
 		}
 	}
+	// A model that has just read the file often hands back its text with one
+	// newline more than the file holds — the fence used to add one, and a
+	// document's last line is easy to mis-copy. The match is still exact; only
+	// trailing newlines are reconsidered, and the same ones come off new_text
+	// so the replacement keeps what followed.
+	if n == 0 {
+		if trimmed := strings.TrimRight(oldText, "\r\n"); trimmed != oldText && trimmed != "" {
+			if m := strings.Count(content, trimmed); m > 0 {
+				oldText, newText, n = trimmed, strings.TrimRight(newText, "\r\n"), m
+			}
+		}
+	}
+	// The replacement takes the file's line endings. A model writes "\n" even
+	// when the text it was shown has "\r\n", so a new line inserted into a
+	// CRLF file would otherwise be the one line in it ending differently.
+	if strings.Contains(content, "\r\n") {
+		newText = strings.ReplaceAll(strings.ReplaceAll(newText, "\r\n", "\n"), "\n", "\r\n")
+	}
 	switch {
 	case n == 0:
 		return fail("edit_file: old_text was not found in %s; it must match exactly, including whitespace and indentation", in.Path)

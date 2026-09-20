@@ -702,3 +702,18 @@ func TestUnreportedCostIsUnknownNotZero(t *testing.T) {
 		}
 	}
 }
+
+// The fence must not put a newline inside itself that the content does not
+// have: a model copying a file's text back out copies that newline too, and
+// edit_file then cannot match it (run_20260920T070511_e1059b: three refusals
+// in a row, each differing from the file by one \n).
+func TestFenceKeepsContentExactlyAsItIs(t *testing.T) {
+	withNewline := fence("fetch", "Project notes\r\nStatus: draft\r\n")
+	if !strings.Contains(withNewline, "Status: draft\r\n</untrusted>") {
+		t.Errorf("a newline was added after content that already ended in one:\n%q", withNewline)
+	}
+	without := fence("fetch", "no trailing newline")
+	if !strings.Contains(without, "no trailing newline\n</untrusted>") {
+		t.Errorf("content without a trailing newline should get one:\n%q", without)
+	}
+}
