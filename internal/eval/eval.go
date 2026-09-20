@@ -224,10 +224,6 @@ func isWordRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
 }
 
-func isWordOrDigit(b byte) bool {
-	return isWordRune(rune(b))
-}
-
 // calledOf reports which of names were requested.
 func calledOf(names []string, s *loop.State) []string {
 	if len(names) == 0 {

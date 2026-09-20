@@ -1041,41 +1041,24 @@ func readPDF(ctx context.Context, f io.Reader, size int64) (string, error) {
 		}
 		return "", fmt.Errorf("pdftotext: %v", err)
 	}
+	// A character can straddle two reads, and nothing here holds the tail
+	// back until the rest arrives: converting bytes to a string keeps the
+	// bytes as they are, so the halves meet again in the buffer and the text
+	// is the same as if it had arrived in one piece. Only the final cut has
+	// to know about characters, and textBuf.add does that.
+	// TestFetchPDFUtf8RuneSplit guards it: a rune split across reads comes
+	// back whole, with no replacement character.
 	out := &textBuf{max: maxDocumentText}
 	buf := make([]byte, 32<<10)
-	var pending []byte
 	for {
 		n, rerr := stdout.Read(buf)
-		if n > 0 {
-			chunk := buf[:n]
-			if len(pending) > 0 {
-				combined := make([]byte, len(pending)+n)
-				copy(combined, pending)
-				copy(combined[len(pending):], chunk)
-				chunk = combined
-				pending = nil
-			}
-			cut := len(chunk)
-			for i := len(chunk) - 1; i >= 0 && i >= len(chunk)-utf8.UTFMax; i-- {
-				if utf8.RuneStart(chunk[i]) {
-					if !utf8.FullRune(chunk[i:]) {
-						cut = i
-						pending = append([]byte(nil), chunk[cut:]...)
-					}
-					break
-				}
-			}
-			if cut > 0 && out.add(string(chunk[:cut])) != nil {
-				// Enough text: stop the conversion rather than wait for the rest.
-				cancel()
-				_, _ = io.Copy(io.Discard, stdout)
-				break
-			}
+		if n > 0 && out.add(string(buf[:n])) != nil {
+			// Enough text: stop the conversion rather than wait for the rest.
+			cancel()
+			_, _ = io.Copy(io.Discard, stdout)
+			break
 		}
 		if rerr != nil {
-			if len(pending) > 0 {
-				_ = out.add(string(pending))
-			}
 			break
 		}
 	}
