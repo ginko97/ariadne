@@ -235,7 +235,7 @@ ariadne eval -tasks my-tasks.json -repeat 3 -min-pass-rate 1.0   # gate a defaul
 | `expect`, `expect_all` | a fact, or several, the answer must contain |
 | `must_call`, `must_not_call` | tools that must have run, or must not have been asked for at all |
 | `files`, `files_from` | fixtures written into a fresh folder for that task: inline text, or a folder next to the task file (for `.docx`, `.pdf`, …) |
-| `expect_file`, `file_contains`, `unchanged`, `absent` | what the folder must look like afterwards |
+| `expect_file`, `file_contains`, `unchanged`, `absent`, `exists` | what the folder must look like afterwards; `exists` takes name patterns, for a file whose name the task cannot know |
 | `approve` | tools whose approval card is answered yes; every other card is answered no |
 | `max_steps` | give up after this many steps |
 

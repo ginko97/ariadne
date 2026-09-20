@@ -29,8 +29,8 @@ func (sc Scorecard) Save(dir string) (string, error) {
 	if when.IsZero() {
 		when = time.Now().UTC()
 	}
-	name := fmt.Sprintf("%s_%s_%s.json",
-		when.Format("20060102T150405"), orUnknown(sc.Commit), slug(sc.Model))
+	name := fmt.Sprintf("%s_%s_%s_%s.json",
+		when.Format("20060102T150405"), orUnknown(sc.Commit), slug(sc.Model), slug(orTasks(sc.TaskSet)))
 	path := filepath.Join(dir, name)
 
 	data, err := json.MarshalIndent(sc, "", "  ")
@@ -66,6 +66,9 @@ func LoadHistory(dir string) ([]Scorecard, error) {
 		if err := json.Unmarshal(data, &sc); err != nil {
 			return nil, fmt.Errorf("eval: decode %s: %w", e.Name(), err)
 		}
+		// Written before task sets were recorded: those were all the original
+		// set, and reading them as such keeps their history comparable.
+		sc.TaskSet = orTasks(sc.TaskSet)
 		out = append(out, sc)
 	}
 
@@ -73,16 +76,27 @@ func LoadHistory(dir string) ([]Scorecard, error) {
 	return out, nil
 }
 
-// Previous returns the most recent earlier scorecard for the same model, which
-// is what a new one has to be compared against. Comparing across models would
-// measure the models, not the change.
-func Previous(history []Scorecard, model string) (Scorecard, bool) {
+// Previous returns the most recent earlier scorecard for the same model on the
+// same task set, which is what a new one has to be compared against. Comparing
+// across models would measure the models, not the change; comparing across task
+// sets compares nothing at all, since no task id appears in both.
+func Previous(history []Scorecard, model, taskSet string) (Scorecard, bool) {
+	taskSet = orTasks(taskSet)
 	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Model == model {
+		if history[i].Model == model && orTasks(history[i].TaskSet) == taskSet {
 			return history[i], true
 		}
 	}
 	return Scorecard{}, false
+}
+
+// orTasks is the name of the original set, for scorecards that predate the
+// field and for callers that pass nothing.
+func orTasks(s string) string {
+	if s == "" {
+		return "tasks"
+	}
+	return s
 }
 
 // Regressions lists tasks that passed in before and fail in sc.

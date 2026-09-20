@@ -125,7 +125,7 @@ func TestRunTasksNilFactoryOrRunID(t *testing.T) {
 }
 
 func TestScorecardTable(t *testing.T) {
-	sc := NewScorecard("some/model", "abc123", []Result{
+	sc := NewScorecard("some/model", "tasks", "abc123", []Result{
 		{TaskID: "a", Pass: true, Cost: 0.001},
 		{TaskID: "b", Pass: false, Cost: 0.002, Reason: "never called: calc"},
 	})

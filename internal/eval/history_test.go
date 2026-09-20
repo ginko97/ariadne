@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,9 +11,9 @@ import (
 func TestSaveAndLoadHistory(t *testing.T) {
 	dir := t.TempDir()
 
-	older := NewScorecard("vendor/model-a", "aaa1111", []Result{{TaskID: "t1", Pass: true}})
+	older := NewScorecard("vendor/model-a", "tasks", "aaa1111", []Result{{TaskID: "t1", Pass: true}})
 	older.When = time.Now().Add(-time.Hour).UTC()
-	newer := NewScorecard("vendor/model-a", "bbb2222", []Result{{TaskID: "t1", Pass: false}})
+	newer := NewScorecard("vendor/model-a", "tasks", "bbb2222", []Result{{TaskID: "t1", Pass: false}})
 
 	for _, sc := range []Scorecard{older, newer} {
 		path, err := sc.Save(dir)
@@ -54,11 +55,11 @@ func TestPreviousIgnoresOtherModels(t *testing.T) {
 		{Model: "b", Commit: "2"},
 		{Model: "a", Commit: "3"},
 	}
-	got, ok := Previous(history, "a")
+	got, ok := Previous(history, "a", "tasks")
 	if !ok || got.Commit != "3" {
 		t.Fatalf("got %+v, want the latest scorecard for a", got)
 	}
-	if _, ok := Previous(history, "never-run"); ok {
+	if _, ok := Previous(history, "never-run", "tasks"); ok {
 		t.Error("reported a previous scorecard for a model with no history")
 	}
 }
@@ -87,9 +88,9 @@ func TestRegressionsNamesTasks(t *testing.T) {
 func TestSaveKeepsRepeatsAtSameCommit(t *testing.T) {
 	dir := t.TempDir()
 
-	first := NewScorecard("vendor/model", "same123", []Result{{TaskID: "t1", Pass: true}})
+	first := NewScorecard("vendor/model", "tasks", "same123", []Result{{TaskID: "t1", Pass: true}})
 	first.When = time.Date(2026, 9, 12, 10, 0, 0, 0, time.UTC)
-	second := NewScorecard("vendor/model", "same123", []Result{{TaskID: "t1", Pass: false}})
+	second := NewScorecard("vendor/model", "tasks", "same123", []Result{{TaskID: "t1", Pass: false}})
 	second.When = time.Date(2026, 9, 12, 10, 5, 0, 0, time.UTC)
 
 	p1, err := first.Save(dir)
@@ -165,5 +166,70 @@ func TestStepRegressionsIgnoresFailingTasks(t *testing.T) {
 	}}
 	if got := StepRegressions(before, after); len(got) != 0 {
 		t.Fatalf("got %v, want none", got)
+	}
+}
+
+// A sweep of one task set is never compared against another. No task id
+// appears in both, so such a comparison reports no regressions — the quiet
+// failure, which reads exactly like a clean sweep.
+func TestPreviousStaysWithinATaskSet(t *testing.T) {
+	dir := t.TempDir()
+	calc := NewScorecard("vendor/model", "tasks", "aaa1111", []Result{{TaskID: "pct-01", Pass: true}})
+	calc.When = time.Now().Add(-time.Hour).UTC()
+	daily := NewScorecard("vendor/model", "daily", "aaa1111", []Result{{TaskID: "find-report", Pass: true}})
+	daily.When = time.Now().UTC()
+	for _, sc := range []Scorecard{calc, daily} {
+		if _, err := sc.Save(dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	history, err := LoadHistory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := Previous(history, "vendor/model", "tasks")
+	if !ok || got.TaskSet != "tasks" || got.Results[0].TaskID != "pct-01" {
+		t.Errorf("the calc set matched %+v", got)
+	}
+	got, ok = Previous(history, "vendor/model", "daily")
+	if !ok || got.TaskSet != "daily" {
+		t.Errorf("the daily set matched %+v", got)
+	}
+	if _, ok := Previous(history, "vendor/model", "other"); ok {
+		t.Error("a set with no history matched something")
+	}
+}
+
+// Scorecards written before task sets were recorded are the original set, and
+// keep comparing against new sweeps of it.
+func TestHistoryBeforeTaskSetsIsTheOriginalSet(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "20260101T000000_aaa1111_vendor-model.json"),
+		[]byte(`{"model":"vendor/model","commit":"aaa1111","when":"2026-01-01T00:00:00Z","results":[{"task_id":"pct-01","pass":true}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	history, err := LoadHistory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := Previous(history, "vendor/model", "tasks"); !ok {
+		t.Error("an old scorecard no longer counts as the original set")
+	}
+	if _, ok := Previous(history, "vendor/model", "daily"); ok {
+		t.Error("an old scorecard was taken for the daily set")
+	}
+}
+
+func TestTaskSetName(t *testing.T) {
+	for path, want := range map[string]string{
+		filepath.Join("testdata", "tasks.json"):           "tasks",
+		filepath.Join("testdata", "daily", "tasks.json"):  "daily",
+		filepath.Join("home", "me", "invoices.json"):      "invoices",
+		filepath.Join("home", "me", "work", "tasks.json"): "work",
+	} {
+		if got := TaskSetName(path); got != want {
+			t.Errorf("TaskSetName(%q) = %q, want %q", path, got, want)
+		}
 	}
 }

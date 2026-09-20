@@ -136,12 +136,44 @@ func checkFiles(t Task, ws string, fixtures map[string][]byte) string {
 			return fmt.Sprintf("%s was changed", name)
 		}
 	}
+	for _, pattern := range t.Exists {
+		found, err := matches(ws, pattern)
+		if err != nil {
+			return fmt.Sprintf("exists %q: %v", pattern, err)
+		}
+		if !found {
+			return fmt.Sprintf("no file matching %q was created", pattern)
+		}
+	}
 	for _, name := range t.Absent {
 		if _, err := read(name); err == nil {
 			return fmt.Sprintf("%s exists and should not", name)
 		}
 	}
 	return ""
+}
+
+// matches says whether any file in ws, at any depth, matches pattern.
+func matches(ws, pattern string) (bool, error) {
+	found := false
+	err := filepath.WalkDir(ws, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || found {
+			return err
+		}
+		rel, relErr := filepath.Rel(ws, p)
+		if relErr != nil {
+			return nil
+		}
+		for _, candidate := range []string{d.Name(), filepath.ToSlash(rel)} {
+			if ok, matchErr := filepath.Match(pattern, candidate); matchErr != nil {
+				return matchErr
+			} else if ok {
+				found = true
+			}
+		}
+		return nil
+	})
+	return found, err
 }
 
 // safeRel refuses a path that is absolute, has a volume or UNC prefix, or

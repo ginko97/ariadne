@@ -69,6 +69,12 @@ type Task struct {
 	FileContains map[string]string `json:"file_contains,omitempty"`
 	Unchanged    []string          `json:"unchanged,omitempty"`
 	Absent       []string          `json:"absent,omitempty"`
+	// Exists are patterns (filepath.Match) at least one file must match, for
+	// when the right answer is a file whose name the task cannot know: asked
+	// for a summary as .pdf, a model should save .md under a name of its own
+	// choosing. Checking the answer's wording instead fails a model that says
+	// "saved as Markdown".
+	Exists []string `json:"exists,omitempty"`
 
 	// dir is the folder of the task file, which FilesFrom is relative to.
 	dir string
@@ -77,7 +83,8 @@ type Task struct {
 // usesFiles says whether t needs a folder of its own.
 func (t Task) usesFiles() bool {
 	return len(t.Files) > 0 || t.FilesFrom != "" || len(t.ExpectFile) > 0 ||
-		len(t.FileContains) > 0 || len(t.Unchanged) > 0 || len(t.Absent) > 0
+		len(t.FileContains) > 0 || len(t.Unchanged) > 0 || len(t.Absent) > 0 ||
+		len(t.Exists) > 0
 }
 
 // Result is one task's outcome.
@@ -104,7 +111,13 @@ type Result struct {
 
 // Scorecard is one model's run over one task set, at one commit.
 type Scorecard struct {
-	Model     string    `json:"model"`
+	Model string `json:"model"`
+	// TaskSet names the set these results came from, so a sweep of one set is
+	// never compared against another: the task ids do not overlap, so such a
+	// comparison reports no regressions rather than reporting nonsense, which
+	// is the quieter and worse failure. Empty in scorecards written before
+	// this existed; LoadHistory reads those as the original set.
+	TaskSet   string    `json:"task_set,omitempty"`
 	Commit    string    `json:"commit"`
 	When      time.Time `json:"when"`
 	Results   []Result  `json:"results"`
@@ -359,9 +372,10 @@ func trimDecimalZeros(s string) string {
 
 // NewScorecard aggregates results. Total cost comes from the runs themselves,
 // so it is what the provider charged rather than a table's estimate.
-func NewScorecard(model, commit string, results []Result) Scorecard {
+func NewScorecard(model, taskSet, commit string, results []Result) Scorecard {
 	sc := Scorecard{
 		Model:   model,
+		TaskSet: taskSet,
 		Commit:  commit,
 		When:    time.Now().UTC(),
 		Results: results,
@@ -377,6 +391,20 @@ func NewScorecard(model, commit string, results []Result) Scorecard {
 		sc.PassRate = float64(sc.Passed) / float64(sc.Total)
 	}
 	return sc
+}
+
+// TaskSetName is the name a task file's results are filed under: its base
+// name without the extension, so testdata/daily/tasks.json and
+// testdata/tasks.json are "daily" and "tasks" rather than both "tasks".
+func TaskSetName(path string) string {
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	if dir := filepath.Base(filepath.Dir(path)); base == "tasks" && dir != "." && dir != "testdata" {
+		return dir
+	}
+	if base == "" {
+		return "tasks"
+	}
+	return base
 }
 
 // LoadTasks reads a task set from disk.

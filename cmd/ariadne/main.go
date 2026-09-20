@@ -1716,7 +1716,7 @@ func cmdEval(args []string) int {
 			fmt.Fprintf(os.Stderr, "eval %s over %d tasks...\n", model, len(tasks))
 		}
 
-		sc := eval.NewScorecard(model, commit,
+		sc := eval.NewScorecard(model, eval.TaskSetName(*tasksPath), commit,
 			eval.RunTasks(ctx, tasks, model, newAgent, taskRunID, *repeat))
 
 		if i > 0 {
@@ -1730,7 +1730,7 @@ func cmdEval(args []string) int {
 				fmt.Fprintf(os.Stderr, "ariadne eval: %v\n", err)
 				return exitFail
 			}
-			if before, ok := eval.Previous(history, model); ok {
+			if before, ok := eval.Previous(history, model, sc.TaskSet); ok {
 				// Reported even when the pass rate is unchanged: an agent taking
 				// more steps for the same answer is usually working around
 				// something that broke.

@@ -214,7 +214,7 @@ func TestScoreWithoutMustCall(t *testing.T) {
 }
 
 func TestNewScorecard(t *testing.T) {
-	sc := NewScorecard("some/model", "abc1234", []Result{
+	sc := NewScorecard("some/model", "tasks", "abc1234", []Result{
 		{TaskID: "a", Pass: true, Cost: 0.001},
 		{TaskID: "b", Pass: false, Cost: 0.002, Reason: "wrong"},
 		{TaskID: "c", Pass: true, Cost: 0.003},

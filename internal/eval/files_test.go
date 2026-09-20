@@ -202,3 +202,37 @@ func TestApprovalsComeFromTheTask(t *testing.T) {
 		t.Errorf("approvals = %v / %v", envs[0].Approve, envs[1].Approve)
 	}
 }
+
+// When the right answer is a file whose name the task cannot know — "save it
+// as .pdf" should produce Markdown under some name — the check is that such a
+// file exists, not that the answer says so. A model that replies "saved as
+// Markdown" would fail a wording check while having done exactly right.
+func TestExistsMatchesAFileTheTaskCannotName(t *testing.T) {
+	task := Task{ID: "save", Prompt: "p", Exists: []string{"*.md"}, Absent: []string{"summary.pdf"}}
+	var envs []TaskEnv
+	saved := acting("write_file", "saved as Markdown", func(ws string) {
+		write(t, filepath.Join(ws, "harbor-summary.md"), "# Summary")
+	}, &envs)
+	if r := RunTasks(context.Background(), []Task{task}, "m", saved, ids, 1)[0]; !r.Pass {
+		t.Errorf("a .md file under another name failed: %s", r.Reason)
+	}
+
+	wrote_pdf := acting("write_file", "saved", func(ws string) {
+		write(t, filepath.Join(ws, "summary.pdf"), "# Summary")
+	}, &envs)
+	r := RunTasks(context.Background(), []Task{task}, "m", wrote_pdf, ids, 1)[0]
+	if r.Pass || !strings.Contains(r.Reason, `no file matching "*.md"`) {
+		t.Errorf("text under a .pdf name: pass=%v reason=%q", r.Pass, r.Reason)
+	}
+
+	// A file in a subfolder counts too.
+	nested := acting("write_file", "saved", func(ws string) {
+		if err := os.MkdirAll(filepath.Join(ws, "out"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(ws, "out", "summary.md"), "# Summary")
+	}, &envs)
+	if r := RunTasks(context.Background(), []Task{task}, "m", nested, ids, 1)[0]; !r.Pass {
+		t.Errorf("a .md file in a subfolder failed: %s", r.Reason)
+	}
+}
