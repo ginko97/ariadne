@@ -70,7 +70,11 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
   In the browser, **Stop** ends a turn at any point, and **Resume turn** finishes one that
   was interrupted — asking again for any approval it was waiting on.
 - **It keeps a record.** Every request, tool call, approval and cost is in a trace you
-  can search: `ariadne traces`.
+  can search: `ariadne traces`. Where a provider prices what it charged, that price is
+  what you see; where it does not — Gemini, a local Ollama, most OpenAI-compatible
+  endpoints — a turn says **cost unknown** rather than a reassuring $0.0000, and a
+  conversation with some priced steps and some unpriced says **≥** the part that was
+  measured.
 - **It is honest about its limits.** [SECURITY.md](SECURITY.md) says what protects you
   and what does not, and the [injection postmortem](docs/injection-postmortem.md) shows
   the attacks that still work, with traces.
