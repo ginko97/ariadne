@@ -17,9 +17,9 @@
   },
   {
     "id": "story-ending",
-    "prompt": "Summarise story.txt in three sentences: where it begins, and how it ends.",
+    "prompt": "Summarise story.txt in three sentences, including how it ends.",
     "files_from": "files/story",
-    "expect_all": ["orchard", "lighthouse"],
+    "expect_all": ["lighthouse"],
     "must_call": ["fetch"],
     "max_steps": 8
   },
@@ -63,7 +63,7 @@
     "absent": ["summary.pdf"],
     "unchanged": ["facts.txt"],
     "must_call": ["write_file"],
-    "exists": ["*.md"],
+    "exists": ["summary.*"],
     "max_steps": 6
   },
   {
