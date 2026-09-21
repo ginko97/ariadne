@@ -597,3 +597,119 @@ func TestResumeCanAddApprovalGate(t *testing.T) {
 		t.Errorf("State.RequireApproval = %v, want union [calc, write_file]", s.RequireApproval)
 	}
 }
+
+// TestToolDroppedAfterThreeDenials asserts that a tool denied three times is dropped
+// from offered tools and refused without re-asking approval.
+func TestToolDroppedAfterThreeDenials(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		// Turn 1: model requests write_file -> denied (1)
+		toolUseResponse("c1", "write_file", `{"path":"a.txt"}`, 10, 10),
+		// Turn 2: model retries write_file -> denied (2)
+		toolUseResponse("c2", "write_file", `{"path":"a.txt","retry":1}`, 10, 10),
+		// Turn 3: model retries write_file -> denied (3, limit reached)
+		toolUseResponse("c3", "write_file", `{"path":"a.txt","retry":2}`, 10, 10),
+		// Turn 4: model attempts write_file even though not offered -> immediate denial without prompt
+		toolUseResponse("c4", "write_file", `{"path":"a.txt","retry":3}`, 10, 10),
+		// Turn 5: model gives up
+		endResponse("I cannot write the file.", 10, 10),
+	}}
+
+	approvalsAsked := 0
+	a := &Agent{
+		Provider:        fake,
+		Model:           "test",
+		MaxSteps:        10,
+		Tools:           []llm.ToolDef{{Name: "calc"}, {Name: "write_file"}},
+		RequireApproval: []string{"write_file"},
+		Approve: func(_ context.Context, call llm.ToolCall) (bool, error) {
+			if call.Name == "write_file" {
+				approvalsAsked++
+			}
+			return false, nil // deny every time
+		},
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			t.Fatal("denied tool must not run")
+			return llm.ToolResult{}, nil
+		},
+	}
+
+	s := NewState("run_test", "task")
+	ans, err := a.Run(context.Background(), s)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if ans != "I cannot write the file." {
+		t.Errorf("unexpected answer: %q", ans)
+	}
+
+	// Approver should only be called 3 times; the 4th attempt is rejected automatically.
+	if approvalsAsked != 3 {
+		t.Errorf("approvals asked = %d, want 3", approvalsAsked)
+	}
+	if s.denialCount("write_file") != 3 {
+		t.Errorf("denialCount = %d, want 3", s.denialCount("write_file"))
+	}
+
+	// In request 4 (index 3), write_file should have been dropped from Tools offered to the model.
+	offeredInTurn4 := fake.Calls[3].Tools
+	for _, toolDef := range offeredInTurn4 {
+		if toolDef.Name == "write_file" {
+			t.Errorf("write_file was offered in turn 4 despite 3 denials: %+v", offeredInTurn4)
+		}
+	}
+
+	// Verify the 3rd denial message informs the model about tool removal.
+	// Message index:
+	// 0: user task
+	// 1: assistant call c1
+	// 2: user result c1
+	// 3: assistant call c2
+	// 4: user result c2
+	// 5: assistant call c3
+	// 6: user result c3 (3rd denial)
+	// 7: assistant call c4
+	// 8: user result c4 (4th denial - rejected immediately)
+	// 9: assistant end
+	thirdDenial := s.Messages[6].Blocks[0].Content
+	if !strings.Contains(thirdDenial, "3 denials reached; tool will no longer be offered in this run") {
+		t.Errorf("third denial message missing drop warning: %q", thirdDenial)
+	}
+
+	fourthDenial := s.Messages[8].Blocks[0].Content
+	if !strings.Contains(fourthDenial, "is no longer offered in this run (3 denials reached)") {
+		t.Errorf("fourth denial message missing dropped notification: %q", fourthDenial)
+	}
+}
+
+// TestToolDenialsPersistAcrossCheckpoint asserts that tool denial counts round-trip
+// through checkpoint persistence and continue to suppress the tool upon resume.
+func TestToolDenialsPersistAcrossCheckpoint(t *testing.T) {
+	dir := t.TempDir()
+	store := Store{Dir: dir}
+
+	s := NewState("run_denial_resume", "task")
+	s.recordDenial("write_file")
+	s.recordDenial("write_file")
+	s.recordDenial("write_file")
+
+	if err := store.Save(s); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := store.Load("run_denial_resume")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if loaded.denialCount("write_file") != 3 {
+		t.Errorf("loaded denialCount = %d, want 3", loaded.denialCount("write_file"))
+	}
+
+	a := &Agent{
+		Tools: []llm.ToolDef{{Name: "calc"}, {Name: "write_file"}},
+	}
+	offered := a.offeredTools(loaded)
+	if len(offered) != 1 || offered[0].Name != "calc" {
+		t.Errorf("offeredTools after resume = %+v, want only [calc]", offered)
+	}
+}

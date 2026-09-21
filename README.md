@@ -92,7 +92,9 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
 - **It asks first.** Reading a web page, writing a file, editing one, every MCP tool
   you have not trusted, and every program it wants to run: you see what it would do —
   the lines an edit changes, what a write replaces, the whole URL — and say yes or no.
-  No answer is not a yes.
+  No answer is not a yes: an unanswered prompt times out after five minutes and denies
+  itself in both the browser and the terminal. Denying a tool three times drops it for
+  the rest of the run so the model cannot fatigue you into agreeing.
 - **It survives a crash.** A conversation is saved when a turn starts and after every
   tool call. Kill the process mid-task and it resumes without repeating what already ran.
   In the browser, **Stop** ends a turn at any point, and **Resume turn** finishes one that

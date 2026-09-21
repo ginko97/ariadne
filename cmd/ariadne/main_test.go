@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -509,7 +510,7 @@ func TestApproveFromReader(t *testing.T) {
 	for _, tc := range cases {
 		r := bufio.NewReader(strings.NewReader(tc.input))
 		var out strings.Builder
-		got, err := approveFromReader(r, &out, call, t.TempDir())
+		got, err := approveFromReader(context.Background(), r, &out, call, t.TempDir())
 		if err != nil {
 			t.Errorf("approveFromReader(%q) unexpected error: %v", tc.input, err)
 		}
@@ -529,7 +530,7 @@ func TestApproveSharedReaderPreservesInput(t *testing.T) {
 	}
 
 	var out strings.Builder
-	ok, err := approveFromReader(r, &out, llm.ToolCall{Name: "calc"}, t.TempDir())
+	ok, err := approveFromReader(context.Background(), r, &out, llm.ToolCall{Name: "calc"}, t.TempDir())
 	if err != nil || !ok {
 		t.Fatalf("approval: %v, %v", ok, err)
 	}
@@ -978,7 +979,7 @@ func TestTerminalApprovalShowsThePreviewNotTheJSON(t *testing.T) {
 
 	var out strings.Builder
 	r := bufio.NewReader(strings.NewReader("n\n"))
-	if _, err := approveFromReader(r, &out, llm.ToolCall{Name: "edit_file", Args: args}, dir); err != nil {
+	if _, err := approveFromReader(context.Background(), r, &out, llm.ToolCall{Name: "edit_file", Args: args}, dir); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -1019,5 +1020,57 @@ func TestNonTerminalDenialNamesTheTrustFlag(t *testing.T) {
 	said, _ := io.ReadAll(pr)
 	if !strings.Contains(string(said), "-trust write_file") {
 		t.Errorf("denial does not name the flag: %q", said)
+	}
+}
+
+// TestApproveFromReaderTimesOut asserts that an unanswered terminal prompt times out
+// and fails closed (denies the call).
+func TestApproveFromReaderTimesOut(t *testing.T) {
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pr.Close()
+	defer pw.Close()
+
+	r := bufio.NewReader(pr)
+	var out strings.Builder
+	call := llm.ToolCall{Name: "write_file", Args: json.RawMessage(`{}`)}
+
+	approved, err := approveFromReaderWithTimeout(context.Background(), r, &out, call, t.TempDir(), 25*time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if approved {
+		t.Error("unanswered prompt timed out but returned approved = true")
+	}
+	if !strings.Contains(out.String(), "approval timed out; denied") {
+		t.Errorf("expected timeout message in output:\n%s", out.String())
+	}
+}
+
+// TestApproveFromReaderCancelsOnContext asserts that a cancelled context aborts
+// the prompt immediately without waiting for input.
+func TestApproveFromReaderCancelsOnContext(t *testing.T) {
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pr.Close()
+	defer pw.Close()
+
+	r := bufio.NewReader(pr)
+	var out strings.Builder
+	call := llm.ToolCall{Name: "write_file", Args: json.RawMessage(`{}`)}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancelled immediately
+
+	approved, err := approveFromReader(ctx, r, &out, call, t.TempDir())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled error, got %v", err)
+	}
+	if approved {
+		t.Error("cancelled prompt returned approved = true")
 	}
 }

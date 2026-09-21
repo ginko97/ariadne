@@ -22,6 +22,10 @@ var (
 	ErrEmptyToolUse = errors.New("loop: stop=tool_use but response carried no tool_use blocks")
 )
 
+// maxToolDenials is the number of times a tool can be denied approval before
+// it is dropped from the offered tools to prevent retry loops and approval fatigue.
+const maxToolDenials = 3
+
 // Price is USD per million tokens, per model.
 type Price struct {
 	InputPerMTok  float64
@@ -411,6 +415,17 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 			continue
 		}
 
+		// A tool that was denied maxToolDenials times is no longer offered and
+		// is refused immediately without putting another prompt to the operator.
+		if s.denialCount(c.Name) >= maxToolDenials {
+			err := a.deny(s, i, c, fmt.Sprintf("tool %q is no longer offered in this run (%d denials reached)",
+				c.Name, maxToolDenials))
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
 		// Permitted is not the same as wanted. The allow-list was decided before
 		// the run, by someone who could not know what the arguments would be;
 		// this asks about these arguments, now.
@@ -426,7 +441,13 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 				IsError: !ok,
 			})
 			if !ok {
-				if err := a.deny(s, i, c, fmt.Sprintf("call to %q was not approved", c.Name)); err != nil {
+				denials := s.recordDenial(c.Name)
+				msg := fmt.Sprintf("call to %q was not approved", c.Name)
+				if denials >= maxToolDenials {
+					msg = fmt.Sprintf("call to %q was not approved (%d denials reached; tool will no longer be offered in this run)",
+						c.Name, denials)
+				}
+				if err := a.deny(s, i, c, msg); err != nil {
 					return err
 				}
 				continue
@@ -696,21 +717,22 @@ func (a *Agent) endRun(s *State, err error) error {
 }
 
 // offeredTools is the tool list the model is shown: Tools minus anything the
-// allow-list excludes.
+// allow-list excludes, and minus any tool that has reached maxToolDenials.
 //
 // This is courtesy, not the control. The model can still name a tool it was
 // never offered, so the check in runCalls is what enforces the grant; filtering
 // here only avoids advertising a capability that would be refused, which would
 // waste a step and read as a malfunction.
 func (a *Agent) offeredTools(s *State) []llm.ToolDef {
-	if len(s.Allow) == 0 {
-		return a.Tools
-	}
-	out := make([]llm.ToolDef, 0, len(a.Tools))
+	var out []llm.ToolDef
 	for _, t := range a.Tools {
-		if s.allows(t.Name) {
-			out = append(out, t)
+		if len(s.Allow) > 0 && !s.allows(t.Name) {
+			continue
 		}
+		if s.denialCount(t.Name) >= maxToolDenials {
+			continue
+		}
+		out = append(out, t)
 	}
 	return out
 }

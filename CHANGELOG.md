@@ -5,6 +5,22 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Stop offering a tool after three denials in one run.** Mitigates approval
+  fatigue and prevents models from looping after an operator denies an action.
+  After the third denial of a tool, it is dropped from the offered tools and
+  any further attempt is refused automatically without asking again.
+- **Terminal approval prompt timeout.** Unanswered terminal approval prompts
+  now time out after 5 minutes and fail closed (denying the call), matching the
+  browser UI timeout. Context cancellation (such as Ctrl-C) unblocks the prompt
+  immediately without waiting for input.
+- **Security test skip detection in `make check`.** Tests matching
+  `Sandbox|Injection|Gate|Trust|Redact` that skip will fail `make check` unless
+  the test and its justification are explicitly recorded in `scripts/audit-skips.go`.
+- **`-repeat 3` in `make eval-daily`.** Runs each task 3 times in daily eval sweeps
+  to prevent single-run model sampling noise from polluting scorecards.
+- **Checkpoint directory fsynced on Unix.** `Store.Save` fsyncs the parent
+  directory after renaming the checkpoint file, ensuring directory entries reach
+  durable storage.
 - **The browser tab has an icon.** A spiral — Ariadne's thread — drawn as
   an inline SVG, so the page is still one file with no build step. It
   follows light and dark, which a `.ico` cannot, and declaring it also

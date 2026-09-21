@@ -89,6 +89,26 @@ type State struct {
 	// The conversation no longer says how long it was; this does, and the trace
 	// still holds every message that ever existed.
 	Dropped int `json:"dropped,omitempty"`
+	// Denials tracks the number of times each tool was denied approval during
+	// this run. Saved on State so a resumed run inherits the count.
+	Denials map[string]int `json:"denials,omitempty"`
+}
+
+// recordDenial increments the denial count for the given tool name and returns the new count.
+func (s *State) recordDenial(name string) int {
+	if s.Denials == nil {
+		s.Denials = make(map[string]int)
+	}
+	s.Denials[name]++
+	return s.Denials[name]
+}
+
+// denialCount reports how many times the tool has been denied in this run.
+func (s *State) denialCount(name string) int {
+	if s.Denials == nil {
+		return 0
+	}
+	return s.Denials[name]
 }
 
 // allows reports whether name may be called in this run.

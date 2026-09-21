@@ -31,7 +31,7 @@ GO     ?= go
 BINARY := ariadne
 PKGS   := ./...
 
-.PHONY: all build fmt vet test check live eval workspace audit-tracked audit-livetests audit-docnames clean
+.PHONY: all build fmt vet test check live eval workspace audit-tracked audit-livetests audit-docnames audit-skips clean
 
 all: check build
 
@@ -61,7 +61,7 @@ eval:
 # The daily set: documents, folders, edits and an injection attempt. Real model
 # calls, so it is never part of `make check`.
 eval-daily:
-	$(GO) run ./cmd/ariadne eval --base-url $(EVAL_URL) --models $(EVAL_MODEL) --tasks testdata/daily/tasks.json
+	$(GO) run ./cmd/ariadne eval --base-url $(EVAL_URL) --models $(EVAL_MODEL) --tasks testdata/daily/tasks.json --repeat 3
 
 # Stage the fetchable fixtures into the sandbox the tools are confined to.
 #
@@ -78,7 +78,7 @@ workspace:
 live:
 	$(GO) test $(PKGS) -tags live -run TestLive -v -count=1
 
-check: fmt vet test audit-tracked audit-livetests audit-docnames
+check: fmt vet test audit-tracked audit-livetests audit-docnames audit-skips
 	@echo 'check: ok'
 
 # Every .go file must be known to git.
@@ -105,6 +105,11 @@ audit-livetests:
 # escaping made it unreadable.
 audit-docnames:
 	@bad=0; 	for f in $$(find . -name '*.go' -not -path './.git/*'); do 	  awk -f scripts/audit-docnames.awk "$$f" "$$f" || bad=1; 	done; 	[ $$bad -eq 0 ] || { echo 'audit-docnames: FAILED'; exit 1; }
+
+# Security-relevant tests (Sandbox|Injection|Gate|Trust|Redact) must not skip
+# without a recorded entry and justification in scripts/audit-skips.go.
+audit-skips:
+	@$(GO) run ./scripts/audit-skips.go
 
 clean:
 	rm -f $(BINARY) $(BINARY).exe
