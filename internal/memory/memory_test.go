@@ -330,3 +330,94 @@ func TestPromptDefangsNotesWrittenByHand(t *testing.T) {
 		t.Errorf("a hand-written note escaped the fence:\n%s", got)
 	}
 }
+
+func TestDeleteNoteSuccess(t *testing.T) {
+	s := store(t)
+	notes := []string{"first note", "second note to delete", "third note"}
+	for _, n := range notes {
+		if err := s.Append(Note{Text: n, RunID: "run_test"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Delete the middle note.
+	if err := s.Delete(1, "second note to delete"); err != nil {
+		t.Fatalf("delete failed: %v", err)
+	}
+
+	remaining, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 2 {
+		t.Fatalf("got %d notes, want 2", len(remaining))
+	}
+	if remaining[0].Text != "first note" {
+		t.Errorf("remaining[0] = %q, want 'first note'", remaining[0].Text)
+	}
+	if remaining[1].Text != "third note" {
+		t.Errorf("remaining[1] = %q, want 'third note'", remaining[1].Text)
+	}
+}
+
+func TestDeleteNoteOutOfBounds(t *testing.T) {
+	s := store(t)
+	if err := s.Append(Note{Text: "only note", RunID: "run_1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Delete(-1, "only note"); err == nil {
+		t.Error("delete with negative index succeeded")
+	}
+	if err := s.Delete(5, "only note"); err == nil {
+		t.Error("delete with out-of-bounds index succeeded")
+	}
+}
+
+func TestDeleteNoteTextMismatch(t *testing.T) {
+	s := store(t)
+	if err := s.Append(Note{Text: "actual note content", RunID: "run_1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Delete(0, "wrong content"); err == nil {
+		t.Error("delete with mismatched text succeeded")
+	}
+
+	// Verify the original note was not removed
+	remaining, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 1 || remaining[0].Text != "actual note content" {
+		t.Errorf("unexpected notes after failed delete: %+v", remaining)
+	}
+}
+
+func TestDeleteAllNotesLeavesHeader(t *testing.T) {
+	s := store(t)
+	if err := s.Append(Note{Text: "one and only", RunID: "run_1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Delete(0, "one and only"); err != nil {
+		t.Fatalf("delete failed: %v", err)
+	}
+
+	remaining, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 0 {
+		t.Errorf("got %d notes, want 0", len(remaining))
+	}
+
+	// File still exists and contains header
+	data, err := os.ReadFile(s.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "# MEMORY") {
+		t.Error("header was lost after deleting all notes")
+	}
+}

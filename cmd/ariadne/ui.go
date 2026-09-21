@@ -13,6 +13,7 @@ import (
 
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
+	"github.com/ginko97/ariadne/internal/memory"
 	"github.com/ginko97/ariadne/internal/server"
 	"github.com/ginko97/ariadne/internal/trace"
 )
@@ -20,9 +21,9 @@ import (
 // cmdUI serves the chat endpoint on loopback.
 //
 // Approvals are requested interactively in the browser over SSE and answered
-// via POST /api/approve. Deliberately without -remember: -remember force-gates
-// the remember tool behind approval, but writing memory notes is not yet offered
-// in the UI.
+// via POST /api/approve. Memory is enabled with forced approval gating: every
+// fact Ariadne remembers must be explicitly approved in the browser before being
+// written to MEMORY.md, and past facts are curated in the Memory drawer.
 func cmdUI(args []string) int {
 	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -129,6 +130,7 @@ func cmdUI(args []string) int {
 			MCPTools:  mcpTools,
 			OnDelta:   onDelta,
 			Approve:   gated,
+			Memory:    true,
 			// No ApproveFn: internal/server replaces Agent.Approve per request
 			// with one that asks over the stream that request is holding, which
 			// is a writer only the handler has. A denier here would be silently
@@ -143,6 +145,7 @@ func cmdUI(args []string) int {
 	}
 
 	srv := server.New(store, newAgent, newRunID)
+	srv.MemoryStore = memory.Store{Path: memoryFile}
 	// The picker's fallback is the model this process was started with: the one
 	// model known to work, because every turn here already uses it.
 	//

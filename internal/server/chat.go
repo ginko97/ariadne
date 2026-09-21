@@ -95,6 +95,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		// message at index 0 that compaction can never drop.
 		state = loop.NewState(runID, req.Message)
 		state.Workspace = workspace
+		state.Memory = s.MemoryStore.Path != ""
 	} else {
 		st, err := s.Store.Load(runID)
 		if err != nil {

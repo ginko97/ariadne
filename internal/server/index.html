@@ -14,7 +14,19 @@
          font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif; }
   aside { border-right:1px solid var(--edge); display:flex; flex-direction:column; min-height:0; }
   aside header { padding:.7rem .9rem; border-bottom:1px solid var(--edge); display:flex; gap:.5rem; }
-  #theme, #settings { font:inherit; cursor:pointer; width:2.4rem; }
+  #theme, #settings, #memoryBtn { font:inherit; cursor:pointer; width:2.4rem; }
+  #memoryPanel { border-bottom:1px solid var(--edge); padding:.9rem; display:flex; flex-direction:column;
+                 gap:.55rem; max-width:44rem; }
+  #memoryPanel h2 { margin:0; font-size:1.05em; }
+  #memoryPanel .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+  #memoryPanel button { font:inherit; cursor:pointer; }
+  .note-card { border:1px solid var(--edge); border-radius:.35rem; padding:.5rem .7rem;
+               display:flex; justify-content:space-between; align-items:flex-start; gap:.6rem; }
+  .note-text { flex:1; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .note-meta { font-size:.8em; color:var(--dim); margin-top:.25rem; }
+  button.del-note { background:none; border:1px solid var(--edge); border-radius:.25rem;
+                    cursor:pointer; color:var(--dim); font-size:.85em; padding:.2rem .5rem; }
+  button.del-note:hover { color:var(--err); border-color:var(--err); }
   #setup { border-bottom:1px solid var(--edge); padding:.9rem; display:flex; flex-direction:column;
            gap:.55rem; max-width:40rem; }
   #setup h2 { margin:0; font-size:1.05em; }
@@ -111,6 +123,7 @@
 <aside>
   <header>
     <button class="primary" id="new" style="flex:1">New conversation</button>
+    <button type="button" id="memoryBtn" title="Remembered facts (MEMORY.md)">🧠</button>
     <button type="button" id="settings" title="Provider, key and model">⚙</button>
     <button type="button" id="theme" title="Theme: follow the system, light, or dark"></button>
   </header>
@@ -130,6 +143,18 @@
     <button type="button" id="useFolder" class="primary">Use</button>
     <button type="button" id="cancelFolder">Cancel</button>
     <span id="folderErr" class="is_error"></span>
+  </div>
+  <div id="memoryPanel" hidden>
+    <div class="row" style="justify-content:space-between; align-items:center;">
+      <h2>Remembered facts</h2>
+      <span id="memoryCount" class="dim"></span>
+    </div>
+    <div class="dim">Facts Ariadne remembered and you approved across conversations. Each fact was approved before it was saved.</div>
+    <div id="memoryList" style="display:flex; flex-direction:column; gap:.5rem; margin-top:.3rem; max-height:22rem; overflow-y:auto;"></div>
+    <div class="row" style="margin-top:.4rem;">
+      <button type="button" id="closeMemory">Close</button>
+      <span id="memoryErr" class="is_error"></span>
+    </div>
   </div>
   <form id="setup" hidden autocomplete="off">
     <h2 id="setupTitle">Choose a model provider</h2>
@@ -653,6 +678,7 @@ async function send(text, opts = {}) {
           showAnswer(answer, d.answer, d.answered_by || d.model);
           stats(d.turns, d.steps, d.cost, d.cost_unknown);
           selectModel(d.model);
+          if (!$('memoryPanel').hidden) loadMemory();
         } else if (name === 'approval_required') {
           approvalCard(d);
           working('waiting for your approval');
@@ -901,6 +927,7 @@ function showAnswer(e, text, model) {
 const HELP = `Commands (answered by this page, never sent to the model):
   /help               this list
   /new                start a new conversation
+  /memory             show or hide remembered facts (MEMORY.md)
   /settings           provider, key and model
   /model [id]         show the model for the next message, or switch to id
   /folder             the folder this conversation reads and writes
@@ -916,6 +943,7 @@ What ariadne can do, through its tools:
   write_file  create or replace a file
   edit_file   change an exact piece of a file (asks first)
   web_fetch   read a web page by URL (asks first)
+  remember    save a fact across conversations (asks first)
 Tools that change something or reach out ask before each call, unless
 ariadne was started with -trust for them; the card shows exactly what will
 run. Files stay inside the conversation's folder.
@@ -933,6 +961,8 @@ function command(text) {
       say(HELP); break;
     case 'new':
       newConversation(); break;
+    case 'memory':
+      toggleMemory(); break;
     case 'settings':
       openSetup(); break;
     case 'model':
@@ -1002,6 +1032,7 @@ async function useFolder(path) {
 
 $('folderBtn').onclick = () => {
   if (busy || runID) return;
+  if (!$('memoryPanel').hidden) closeMemory();
   $('folderInput').value = newWorkspace || defaultWorkspace;
   $('folderErr').textContent = '';
   $('folderPanel').hidden = false;
@@ -1031,6 +1062,107 @@ $('browse').onclick = async () => {
     $('browse').disabled = false;
   }
 };
+
+// ---------------------------------------------------------------- memory
+//
+// Facts remembered across conversations in MEMORY.md. Every fact was approved
+// before it was kept, and any fact can be deleted by the operator.
+let memoryNotes = [];
+
+async function loadMemory() {
+  $('memoryErr').textContent = '';
+  try {
+    const resp = await api('/api/memory');
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      $('memoryErr').textContent = d.error || 'Could not load memory notes';
+      return;
+    }
+    memoryNotes = await resp.json();
+    renderMemory();
+  } catch (e) {
+    $('memoryErr').textContent = e.message;
+  }
+}
+
+function renderMemory() {
+  const list = $('memoryList');
+  list.replaceChildren();
+  $('memoryCount').textContent = `${memoryNotes.length} / 50 notes`;
+  if (memoryNotes.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'dim';
+    empty.style.padding = '.4rem 0';
+    empty.textContent = 'No remembered facts yet. When Ariadne asks to remember something and you approve it, it will appear here.';
+    list.append(empty);
+    return;
+  }
+  for (const item of memoryNotes) {
+    const card = document.createElement('div');
+    card.className = 'note-card';
+
+    const body = document.createElement('div');
+    body.className = 'note-text';
+    body.textContent = item.text;
+
+    const meta = document.createElement('div');
+    meta.className = 'note-meta';
+    const stamp = item.at ? new Date(item.at).toLocaleString() : '';
+    meta.textContent = (item.run_id ? `from ${item.run_id}` : '') + (stamp ? ` · ${stamp}` : '');
+    body.append(meta);
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'del-note';
+    delBtn.textContent = 'Delete';
+    delBtn.title = 'Delete this remembered fact';
+    delBtn.onclick = async () => {
+      delBtn.disabled = true;
+      $('memoryErr').textContent = '';
+      try {
+        const resp = await api('/api/memory', {
+          method: 'DELETE',
+          body: JSON.stringify({ index: item.index, text: item.text }),
+        });
+        const d = await resp.json().catch(() => ({ error: 'refused' }));
+        if (!resp.ok) {
+          $('memoryErr').textContent = d.error || 'Could not delete note';
+          delBtn.disabled = false;
+          return;
+        }
+        await loadMemory();
+      } catch (err) {
+        $('memoryErr').textContent = err.message;
+        delBtn.disabled = false;
+      }
+    };
+
+    card.append(body, delBtn);
+    list.append(card);
+  }
+}
+
+function openMemory() {
+  if (!$('setup').hidden) closeSetup();
+  if (!$('folderPanel').hidden) closeFolderPanel();
+  $('memoryPanel').hidden = false;
+  loadMemory();
+}
+
+function closeMemory() {
+  $('memoryPanel').hidden = true;
+  $('memoryErr').textContent = '';
+  $('input').focus();
+}
+
+function toggleMemory() {
+  if (busy) return;
+  if ($('memoryPanel').hidden) openMemory();
+  else closeMemory();
+}
+
+$('memoryBtn').onclick = toggleMemory;
+$('closeMemory').onclick = closeMemory;
 
 // ---------------------------------------------------------------- setup
 //
@@ -1070,6 +1202,8 @@ async function loadOllamaModels() {
 
 function openSetup() {
   if (!setup) return;
+  if (!$('memoryPanel').hidden) closeMemory();
+  if (!$('folderPanel').hidden) closeFolderPanel();
   $('setupProvider').replaceChildren(...setup.providers.map(p =>
     Object.assign(document.createElement('option'), { value: p.id, textContent: p.name })));
   $('setupProvider').value = setup.configured ? setup.provider : 'openrouter';

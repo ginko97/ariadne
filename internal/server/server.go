@@ -22,6 +22,7 @@ import (
 
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
+	"github.com/ginko97/ariadne/internal/memory"
 )
 
 // AgentFactory builds the agent for one request.
@@ -44,8 +45,9 @@ type AgentFactory func(runID string, state *loop.State, onDelta func(llm.Chunk))
 // delta sink shared across requests, which is the same conversation streamed
 // into somebody else's browser.
 type Server struct {
-	Store    *loop.Store
-	NewAgent AgentFactory
+	Store       *loop.Store
+	MemoryStore memory.Store
+	NewAgent    AgentFactory
 
 	// NewRunID mints the id for a fresh conversation. Injected rather than
 	// implemented here: cmd/ariadne already has one, and a run id format
@@ -112,6 +114,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/chat", s.handleChat)
 	mux.HandleFunc("GET /api/runs", s.handleRuns)
 	mux.HandleFunc("GET /api/models", s.handleModels)
+	mux.HandleFunc("GET /api/memory", s.handleMemoryList)
+	mux.HandleFunc("DELETE /api/memory", s.handleMemoryDelete)
 	mux.HandleFunc("GET /api/runs/{id}", s.handleTranscript)
 	mux.HandleFunc("DELETE /api/runs/{id}", s.handleDelete)
 	mux.HandleFunc("POST /api/approve", s.handleApprove)

@@ -68,8 +68,9 @@ it lists the models you have pulled and checks that the one you pick can call to
 | | |
 | --- | --- |
 | **New conversation**, then **Folder…** | choose the folder it may read and write, before the first message; it stays fixed after that |
+| **🧠** / `/memory` | show and curate remembered facts across conversations (`MEMORY.md`): view past notes, timestamps, and delete unwanted facts. Ariadne asks before saving any fact |
 | **⚙** | provider, key and model. With two keys saved (say OpenRouter and Gemini), pick the other provider and leave the key empty to switch; a conversation keeps the provider it started on |
-| `/help` | the page's commands — `/new`, `/model`, `/folder`, `/settings`, `/theme`, `/stop`. Answered by the page, never sent to the model; `//text` sends a message starting with `/` |
+| `/help` | the page's commands — `/new`, `/memory`, `/model`, `/folder`, `/settings`, `/theme`, `/stop`. Answered by the page, never sent to the model; `//text` sends a message starting with `/` |
 | **Working…** | shown while a turn runs: how long, and whether it is thinking, calling a tool, waiting for you, or writing |
 | **Stop** / **Resume turn** | end a turn at any point; finish one that was interrupted, without repeating what already ran |
 | **×** on a conversation | delete it for good — the conversation and its record of every tool call and cost. It asks first; a running turn is refused until it stops |
@@ -89,17 +90,18 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
 | The web | read a page by URL (`web_fetch`), asking before every fetch; never your own machine or local network |
 | Tools from anywhere | any MCP server: filesystem, search, git, ... (`-mcp-config`) |
 | Run programs | `-exec`, asking before every single one |
-| Remember | notes that carry across conversations (`-remember`, in the terminal for now) |
+| Remember | notes that carry across conversations in `MEMORY.md`: curated in the browser (**🧠** or `/memory`) or `-remember` in the terminal; every fact asks for your approval before being saved |
 | Any model | OpenRouter, OpenAI, Gemini, xAI, Groq, Together, a local Ollama — switch in **⚙** |
 
 ## Why it is different
 
-- **It asks first.** Reading a web page, writing a file, editing one, every MCP tool
-  you have not trusted, and every program it wants to run: you see what it would do —
-  the lines an edit changes, what a write replaces, the whole URL — and say yes or no.
-  No answer is not a yes: an unanswered prompt times out after five minutes and denies
-  itself in both the browser and the terminal. Denying a tool three times drops it for
-  the rest of the run so the model cannot fatigue you into agreeing.
+- **It asks first.** Reading a web page, writing a file, editing one, saving a fact
+  to memory, every MCP tool you have not trusted, and every program it wants to run:
+  you see what it would do — the lines an edit changes, what a write replaces, the
+  note to be remembered, the whole URL — and say yes or no. No answer is not a yes: an
+  unanswered prompt times out after five minutes and denies itself in both the browser
+  and the terminal. Denying a tool three times drops it for the rest of the run so the
+  model cannot fatigue you into agreeing.
 - **It survives a crash.** A conversation is saved when a turn starts and after every
   tool call. Kill the process mid-task and it resumes without repeating what already ran.
   In the browser, **Stop** ends a turn at any point, and **Resume turn** finishes one that
@@ -456,10 +458,10 @@ side can tell which one wrote a turn, because there is nothing to tell apart.
 
 `ariadne ui` binds loopback only and serves one embedded page — no Node, no build step,
 nothing to install. It offers the model list from OpenRouter filtered to models that can
-actually call tools, and a model may change between turns but never inside one.
-
-What it does **not** do yet: memory notes (`-remember`) are not yet offered in the browser
-interface; memory remains terminal-only.
+actually call tools, and a model may change between turns but never inside one. Memory
+is enabled with forced approval gating: facts the model offers to remember across conversations
+require explicit approval on screen, and past notes can be reviewed and deleted from the
+**🧠** drawer.
 
 ---
 
@@ -480,10 +482,12 @@ interface; memory remains terminal-only.
 - **Timeouts** that can be raised (`-tool-timeout`, `-http-timeout`). A slow tool is
   *abandoned* rather than cancelled, because a context cannot stop a function that never
   checks one — and the result says "may still be running" rather than claiming failure.
-- **Memory** (`-remember`): an append-only `MEMORY.md` the agent may add a note to and
-  later runs read back. Off by default, gated behind approval when on, and unwritable
-  unattended. What comes back out is fenced like a fetched document, because a note may
-  have been written by a run that was reading one, and that fence was measured failing.
+- **Memory** (`-remember` in the terminal, enabled with forced approval in `ariadne ui`):
+  cross-conversation notes in `MEMORY.md` that can be reviewed and deleted from the **🧠**
+  drawer or `/memory`. Gated behind approval in both interfaces — the model can never record a note
+  unattended without you saying yes. Notes can be deleted with atomic dual-key verification
+  (index + expected text). What comes back out is fenced like a fetched document, because a
+  note may have been written by a run that was reading one, and that fence was measured failing.
 - **JSONL traces** per run: every request, response, tool call, denial, approval, retry,
   timeout and compaction.
 

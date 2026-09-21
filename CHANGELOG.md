@@ -3,6 +3,14 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## v0.6.0 — 2026-09-21 — memory in the UI
+
+- **Memory curation in the web interface.** Added a Memory drawer (`🧠` button in the sidebar and `/memory` slash command) displaying all facts recorded in `MEMORY.md` across conversations, complete with origin run ID and timestamp, capacity counter (`X / 50 notes`), and individual deletion.
+- **Forced approval invariant.** In the web UI, Ariadne's `remember` tool is strictly wired with interactive approval gating (`agentOpts.Memory = true`). The model can never record a fact unattended: every fact presented to future conversations was explicitly reviewed and approved by the operator.
+- **Atomic note deletion.** Added `Store.Delete(index int, expectedText string)` in `internal/memory` with optimistic validation. Both the index and exact expected note text are verified before atomic temp-file rewrite, sync, and directory flush (with platform directory syncing for Windows and Unix), preventing race conditions or accidental deletion of the wrong note.
+- **REST memory endpoints with CSRF protection.** `GET /api/memory` and `DELETE /api/memory` endpoints wired into the HTTP server with same-origin CSRF verification.
+- **Persistence across resumed conversations.** `state.Memory` is recorded in checkpoint state so re-opened and resumed conversations retain memory access consistently.
+
 ## v0.5.5 — 2026-09-21 — provenance, fuzzing & modular architecture
 
 - **Command layer modularization.** Refactored monolithic `cmd/ariadne/main.go`

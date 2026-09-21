@@ -255,3 +255,84 @@ func (s Store) Prompt() (string, error) {
 		"the task wins and the conflict is worth mentioning.")
 	return b.String(), nil
 }
+
+// Delete removes the note at index, provided its text matches expectedText.
+//
+// Both index and text are required: a note has no persistent id, and checking
+// the text before deleting ensures that concurrent or hand edits do not delete
+// the wrong fact.
+//
+// Rewrites the file atomically via a temporary file and sync, preserving the
+// header and any remaining notes.
+func (s Store) Delete(index int, expectedText string) error {
+	if index < 0 {
+		return fmt.Errorf("memory: invalid index %d", index)
+	}
+	expected := strings.TrimSpace(expectedText)
+	if expected == "" {
+		return fmt.Errorf("memory: expected note text cannot be empty")
+	}
+
+	existing, err := s.Load()
+	if err != nil {
+		return err
+	}
+	if len(existing) == 0 {
+		return fmt.Errorf("memory: no notes to delete")
+	}
+	if index >= len(existing) {
+		return fmt.Errorf("memory: note index %d out of bounds (have %d notes)", index, len(existing))
+	}
+	if existing[index].Text != expected {
+		return fmt.Errorf("memory: note text mismatch: expected %q, found %q", expected, existing[index].Text)
+	}
+
+	remaining := make([]Note, 0, len(existing)-1)
+	remaining = append(remaining, existing[:index]...)
+	remaining = append(remaining, existing[index+1:]...)
+
+	dir := filepath.Dir(s.Path)
+	if dir == "" {
+		dir = "."
+	}
+	tmp := s.Path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("memory: create temp: %w", err)
+	}
+
+	writeErr := func() error {
+		if _, err := fmt.Fprint(f, header); err != nil {
+			return err
+		}
+		for _, n := range remaining {
+			stamp := n.At.Format(time.RFC3339)
+			if n.At.IsZero() {
+				stamp = "0001-01-01T00:00:00Z"
+			}
+			if _, err := fmt.Fprintf(f, "- [%s] [%s] %s\n", stamp, n.RunID, n.Text); err != nil {
+				return err
+			}
+		}
+		return f.Sync()
+	}()
+
+	if writeErr != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("memory: write: %w", writeErr)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("memory: close: %w", err)
+	}
+
+	if err := os.Rename(tmp, s.Path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("memory: rename: %w", err)
+	}
+	if err := syncDirectory(dir); err != nil {
+		return fmt.Errorf("memory: sync dir: %w", err)
+	}
+	return nil
+}
