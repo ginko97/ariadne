@@ -20,9 +20,6 @@ carry the longer story for each release.
 - **Strict cell reference validation (B4).** `columnIndex` now validates that cell
   references have one or more ASCII digits after column letters, rejecting malformed
   inputs like `A1B` or `A` and preventing silent row alignment drift in XLSX spreadsheets.
-- **Platform-aware path check in eval (B10).** `eval.safeRel` restricts `:` rejection
-  to Windows (where drive letters and NTFS streams reside), accepting valid filenames
-  with colons on Unix platforms.
 - **GitHub Actions runner modernization.** Upgraded workflow actions to Node 24-native
   pinned releases (`actions/checkout` v7.0.1, `actions/setup-go` v7.0.0 with `cache: false`,
   `goreleaser-action` v7.2.3, and `attest-build-provenance` v4.2.2), eliminating runner

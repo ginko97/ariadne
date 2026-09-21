@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -253,14 +252,7 @@ func TestSafeRel(t *testing.T) {
 	}
 
 	colonPath := "reports:q3.txt"
-	err := safeRel(colonPath)
-	if runtime.GOOS == "windows" {
-		if err == nil {
-			t.Errorf("path with colon %q should be rejected on windows", colonPath)
-		}
-	} else {
-		if err != nil {
-			t.Errorf("path with colon %q should be accepted on non-windows: %v", colonPath, err)
-		}
+	if err := safeRel(colonPath); err == nil {
+		t.Errorf("path with colon %q should be rejected on all platforms", colonPath)
 	}
 }
