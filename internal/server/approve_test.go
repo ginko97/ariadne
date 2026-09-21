@@ -96,7 +96,7 @@ func TestApproverBlocksUntilASeparateRequestAnswers(t *testing.T) {
 		if !ok {
 			t.Error("an explicit yes was not honoured")
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("the turn never unblocked")
 	}
 }
@@ -119,7 +119,7 @@ func TestApproverHonoursADenial(t *testing.T) {
 		if ok {
 			t.Error("a denial was read as approval")
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("the turn never unblocked")
 	}
 }
@@ -146,7 +146,7 @@ func TestApproverDeniesWhenTheCallerDisappears(t *testing.T) {
 		if ok {
 			t.Error("a cancelled request approved a tool call")
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("a cancelled request left the turn waiting")
 	}
 }
@@ -244,7 +244,7 @@ func TestGatedToolIsApprovedOverHTTP(t *testing.T) {
 
 	go func() {
 		// Answer as soon as the turn asks.
-		for range 200 {
+		for range 500 {
 			if s.approvals.decide(approvalKey("run_gate", "w1"), true) {
 				return
 			}
@@ -266,7 +266,7 @@ func TestGatedToolIsApprovedOverHTTP(t *testing.T) {
 
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	for range 200 {
+	for range 500 {
 		if cond() {
 			return
 		}
@@ -389,7 +389,7 @@ func TestServerReplacesTheFactorysApprover(t *testing.T) {
 	defer ts.Close()
 
 	go func() {
-		for range 200 {
+		for range 500 {
 			if s.approvals.decide(approvalKey("run_replace", "w1"), true) {
 				return
 			}

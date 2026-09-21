@@ -23,6 +23,11 @@ carry the longer story for each release.
 - **Platform-aware path check in eval (B10).** `eval.safeRel` restricts `:` rejection
   to Windows (where drive letters and NTFS streams reside), accepting valid filenames
   with colons on Unix platforms.
+- **GitHub Actions runner modernization.** Upgraded workflow actions to Node 24-native
+  pinned releases (`actions/checkout` v7.0.1, `actions/setup-go` v7.0.0 with `cache: false`,
+  `goreleaser-action` v7.2.3, and `attest-build-provenance` v4.2.2), eliminating runner
+  tar extraction failures and deprecation warnings on Linux and macOS. Increased server
+  approval test polling tolerance to ensure race detector reliability under high runner load.
 
 ## v0.6.0 — 2026-09-21 — memory in the UI
 
