@@ -37,9 +37,28 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
+
+var (
+	storeMu   sync.Mutex
+	pathLocks = make(map[string]*sync.Mutex)
+)
+
+func lockPath(p string) func() {
+	clean := filepath.Clean(p)
+	storeMu.Lock()
+	mu, ok := pathLocks[clean]
+	if !ok {
+		mu = &sync.Mutex{}
+		pathLocks[clean] = mu
+	}
+	storeMu.Unlock()
+	mu.Lock()
+	return mu.Unlock
+}
 
 const (
 	// MaxNote bounds one note. Long enough for a fact worth keeping, short
@@ -64,9 +83,12 @@ type Store struct{ Path string }
 // Append adds one note, creating the file if needed.
 //
 // Read-modify-write rather than a bare O_APPEND, because the count has to be
-// checked against what is already there. Runs are sequential, so this is not
-// contended; if that ever changes it needs a lock, not a retry.
+// checked against what is already there. Serialized per file path against
+// concurrent appends and deletions from other goroutines (such as the web UI).
 func (s Store) Append(n Note) error {
+	unlock := lockPath(s.Path)
+	defer unlock()
+
 	text := strings.Join(strings.Fields(n.Text), " ")
 	if text == "" {
 		return fmt.Errorf("memory: a note cannot be empty")
@@ -265,6 +287,9 @@ func (s Store) Prompt() (string, error) {
 // Rewrites the file atomically via a temporary file and sync, preserving the
 // header and any remaining notes.
 func (s Store) Delete(index int, expectedText string) error {
+	unlock := lockPath(s.Path)
+	defer unlock()
+
 	if index < 0 {
 		return fmt.Errorf("memory: invalid index %d", index)
 	}

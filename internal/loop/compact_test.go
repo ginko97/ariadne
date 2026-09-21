@@ -361,6 +361,13 @@ func TestResumeAfterCompactionDoesNotDoubleCompact(t *testing.T) {
 	if savedState.Dropped == 0 {
 		t.Fatal("expected compaction to have dropped messages")
 	}
+	if savedState.InputTokens <= 0 || savedState.InputTokens >= a.ContextBudget {
+		t.Fatalf("expected synthesized InputTokens to be > 0 and < budget %d, got %d",
+			a.ContextBudget, savedState.InputTokens)
+	}
+	if savedState.InputChars <= 0 {
+		t.Fatalf("expected InputChars to be > 0, got %d", savedState.InputChars)
+	}
 
 	droppedFirst := savedState.Dropped
 	messagesFirst := len(savedState.Messages)

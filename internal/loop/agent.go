@@ -248,6 +248,7 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		// tool_use in the history has its result. Trimming anywhere else would
 		// have to reason about a batch in flight.
 		if est := estimatedTokens(s); s.ContextBudget > 0 && est > s.ContextBudget {
+			beforeChars := totalSize(s.Messages)
 			if n := compact(s, est, s.ContextBudget); n > 0 {
 				a.emit(trace.Event{
 					Kind: trace.KindCompact, Step: s.Steps,
@@ -255,12 +256,23 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 					Content: fmt.Sprintf("dropped %d messages (%d total) over budget %d",
 						n, s.Dropped, s.ContextBudget),
 				})
-				// The prompt is now compacted. Reset InputTokens so that an
-				// interruption or failure before the next provider response does
-				// not falsely re-trigger compaction on resume against the already
-				// trimmed conversation. The next successful response will record
-				// the provider's fresh count.
-				s.InputTokens = 0
+				// The prompt is now compacted. Synthesize a conservative token
+				// count proportional to the characters retained. This ensures
+				// that s.InputTokens stays safely below s.ContextBudget (preventing
+				// a false double-compaction cascade on an interrupted resume)
+				// while maintaining a non-zero baseline so estimatedTokens(s)
+				// remains responsive to subsequent expansion before the next
+				// provider response.
+				afterChars := totalSize(s.Messages)
+				if beforeChars > 0 {
+					s.InputTokens = int(float64(est) * float64(afterChars) / float64(beforeChars))
+				} else {
+					s.InputTokens = int(float64(s.ContextBudget) * compactTarget)
+				}
+				if s.InputTokens >= s.ContextBudget {
+					s.InputTokens = int(float64(s.ContextBudget) * compactTarget)
+				}
+				s.InputChars = afterChars
 				// The compacted conversation is what the run continues from, so
 				// it is what has to be on disk. The dropped messages are not
 				// lost: the trace holds every message that ever existed, which

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -234,5 +235,32 @@ func TestExistsMatchesAFileTheTaskCannotName(t *testing.T) {
 	}, &envs)
 	if r := RunTasks(context.Background(), []Task{task}, "m", nested, ids, 1)[0]; !r.Pass {
 		t.Errorf("a .md file in a subfolder failed: %s", r.Reason)
+	}
+}
+
+func TestSafeRel(t *testing.T) {
+	if err := safeRel("valid/file.txt"); err != nil {
+		t.Errorf("safe relative path was rejected: %v", err)
+	}
+	if err := safeRel("../escape.txt"); err == nil {
+		t.Error("escape path should be rejected")
+	}
+	if err := safeRel("/abs/path.txt"); err == nil {
+		t.Error("absolute path should be rejected")
+	}
+	if err := safeRel(""); err == nil {
+		t.Error("empty path should be rejected")
+	}
+
+	colonPath := "reports:q3.txt"
+	err := safeRel(colonPath)
+	if runtime.GOOS == "windows" {
+		if err == nil {
+			t.Errorf("path with colon %q should be rejected on windows", colonPath)
+		}
+	} else {
+		if err != nil {
+			t.Errorf("path with colon %q should be accepted on non-windows: %v", colonPath, err)
+		}
 	}
 }

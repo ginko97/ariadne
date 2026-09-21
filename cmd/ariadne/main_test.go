@@ -433,6 +433,15 @@ func TestCheckResumeGrants(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "cannot widen") {
 		t.Errorf("a checkpoint list without remember should be refused: %v", err)
 	}
+
+	// Disjoint -allow and checkpoint allow-lists must be rejected loudly.
+	err = checkResumeGrants(false, []string{"write_file"}, withAllow("calc"))
+	if err == nil || !strings.Contains(err.Error(), "no overlap") {
+		t.Errorf("disjoint -allow on resume must be refused: %v", err)
+	}
+	if err := checkResumeGrants(false, []string{"calc", "write_file"}, withAllow("calc")); err != nil {
+		t.Errorf("overlapping -allow narrowing should pass: %v", err)
+	}
 }
 
 func TestResolveModel(t *testing.T) {

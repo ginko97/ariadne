@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -183,7 +184,7 @@ func safeRel(p string) error {
 		return errors.New("empty path")
 	}
 	slash := filepath.ToSlash(p)
-	if filepath.IsAbs(p) || strings.HasPrefix(slash, "/") || filepath.VolumeName(p) != "" || strings.Contains(p, ":") {
+	if filepath.IsAbs(p) || strings.HasPrefix(slash, "/") || filepath.VolumeName(p) != "" || (runtime.GOOS == "windows" && strings.Contains(p, ":")) {
 		return fmt.Errorf("%q must be a relative path", p)
 	}
 	for _, part := range strings.Split(slash, "/") {

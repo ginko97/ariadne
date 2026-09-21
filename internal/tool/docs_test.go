@@ -234,6 +234,7 @@ func TestColumnIndex(t *testing.T) {
 		"A1": 0, "a1": 0, "B5": 1, "b5": 1, "Z9": 25, "z9": 25,
 		"AA1": 26, "aa1": 26, "AB10": 27, "ab10": 27,
 		"123": -1, "": -1, "AAAA1": -1,
+		"A": -1, "A1B": -1, "A-1": -1, "AA": -1, "A 1": -1,
 	} {
 		if got := columnIndex(ref); got != want {
 			t.Errorf("columnIndex(%q) = %d, want %d", ref, got, want)

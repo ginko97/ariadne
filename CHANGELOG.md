@@ -3,6 +3,27 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## v0.6.1 — 2026-09-22 — correctness and concurrency hardening
+
+- **Disjoint grant rejection on resume (B1).** `checkResumeGrants` now verifies that
+  when a resuming command specifies `--allow`, it shares at least one common tool
+  with the checkpoint's existing allow-list. If disjoint, resume fails with an
+  explicit, actionable error instead of silently continuing with the checkpoint's grant.
+- **Post-compaction token synthesis (B3).** Replaced the `s.InputTokens = 0` reset
+  with a conservative token count synthesized proportionally from retained characters.
+  Keeps the token count below the context budget to prevent double-compaction cascades
+  on interrupted resumes while eliminating the post-compaction blind estimation window.
+- **Thread-safe memory store (B5).** Introduced an in-process path-keyed mutex
+  serializing `memory.Store.Append` and `Delete`, closing a TOCTOU race where an
+  asynchronous background turn's `remember` append could be overwritten by a concurrent
+  deletion from the web UI.
+- **Strict cell reference validation (B4).** `columnIndex` now validates that cell
+  references have one or more ASCII digits after column letters, rejecting malformed
+  inputs like `A1B` or `A` and preventing silent row alignment drift in XLSX spreadsheets.
+- **Platform-aware path check in eval (B10).** `eval.safeRel` restricts `:` rejection
+  to Windows (where drive letters and NTFS streams reside), accepting valid filenames
+  with colons on Unix platforms.
+
 ## v0.6.0 — 2026-09-21 — memory in the UI
 
 - **Memory curation in the web interface.** Added a Memory drawer (`🧠` button in the sidebar and `/memory` slash command) displaying all facts recorded in `MEMORY.md` across conversations, complete with origin run ID and timestamp, capacity counter (`X / 50 notes`), and individual deletion.

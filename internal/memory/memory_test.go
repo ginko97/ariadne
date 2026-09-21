@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -419,5 +420,66 @@ func TestDeleteAllNotesLeavesHeader(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "# MEMORY") {
 		t.Error("header was lost after deleting all notes")
+	}
+}
+
+func TestConcurrentAppendAndDelete(t *testing.T) {
+	s := store(t)
+	// Seed with an initial note that will be deleted.
+	if err := s.Append(Note{Text: "initial note to be deleted", RunID: "run_seed"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	const appends = 15
+
+	// Goroutines concurrently appending unique notes.
+	for i := 0; i < appends; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_ = s.Append(Note{
+				Text:  fmt.Sprintf("concurrent note %d", idx),
+				RunID: fmt.Sprintf("run_%d", idx),
+			})
+		}(i)
+	}
+
+	// Goroutine deleting the initial note.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// Might run before or after some appends; dual-key verification
+		// ensures it safely removes the initial note regardless of position.
+		for tries := 0; tries < 20; tries++ {
+			notes, err := s.Load()
+			if err != nil {
+				continue
+			}
+			for idx, n := range notes {
+				if n.Text == "initial note to be deleted" {
+					_ = s.Delete(idx, n.Text)
+					return
+				}
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+	}()
+
+	wg.Wait()
+
+	notes, err := s.Load()
+	if err != nil {
+		t.Fatalf("failed to load notes after concurrent operations: %v", err)
+	}
+	// Initial note should be deleted.
+	for _, n := range notes {
+		if n.Text == "initial note to be deleted" {
+			t.Error("initial note was not deleted during concurrent execution")
+		}
+	}
+	// Verify that at least several concurrent notes were safely written.
+	if len(notes) == 0 {
+		t.Error("all concurrent notes were lost")
 	}
 }

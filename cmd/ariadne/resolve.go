@@ -78,15 +78,33 @@ func contains(list []string, v string) bool {
 	return false
 }
 
-// checkResumeGrants refuses a resume whose memory setting the allow-lists
-// cannot support.
+// checkResumeGrants refuses a resume whose allow-lists conflict or whose
+// memory setting the allow-lists cannot support.
 //
 // Two lists matter and they fail differently. The flag list is the operator's
 // sentence now; the checkpoint's list is the grant the run has been operating
-// under, and this project never widens one. Either way the failure to avoid is
-// silent: memory read on with the write tool refused at the loop, which looks
-// like a model that will not use a tool it can see.
+// under, and this project never widens one.
+//
+// If the resuming -allow flag has zero overlap with the checkpoint's allow-list,
+// the narrowing request cannot be satisfied. Silently continuing with the base
+// grant would ignore the operator's explicit narrowing, so that is an error.
+//
+// Memory also requires validation: memory read on with the write tool refused at
+// the loop looks like a model that will not use a tool it can see.
 func checkResumeGrants(mem bool, allowFlag []string, st *loop.State) error {
+	if len(allowFlag) > 0 && len(st.Allow) > 0 {
+		hasOverlap := false
+		for _, a := range allowFlag {
+			if contains(st.Allow, a) {
+				hasOverlap = true
+				break
+			}
+		}
+		if !hasOverlap {
+			return fmt.Errorf("the requested -allow list (%s) has no overlap with the checkpoint's allow-list (%s)",
+				strings.Join(allowFlag, ", "), strings.Join(st.Allow, ", "))
+		}
+	}
 	if !mem {
 		return nil
 	}

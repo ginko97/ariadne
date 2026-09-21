@@ -679,7 +679,8 @@ func excelDate(serial float64, date1904 bool) string {
 }
 
 // columnIndex turns the letters of a cell reference ("C7") into a 0-based
-// column, or -1.
+// column, or -1. A valid reference must have 1-3 ASCII letters followed by
+// 1 or more ASCII digits and nothing else.
 func columnIndex(ref string) int {
 	col := 0
 	n := 0
@@ -693,8 +694,13 @@ func columnIndex(ref string) int {
 		col = col*26 + int(c-'A'+1)
 		n++
 	}
-	if n == 0 || n > 3 {
+	if n == 0 || n > 3 || n == len(ref) {
 		return -1
+	}
+	for _, c := range ref[n:] {
+		if c < '0' || c > '9' {
+			return -1
+		}
 	}
 	return col - 1
 }
