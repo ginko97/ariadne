@@ -2,6 +2,8 @@ module github.com/ginko97/ariadne
 
 go 1.25.0
 
+toolchain go1.26.6
+
 require github.com/modelcontextprotocol/go-sdk v1.7.0
 
 require (

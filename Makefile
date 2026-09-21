@@ -31,7 +31,7 @@ GO     ?= go
 BINARY := ariadne
 PKGS   := ./...
 
-.PHONY: all build fmt vet test check live eval workspace audit-tracked audit-livetests audit-docnames audit-skips clean
+.PHONY: all build fmt vet test check live eval workspace audit-tracked audit-livetests audit-docnames audit-skips audit-vuln clean
 
 all: check build
 
@@ -110,6 +110,10 @@ audit-docnames:
 # without a recorded entry and justification in scripts/audit-skips.go.
 audit-skips:
 	@$(GO) run ./scripts/audit-skips.go
+
+# Check for known vulnerabilities in Go dependencies and standard library.
+audit-vuln:
+	@$(GO) run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 clean:
 	rm -f $(BINARY) $(BINARY).exe

@@ -1,5 +1,10 @@
 # ariadne
 
+[![CI](https://github.com/ginko97/ariadne/actions/workflows/ci.yml/badge.svg)](https://github.com/ginko97/ariadne/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ginko97/ariadne?logo=github)](https://github.com/ginko97/ariadne/releases/latest)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ginko97/ariadne.svg)](https://pkg.go.dev/github.com/ginko97/ariadne)
+[![License](https://img.shields.io/github/license/ginko97/ariadne)](LICENSE)
+
 **A personal AI assistant that asks before it acts.** Talk to it in your browser or your
 terminal, with whichever model you like. It reads and writes files in a folder you give
 it, uses tools from any MCP server, and — if you allow it — runs programs. Every step

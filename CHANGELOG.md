@@ -3,6 +3,29 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## v0.5.5 — 2026-09-21 — provenance, fuzzing & modular architecture
+
+- **Command layer modularization.** Refactored monolithic `cmd/ariadne/main.go`
+  (2,320 lines) into focused, single-responsibility files in `package main`
+  (`resolve.go`, `approval.go`, `traces.go`, `eval.go`, `run.go`, `chat.go`,
+  `ui.go`, `agent.go`, `main.go`). Flag definitions, terminal REPL loops, trace
+  querying, and agent assembly are cleanly decoupled with zero test breakage.
+- **Build provenance & supply chain security.** All GitHub Actions workflows are
+  pinned to immutable commit SHAs. Releases now include cryptographic GitHub
+  Artifact Attestations (`actions/attest-build-provenance`) for binary verification.
+  Added Dependabot configuration for weekly Go module and Action updates. Upgraded
+  toolchain to Go 1.26.6, resolving all stdlib vulnerabilities.
+- **Automated vulnerability audit.** Added `make audit-vuln` target running
+  `govulncheck ./...`, integrated as a blocking gate in Linux CI.
+- **Automated release notes extraction.** Configured `fetch-tags: true` and a
+  `git cat-file -p` fallback in the release workflow so release notes are reliably
+  extracted from annotated tags.
+- **Native Go fuzz testing & UTF-8 hardening.** Added `testing.F` fuzz tests
+  covering URL validation (`FuzzCheckWebURL`), web text extraction (`FuzzHTMLText`),
+  run ID sanitization (`FuzzValidRunID`), and checkpoint unmarshaling (`FuzzCheckpointJSON`).
+  Fuzzing detected and fixed an issue where invalid UTF-8 byte sequences from web
+  scrapes bypassed sanitization before reaching provider APIs.
+
 ## v0.5.4 — 2026-09-21 — the cheap correctness batch
 
 - **Stop offering a tool after three denials in one run.** Mitigates approval

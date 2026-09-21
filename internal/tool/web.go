@@ -287,6 +287,7 @@ var (
 // that is mostly JavaScript comes back nearly empty, which is the honest
 // answer for a tool that does not run scripts.
 func htmlText(s string) string {
+	s = strings.ToValidUTF8(s, "")
 	s = comment.ReplaceAllString(s, " ")
 	// The title lives in <head>, which is dropped with everything else in it,
 	// and it is often the most useful line on the page.
