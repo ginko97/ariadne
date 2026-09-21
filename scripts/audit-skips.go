@@ -25,6 +25,11 @@ var allowedSkips = map[string]string{
 	// TestSandboxWindowsPathsAreNamesOnUnix asserts the Unix behaviour instead.
 	"TestSandboxWindowsPathsAreNamesOnUnix": "covered by TestSandboxWindowsDriveEscape on Windows",
 	"TestSandboxWindowsDriveEscape":         "drive letters and UNC paths are absolute only on Windows",
+
+	// NTFS directory junctions are a Windows reparse point. On Unix, symlink-based equivalents
+	// (TestSandboxRejectsSymlinkEscapes, TestSandboxWithSymlinkedRoot) test the equivalent containment.
+	"TestSandboxRejectsJunctionEscape": "junctions are a Windows reparse point",
+	"TestSandboxWithJunctionedRoot":    "junctions are a Windows reparse point",
 }
 
 // securityPattern matches tests whose names indicate security-critical invariants.

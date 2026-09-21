@@ -3,7 +3,7 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
-## Unreleased
+## v0.5.4 — 2026-09-21 — the cheap correctness batch
 
 - **Stop offering a tool after three denials in one run.** Mitigates approval
   fatigue and prevents models from looping after an operator denies an action.
@@ -15,7 +15,8 @@ carry the longer story for each release.
   immediately without waiting for input.
 - **Security test skip detection in `make check`.** Tests matching
   `Sandbox|Injection|Gate|Trust|Redact` that skip will fail `make check` unless
-  the test and its justification are explicitly recorded in `scripts/audit-skips.go`.
+  the test and its justification are explicitly recorded in `scripts/audit-skips.go`
+  (covering Windows and Unix platform skips).
 - **`-repeat 3` in `make eval-daily`.** Runs each task 3 times in daily eval sweeps
   to prevent single-run model sampling noise from polluting scorecards.
 - **Checkpoint directory fsynced on Unix.** `Store.Save` fsyncs the parent
