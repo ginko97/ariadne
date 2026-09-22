@@ -46,9 +46,11 @@ mark first, which stops the prompt for everything you unpack from it:
 Unblock-File .\ariadne_*_windows_amd64.zip
 ```
 
-Double-clicking `ariadne.exe` opens the browser interface. Everything else
-needs a terminal: open PowerShell in the folder you unpacked into and run
-`ariadne setup`.
+Double-clicking `ariadne.exe` opens the browser interface. If the first
+double-click says *"Windows cannot access the specified device, path, or
+file"*, your antivirus is still scanning a new, unsigned file; wait a few
+seconds and run it again. Everything else needs a terminal: open PowerShell
+in the folder you unpacked into and run `ariadne setup`.
 
 ## Start
 

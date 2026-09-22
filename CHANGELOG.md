@@ -3,7 +3,7 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
-## Unreleased
+## v0.6.3 — 2026-09-22 — one card per decision (approval fatigue)
 
 - **One card per decision, not one per call.** A research request that read
   twenty web pages used to raise twenty approval cards, and nobody reads the
@@ -16,6 +16,12 @@ carry the longer story for each release.
   message, and is recorded in the trace with the calls it let through. Only
   web fetches can be allowed this way; writes, edits and programs still ask
   every time. See SECURITY.md for what a grant does not protect.
+- **Windows first-launch scan delay documented.** Added documentation for the
+  intermittent SmartScreen / antivirus file lock on unsigned binaries during
+  first launch on Windows.
+
+## v0.6.2 — 2026-09-22 — terminal stdin ownership & release notes
+
 - **An answer typed after a terminal prompt times out is no longer lost.**
   Since v0.5.4, a prompt that timed out left a reader behind on the
   terminal, and the next line you typed went to it and was thrown away —
