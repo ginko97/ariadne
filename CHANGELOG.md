@@ -16,6 +16,12 @@ carry the longer story for each release.
   waiting, its buttons are disabled and it points at **Resume**. Before this
   they stayed clickable and returned an error.
 - **`chat -task` prints the conversation id**, like any first message does.
+- **A new conversation appears in the sidebar as soon as it asks you
+  something.** It used to be missing until its first turn ended, so a first
+  turn waiting on a card had no row and no **Needs you**.
+- **The README is shorter, with a screenshot.** The design and the evidence
+  behind it (crash recovery, measurement, the injection findings) moved to
+  [ARCHITECTURE.md](ARCHITECTURE.md), unchanged.
 - **A refused message no longer freezes the page.** When the server turned a
   message away (the conversation already busy in another tab, no provider
   set up, ariadne unreachable), the page stayed on "Working…" with Send
