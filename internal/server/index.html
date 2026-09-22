@@ -790,6 +790,10 @@ async function send(text, opts = {}) {
           approvalCard(d);
           working('waiting for your approval');
           answer = null;
+          // The list was loaded at 'start', before a new conversation's first
+          // checkpoint existed, so it was missing until the turn ended. It is
+          // saved by now, and a card is when "Needs you" matters.
+          loadRuns();
         } else if (name === 'approval_timeout') {
           settleApproval(d.call_id, 'timed out — denied');
         } else if (name === 'approval_waiting') {
