@@ -220,10 +220,6 @@ func TestChatWithBriefValidationRejections(t *testing.T) {
 }
 
 func TestBriefApprovalWaitingAndResuming(t *testing.T) {
-	oldTimeout := approvalTimeout
-	approvalTimeout = 50 * time.Millisecond
-	defer func() { approvalTimeout = oldTimeout }()
-
 	callWrite := llm.ToolCall{
 		ID:   "call_write_1",
 		Name: "write_file",
@@ -250,21 +246,24 @@ func TestBriefApprovalWaitingAndResuming(t *testing.T) {
 	fake := &llm.Fake{Responses: []llm.Response{resp1, resp2}}
 	store := &loop.Store{Dir: t.TempDir()}
 
-	s := New(store,
-		func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
-			return &loop.Agent{
-				Provider:        fake,
-				Model:           "test-model",
-				MaxSteps:        5,
-				RequireApproval: []string{"write_file"},
-				Checkpoint:      store.Save,
-				RunTool: func(ctx context.Context, c llm.ToolCall) (llm.ToolResult, error) {
-					return llm.ToolResult{Content: "written"}, nil
-				},
-			}, nil
-		},
-		func() string { return "run_brief_wait" },
-	)
+	factory := func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
+		return &loop.Agent{
+			Provider:        fake,
+			Model:           "test-model",
+			MaxSteps:        5,
+			RequireApproval: []string{"write_file"},
+			Checkpoint:      store.Save,
+			RunTool: func(ctx context.Context, c llm.ToolCall) (llm.ToolResult, error) {
+				return llm.ToolResult{Content: "written"}, nil
+			},
+		}, nil
+	}
+	newRunID := func() string { return "run_brief_wait" }
+
+	// Phase 1 only: nobody answers, so the card should give up quickly. Set
+	// before the server starts serving, never while it is.
+	s := New(store, factory, newRunID)
+	s.approvalTimeout = 50 * time.Millisecond
 	ts := httptest.NewServer(s.Routes())
 	defer ts.Close()
 
@@ -320,16 +319,24 @@ func TestBriefApprovalWaitingAndResuming(t *testing.T) {
 		t.Fatalf("expected NeedsYou == true in runsData: %+v", runsData)
 	}
 
-	// 2. Now operator resumes the turn and approves the call!
+	// 2. Now operator resumes the turn and approves the call — on a server with
+	// the real timeout, as after a restart. Resuming on the 50 ms server made
+	// this phase a race between the test's approval and the card giving up:
+	// 60 ms of delay before approveVia was enough to fail it, which a loaded
+	// runner under -race can supply on its own.
+	s2 := New(store, factory, newRunID)
+	ts2 := httptest.NewServer(s2.Routes())
+	defer ts2.Close()
+
 	resumeBody, _ := json.Marshal(chatRequest{RunID: "run_brief_wait", Resume: true})
-	req2, _ := http.NewRequest("POST", ts.URL+"/api/chat", strings.NewReader(string(resumeBody)))
+	req2, _ := http.NewRequest("POST", ts2.URL+"/api/chat", strings.NewReader(string(resumeBody)))
 	req2.Header.Set("Content-Type", "application/json")
-	req2.Header.Set("X-Ariadne-CSRF", s.CSRFToken)
+	req2.Header.Set("X-Ariadne-CSRF", s2.CSRFToken)
 
 	// Launch in goroutine and approve via POST /api/approve
 	done := make(chan string, 1)
 	go func() {
-		r, err := ts.Client().Do(req2)
+		r, err := ts2.Client().Do(req2)
 		if err != nil {
 			done <- err.Error()
 			return
@@ -340,10 +347,10 @@ func TestBriefApprovalWaitingAndResuming(t *testing.T) {
 	}()
 
 	// Wait for card to appear in memory
-	waitFor(t, func() bool { return s.approvals.isWaiting("run_brief_wait") })
+	waitFor(t, func() bool { return s2.approvals.isWaiting("run_brief_wait") })
 
 	// Approve it!
-	approveVia(t, s, ts, "run_brief_wait", callWrite.ID, true)
+	approveVia(t, s2, ts2, "run_brief_wait", callWrite.ID, true)
 
 	select {
 	case outStr := <-done:
@@ -368,10 +375,6 @@ func TestBriefApprovalWaitingAndResuming(t *testing.T) {
 }
 
 func TestNormalApprovalTimesOutToDenial(t *testing.T) {
-	oldTimeout := approvalTimeout
-	approvalTimeout = 50 * time.Millisecond
-	defer func() { approvalTimeout = oldTimeout }()
-
 	callWrite := llm.ToolCall{
 		ID:   "c_write",
 		Name: "write_file",
@@ -407,6 +410,7 @@ func TestNormalApprovalTimesOutToDenial(t *testing.T) {
 		},
 		func() string { return "run_normal_timeout" },
 	)
+	s.approvalTimeout = 50 * time.Millisecond
 	ts := httptest.NewServer(s.Routes())
 	defer ts.Close()
 

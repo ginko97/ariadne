@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
@@ -69,6 +70,9 @@ type Server struct {
 	// blocked waiting for it. A turn cannot read its own answer: it is holding
 	// the SSE stream the question went out on.
 	approvals *approvals
+	// approvalTimeout is how long a card waits; defaultApprovalTimeout unless
+	// a test shortens it before the server starts serving.
+	approvalTimeout time.Duration
 
 	// DefaultWorkspace is the folder a new conversation gets when the page
 	// sends none — the server's -workspace, or the home directory's
@@ -100,6 +104,8 @@ func New(store *loop.Store, newAgent AgentFactory, newRunID func() string) *Serv
 		CSRFToken: newToken(),
 		approvals: newApprovals(),
 		live:      map[string]bool{},
+
+		approvalTimeout: defaultApprovalTimeout,
 	}
 }
 

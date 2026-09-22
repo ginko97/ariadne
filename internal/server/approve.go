@@ -14,13 +14,17 @@ import (
 	"github.com/ginko97/ariadne/internal/tool"
 )
 
-// approvalTimeout bounds how long a turn waits for somebody to answer.
+// defaultApprovalTimeout bounds how long a turn waits for somebody to answer.
 //
 // A wait with nobody there is a denial, not a hang: the run holds a claim on the
 // conversation while it waits, so an unanswered prompt would wedge that
 // conversation until the process stopped. Long enough to walk back to the
 // keyboard, short enough that a forgotten tab does not hold a run all day.
-var approvalTimeout = 5 * time.Minute
+//
+// Per Server rather than a package variable, so a test can shorten it for one
+// server without every other request in the package, or a later phase of the
+// same test, racing a card against it.
+const defaultApprovalTimeout = 5 * time.Minute
 
 // errApprovalWaiting is returned when an approval card for a brief times out.
 // Instead of treating the lack of immediate answer as a denial, the run yields
@@ -202,7 +206,7 @@ func (s *Server) batchApprover(runID string, out *sseWriter, workspace string, i
 			"calls":   card,
 		})
 
-		timer := time.NewTimer(approvalTimeout)
+		timer := time.NewTimer(s.approvalTimeout)
 		defer timer.Stop()
 
 		select {
