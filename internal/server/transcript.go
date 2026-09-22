@@ -32,6 +32,7 @@ type transcriptResponse struct {
 	// person can always see where it can read and write.
 	Workspace string            `json:"workspace,omitempty"`
 	Pending   bool              `json:"pending,omitempty"`
+	Brief     string            `json:"brief,omitempty"`
 	Messages  []transcriptEntry `json:"messages"`
 }
 
@@ -89,6 +90,7 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
 		CostUnknown: state.UnpricedSteps > 0,
 		Workspace:   ws,
 		Pending:     state.HasPendingToolCalls(),
+		Brief:       state.Brief,
 		Messages:    entries(state.Messages),
 	}
 

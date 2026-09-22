@@ -122,6 +122,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/workspace", s.handleWorkspace)
 	mux.HandleFunc("POST /api/workspace/check", s.handleWorkspaceCheck)
 	mux.HandleFunc("POST /api/workspace/pick", s.handleWorkspacePick)
+	mux.HandleFunc("POST /api/brief", s.handleBrief)
 	mux.HandleFunc("GET /api/setup", s.handleSetupStatus)
 	mux.HandleFunc("POST /api/setup", s.handleSetup)
 	mux.HandleFunc("POST /api/setup/ollama", s.handleSetupOllama)

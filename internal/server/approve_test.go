@@ -75,7 +75,7 @@ func TestApproverBlocksUntilASeparateRequestAnswers(t *testing.T) {
 	rec := newSyncRecorder()
 	out := &sseWriter{w: rec, f: rec}
 
-	approve := s.approver("run_a", out, t.TempDir())
+	approve := s.approver("run_a", out, t.TempDir(), false)
 	done := make(chan bool, 1)
 	go func() {
 		ok, _ := approve(context.Background(), llm.ToolCall{ID: "call_1", Name: "write_file"})
@@ -108,7 +108,7 @@ func TestApproverHonoursADenial(t *testing.T) {
 
 	done := make(chan bool, 1)
 	go func() {
-		ok, _ := s.approver("run_d", out, t.TempDir())(context.Background(), llm.ToolCall{ID: "c", Name: "write_file"})
+		ok, _ := s.approver("run_d", out, t.TempDir(), false)(context.Background(), llm.ToolCall{ID: "c", Name: "write_file"})
 		done <- ok
 	}()
 	waitFor(t, func() bool { return strings.Contains(rec.body(), "approval_required") })
@@ -135,7 +135,7 @@ func TestApproverDeniesWhenTheCallerDisappears(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan bool, 1)
 	go func() {
-		ok, _ := s.approver("run_gone", out, t.TempDir())(ctx, llm.ToolCall{ID: "c", Name: "write_file"})
+		ok, _ := s.approver("run_gone", out, t.TempDir(), false)(ctx, llm.ToolCall{ID: "c", Name: "write_file"})
 		done <- ok
 	}()
 	waitFor(t, func() bool { return strings.Contains(rec.body(), "approval_required") })
@@ -171,7 +171,7 @@ func TestApproveDoesNotCrossConversations(t *testing.T) {
 
 	done := make(chan bool, 1)
 	go func() {
-		ok, _ := s.approver("run_mine", out, t.TempDir())(context.Background(), llm.ToolCall{ID: "shared", Name: "write_file"})
+		ok, _ := s.approver("run_mine", out, t.TempDir(), false)(context.Background(), llm.ToolCall{ID: "shared", Name: "write_file"})
 		done <- ok
 	}()
 	waitFor(t, func() bool { return strings.Contains(rec.body(), "approval_required") })
@@ -414,7 +414,7 @@ func TestApproverReturnsContextErrorOnCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	ok, err := s.approver("run_cancel", out, t.TempDir())(ctx, llm.ToolCall{ID: "c1", Name: "write_file"})
+	ok, err := s.approver("run_cancel", out, t.TempDir(), false)(ctx, llm.ToolCall{ID: "c1", Name: "write_file"})
 	if ok {
 		t.Error("cancelled call was approved")
 	}
@@ -439,7 +439,7 @@ func TestApprovalEventCarriesAPreview(t *testing.T) {
 	})
 
 	go func() {
-		s.approver("run_p", out, ws)(context.Background(), llm.ToolCall{ID: "c1", Name: "edit_file", Args: args})
+		s.approver("run_p", out, ws, false)(context.Background(), llm.ToolCall{ID: "c1", Name: "edit_file", Args: args})
 	}()
 	waitFor(t, func() bool { return strings.Contains(rec.body(), "approval_required") })
 	approveVia(t, s, ts, "run_p", "c1", false)
@@ -500,7 +500,7 @@ func TestBatchCardListsEveryCallAndItsDestination(t *testing.T) {
 
 	done := make(chan loop.BatchDecision, 1)
 	go func() {
-		d, _ := s.batchApprover("run_card", out, t.TempDir())(context.Background(), calls, keys)
+		d, _ := s.batchApprover("run_card", out, t.TempDir(), false)(context.Background(), calls, keys)
 		done <- d
 	}()
 	waitFor(t, func() bool { return strings.Contains(rec.body(), "approval_required") })
@@ -547,7 +547,7 @@ func TestAnswerNamingSomethingOffTheCardIsRefused(t *testing.T) {
 	keys := []string{"https://github.com"}
 	done := make(chan loop.BatchDecision, 1)
 	go func() {
-		d, _ := s.batchApprover("run_off", out, t.TempDir())(context.Background(), calls, keys)
+		d, _ := s.batchApprover("run_off", out, t.TempDir(), false)(context.Background(), calls, keys)
 		done <- d
 	}()
 	waitFor(t, func() bool { return strings.Contains(rec.body(), "approval_required") })
@@ -583,7 +583,7 @@ func TestADenialCarriesNoGrants(t *testing.T) {
 
 	done := make(chan loop.BatchDecision, 1)
 	go func() {
-		d, _ := s.batchApprover("run_no", out, t.TempDir())(context.Background(),
+		d, _ := s.batchApprover("run_no", out, t.TempDir(), false)(context.Background(),
 			[]llm.ToolCall{fetchCall("n1", "https://github.com/a")}, []string{"https://github.com"})
 		done <- d
 	}()

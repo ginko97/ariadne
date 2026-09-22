@@ -542,3 +542,55 @@ func TestSaveFlushesTheDirectoryAfterTheRename(t *testing.T) {
 		t.Error("a directory that cannot be flushed was reported as a successful save")
 	}
 }
+
+func TestCheckpointPreservesBrief(t *testing.T) {
+	store := &Store{Dir: t.TempDir()}
+	st := NewState("run_brief", "task from brief")
+	st.Brief = "briefs/market.md"
+
+	if err := store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.Load("run_brief")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Brief != "briefs/market.md" {
+		t.Errorf("got.Brief = %q, want %q", got.Brief, "briefs/market.md")
+	}
+}
+
+func TestSummaryPending(t *testing.T) {
+	store := &Store{Dir: t.TempDir()}
+	st1 := NewState("run_normal", "normal task")
+	if err := store.Save(st1); err != nil {
+		t.Fatal(err)
+	}
+
+	st2 := NewState("run_pending", "pending task")
+	st2.Messages = append(st2.Messages, llm.Message{
+		Role: llm.RoleAssistant,
+		Blocks: []llm.Block{
+			{Type: llm.BlockToolUse, ID: "c1", Name: "write_file", Args: json.RawMessage(`{}`)},
+		},
+	})
+	if err := store.Save(st2); err != nil {
+		t.Fatal(err)
+	}
+
+	list, _, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, s := range list {
+		if s.RunID == "run_pending" && !s.Pending {
+			t.Errorf("run_pending should have Pending == true")
+		}
+		if s.RunID == "run_normal" && s.Pending {
+			t.Errorf("run_normal should have Pending == false")
+		}
+	}
+}

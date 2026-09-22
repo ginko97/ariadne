@@ -70,6 +70,8 @@ it lists the models you have pulled and checks that the one you pick can call to
 | | |
 | --- | --- |
 | **New conversation**, then **Folder…** | choose the folder it may read and write, before the first message; it stays fixed after that |
+| **Brief…** / `/brief <file.md>` | start from a markdown task brief in your workspace; the brief is shown in full before execution |
+| **Needs you** | sidebar badge marking conversations waiting on approval cards or pending tool calls |
 | **🧠** / `/memory` | show and curate remembered facts across conversations (`MEMORY.md`): view past notes, timestamps, and delete unwanted facts. Ariadne asks before saving any fact |
 | **⚙** | provider, key and model. With two keys saved (say OpenRouter and Gemini), pick the other provider and leave the key empty to switch; a conversation keeps the provider it started on |
 | `/help` | the page's commands — `/new`, `/memory`, `/model`, `/folder`, `/settings`, `/theme`, `/stop`. Answered by the page, never sent to the model; `//text` sends a message starting with `/` |
@@ -89,6 +91,7 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
 | | |
 | --- | --- |
 | Files | list, read, write and edit in one folder per conversation — pick it in the browser (**Folder…**), or `-workspace <folder>`. Writing and editing ask first, showing the lines that would change; `edit_file` touches only the text it names. It saves text (`.md`, `.txt`), not PDF or Word files |
+| Research briefs | start a conversation or job from a markdown task file (`-task brief.md`, or **Brief…** / `/brief` in the browser); brief approval cards pause gracefully and wait for you rather than timing out to denial |
 | Documents | read Word, Excel and PowerPoint files (`.docx`, `.xlsx`, `.pptx`) and their LibreOffice counterparts (`.odt`, `.ods`, `.odp`) — spreadsheets as rows, dates as dates, a long document in 256 KB parts; PDFs when [Poppler](https://poppler.freedesktop.org)'s `pdftotext` is installed |
 | The web | read a page by URL (`web_fetch`), asking before it fetches — in the browser you can allow one site until the turn ends; never your own machine or local network |
 | Tools from anywhere | any MCP server: filesystem, search, git, ... (`-mcp-config`) |
@@ -103,8 +106,10 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
   you see what it would do — the lines an edit changes, what a write replaces, the
   note to be remembered, the whole URL — and say yes or no. No answer is not a yes: an
   unanswered prompt times out after five minutes and denies itself in both the browser
-  and the terminal. Denying a tool three times drops it for the rest of the run so the
-  model cannot fatigue you into agreeing.
+  and the terminal. For brief-seeded tasks, unanswered approval cards release the in-flight
+  claim and pause gracefully, leaving tool calls pending on disk and marking the conversation
+  **Needs you** in the sidebar so you can review at your convenience. Denying a tool three
+  times drops it for the rest of the run so the model cannot fatigue you into agreeing.
 - **It survives a crash.** A conversation is saved when a turn starts and after every
   tool call. Kill the process mid-task and it resumes without repeating what already ran.
   In the browser, **Stop** ends a turn at any point, and **Resume turn** finishes one that

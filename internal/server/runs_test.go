@@ -164,3 +164,52 @@ func TestRunsOnAnEmptyStore(t *testing.T) {
 		t.Errorf("runs=%d skipped=%d, want both 0", len(got.Runs), got.Skipped)
 	}
 }
+
+func TestRunsReportsNeedsYou(t *testing.T) {
+	store := &loop.Store{Dir: t.TempDir()}
+	s := New(store,
+		func(string, *loop.State, func(llm.Chunk)) (*loop.Agent, func()) { return nil, nil },
+		func() string { return "run_1" },
+	)
+	ts := httptest.NewServer(s.Routes())
+	defer ts.Close()
+
+	// 1. A normal state on disk: needs_you should be false
+	st1 := loop.NewState("run_1", "regular task")
+	if err := store.Save(st1); err != nil {
+		t.Fatal(err)
+	}
+	got := getRuns(t, s, ts, "")
+	if len(got.Runs) != 1 || got.Runs[0].NeedsYou {
+		t.Fatalf("run_1: got needs_you = %v, want false", got.Runs[0].NeedsYou)
+	}
+
+	// 2. An actively waiting card: needs_you should be true
+	_ = s.approvals.wait(approvalKey("run_1", "c1"), []string{"c1"}, nil)
+	got2 := getRuns(t, s, ts, "")
+	if len(got2.Runs) != 1 || !got2.Runs[0].NeedsYou {
+		t.Fatalf("run_1 with active approval: got needs_you = %v, want true", got2.Runs[0].NeedsYou)
+	}
+	s.approvals.forget(approvalKey("run_1", "c1"))
+
+	// 3. A state on disk with pending tool calls: needs_you should be true
+	st2 := loop.NewState("run_2", "pending task")
+	st2.Messages = append(st2.Messages, llm.Message{
+		Role: llm.RoleAssistant,
+		Blocks: []llm.Block{
+			{Type: llm.BlockToolUse, ID: "call_pend", Name: "write_file", Args: json.RawMessage(`{}`)},
+		},
+	})
+	if err := store.Save(st2); err != nil {
+		t.Fatal(err)
+	}
+	got3 := getRuns(t, s, ts, "")
+	for _, r := range got3.Runs {
+		if r.RunID == "run_2" && !r.NeedsYou {
+			t.Errorf("run_2 with pending tool call: got needs_you = false, want true")
+		}
+		if r.RunID == "run_1" && r.NeedsYou {
+			t.Errorf("run_1: got needs_you = true, want false")
+		}
+	}
+}

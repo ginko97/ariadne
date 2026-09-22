@@ -31,6 +31,7 @@ type runRow struct {
 	Messages int     `json:"messages"`
 	Cost     float64 `json:"cost_usd"`
 	Updated  string  `json:"updated"` // RFC3339
+	NeedsYou bool    `json:"needs_you,omitempty"`
 }
 
 // handleRuns lists conversations, most recently active first.
@@ -71,6 +72,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 			Messages: r.Messages,
 			Cost:     r.Cost,
 			Updated:  r.Updated.UTC().Format("2006-01-02T15:04:05Z"),
+			NeedsYou: r.Pending || s.approvals.isWaiting(r.RunID),
 		})
 	}
 

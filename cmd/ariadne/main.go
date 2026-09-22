@@ -182,6 +182,7 @@ flags:
   -trust          MCP tools, or a gated built-in, that run without approval,
                   e.g. fs__read_text_file. web_fetch, edit_file and write_file
                   ask every time unless named here; exec always asks
+  -task           markdown file containing the task (shows brief before running)
 
 chat flags: same as run/resume. While chatting, ` + "`/help`" + ` lists the commands.
 

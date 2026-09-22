@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +20,12 @@ import (
 // conversation while it waits, so an unanswered prompt would wedge that
 // conversation until the process stopped. Long enough to walk back to the
 // keyboard, short enough that a forgotten tab does not hold a run all day.
-const approvalTimeout = 5 * time.Minute
+var approvalTimeout = 5 * time.Minute
+
+// errApprovalWaiting is returned when an approval card for a brief times out.
+// Instead of treating the lack of immediate answer as a denial, the run yields
+// its claim and stays pending until the operator reviews it.
+var errApprovalWaiting = errors.New("approval card is waiting for operator review")
 
 // approvals lets a second request answer a question the first one is blocked on.
 //
@@ -80,6 +86,19 @@ func (a *approvals) forget(key string) {
 	a.mu.Lock()
 	delete(a.waiting, key)
 	a.mu.Unlock()
+}
+
+// isWaiting reports whether any card for runID is actively waiting for an answer.
+func (a *approvals) isWaiting(runID string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	prefix := runID + "\x00"
+	for k := range a.waiting {
+		if strings.HasPrefix(k, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // decide answers a waiting question with a plain yes or no for every call on
@@ -146,7 +165,7 @@ type cardCall struct {
 // reasons rather than a happy path with error handling: a closed tab, a person
 // who never answers, and a server that restarted are all "no", and none of them
 // should be distinguishable from "no" by the tool that was asked for.
-func (s *Server) batchApprover(runID string, out *sseWriter, workspace string) func(context.Context, []llm.ToolCall, []string) (loop.BatchDecision, error) {
+func (s *Server) batchApprover(runID string, out *sseWriter, workspace string, isBrief bool) func(context.Context, []llm.ToolCall, []string) (loop.BatchDecision, error) {
 	return func(ctx context.Context, calls []llm.ToolCall, keys []string) (loop.BatchDecision, error) {
 		denied := loop.BatchDecision{Approved: make([]bool, len(calls))}
 		if len(calls) == 0 {
@@ -205,6 +224,10 @@ func (s *Server) batchApprover(runID string, out *sseWriter, workspace string) f
 			// prompt that was just sent, so nobody is going to answer it.
 			return denied, ctx.Err()
 		case <-timer.C:
+			if isBrief {
+				out.event("approval_waiting", map[string]any{"call_id": id, "tool": calls[0].Name})
+				return denied, errApprovalWaiting
+			}
 			out.event("approval_timeout", map[string]any{"call_id": id, "tool": calls[0].Name})
 			return denied, nil
 		}
@@ -214,8 +237,8 @@ func (s *Server) batchApprover(runID string, out *sseWriter, workspace string) f
 // approver is batchApprover for one call: a card with a single line and
 // nothing to grant. Kept as the shape Agent.Approve expects, so anything that
 // asks about one call at a time gets the same card and the same answers.
-func (s *Server) approver(runID string, out *sseWriter, workspace string) func(context.Context, llm.ToolCall) (bool, error) {
-	batch := s.batchApprover(runID, out, workspace)
+func (s *Server) approver(runID string, out *sseWriter, workspace string, isBrief bool) func(context.Context, llm.ToolCall) (bool, error) {
+	batch := s.batchApprover(runID, out, workspace, isBrief)
 	return func(ctx context.Context, c llm.ToolCall) (bool, error) {
 		d, err := batch(ctx, []llm.ToolCall{c}, []string{""})
 		return len(d.Approved) == 1 && d.Approved[0], err

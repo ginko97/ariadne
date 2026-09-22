@@ -65,6 +65,10 @@ type State struct {
 	// "remember" or from the system prompt containing a fence marker, works
 	// until either of those is reworded and then fails silently.
 	Memory bool `json:"memory,omitempty"`
+	// Brief is the path to the task file when this run was started from a
+	// markdown brief. Recorded so resume knows this was a brief-driven run,
+	// allowing approval cards to wait instead of auto-denying on timeout.
+	Brief string `json:"brief,omitempty"`
 	// ContextBudget is the prompt-token ceiling this run aims to stay under.
 	// Saved on State so a resumed run inherits the budget rather than silently
 	// disabling compaction.

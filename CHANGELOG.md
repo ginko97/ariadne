@@ -3,6 +3,25 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## v0.6.4 — 2026-09-23 — research briefs & jobs that wait for you
+
+- **Research briefs (`-task <file.md>` and `/brief <file.md>`).** Seed a
+  conversation from a markdown task brief in your workspace rather than
+  typing long prompts at the composer. Supported via `ariadne run -task brief.md`,
+  `ariadne chat -task brief.md`, the new **Brief…** button in the browser UI,
+  and the `/brief <file.md>` chat command. The brief content is displayed in
+  full before running so you always know what instructions are being executed.
+- **"Needs you" indicator in the sidebar.** Conversations with active approval
+  cards or pending tool calls from an interrupted turn are highlighted with a
+  prominent "Needs you" badge in the conversation sidebar, so you can easily
+  spot which conversations require operator review.
+- **Cards that wait instead of timing out to a denial.** For conversations
+  started from a brief, unanswered approval cards release the conversation's
+  in-flight claim after the 5-minute timeout and pause gracefully instead of
+  timing out into a permanent denial. The tool calls remain safely pending on
+  disk, the conversation is marked "Needs you", and resuming the turn allows
+  you to review and approve the actions at your convenience.
+
 ## v0.6.3 — 2026-09-22 — one card per decision (approval fatigue)
 
 - **One card per decision, not one per call.** A research request that read

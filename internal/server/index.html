@@ -41,6 +41,8 @@
                  font:inherit; color:inherit; }
   #runs button:hover { background:#8881; }
   #runs button[aria-current="true"] { background:#8882; font-weight:600; }
+  #runs button.needs-you { border-left:3px solid #d90; }
+  #runs .badge-needs-you { color:#d90; font-weight:600; margin-right:.25rem; }
   /* After the rule above, and narrow: the generic one sets width:100%, which a
      flex row then splits between the title and a single character. */
   #runs .del { visibility:hidden; width:auto; flex:none; padding:0 .7rem; color:var(--dim);
@@ -62,12 +64,14 @@
   #bar select { max-width:22rem; font:inherit; }
   #folder { max-width:28rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #bar button { font:inherit; cursor:pointer; }
-  #folderPanel { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;
+  #folderPanel, #briefPanel { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;
                  padding:.5rem .9rem; border-bottom:1px solid var(--edge); }
-  #folderPanel input { flex:1; min-width:14rem; font:inherit; padding:.35rem .5rem; }
-  #folderPanel button { font:inherit; cursor:pointer; }
+  #folderPanel input, #briefPanel input { flex:1; min-width:14rem; font:inherit; padding:.35rem .5rem; }
+  #folderPanel button, #briefPanel button { font:inherit; cursor:pointer; }
   #log { flex:1; overflow-y:auto; padding:1rem; display:flex; flex-direction:column; gap:.7rem; }
   .e { max-width:52rem; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .brief { border-left:3px solid var(--edge); padding-left:.7rem; }
+  .brief-header { font-size:.85em; margin-bottom:.3rem; font-weight:600; }
   .prompt { align-self:flex-end; background:#8882; padding:.5rem .75rem; border-radius:.6rem; }
   .tool_call, .tool_result { color:var(--dim); font-family:ui-monospace,SFMono-Regular,monospace;
                              font-size:.82em; border-left:2px solid var(--edge); padding-left:.6rem; }
@@ -140,6 +144,7 @@
     <span id="stats" class="dim"></span>
     <span id="folder" class="dim" title="The folder this conversation can read and write"></span>
     <button type="button" id="folderBtn" title="Choose the folder for this new conversation">Folder…</button>
+    <button type="button" id="briefBtn" title="Start a conversation from a markdown brief in the workspace">Brief…</button>
   </div>
   <div id="folderPanel" hidden>
     <input id="folderInput" type="text" spellcheck="false" placeholder="Full path of a folder">
@@ -147,6 +152,12 @@
     <button type="button" id="useFolder" class="primary">Use</button>
     <button type="button" id="cancelFolder">Cancel</button>
     <span id="folderErr" class="is_error"></span>
+  </div>
+  <div id="briefPanel" hidden>
+    <input id="briefInput" type="text" spellcheck="false" placeholder="Path to brief.md (in the folder)">
+    <button type="button" id="useBrief" class="primary">Start</button>
+    <button type="button" id="cancelBrief">Cancel</button>
+    <span id="briefErr" class="is_error"></span>
   </div>
   <div id="memoryPanel" hidden>
     <div class="row" style="justify-content:space-between; align-items:center;">
@@ -433,8 +444,15 @@ async function loadRuns() {
       const b = document.createElement('button');
       b.innerHTML = '<span class="title"></span><span class="meta"></span>';
       b.querySelector('.title').textContent = r.title || '(untitled)';
-      b.querySelector('.meta').textContent =
-        `${r.turns} turn${r.turns === 1 ? '' : 's'} · ${r.model || ''}`;
+      const metaEl = b.querySelector('.meta');
+      if (r.needs_you) {
+        b.classList.add('needs-you');
+        const badge = document.createElement('span');
+        badge.className = 'badge-needs-you';
+        badge.textContent = 'Needs you';
+        metaEl.append(badge, document.createTextNode(' · '));
+      }
+      metaEl.append(document.createTextNode(`${r.turns} turn${r.turns === 1 ? '' : 's'} · ${r.model || ''}`));
       if (r.run_id === runID) b.setAttribute('aria-current', 'true');
       b.onclick = () => open(r.run_id);
 
@@ -515,6 +533,7 @@ async function open(id) {
   runID = t.run_id;
   convWorkspace = t.workspace || '';
   closeFolderPanel();
+  closeBriefPanel();
   showFolder();
   render(t.messages);
   stats(t.turns, t.steps, t.cost_usd, t.cost_unknown);
@@ -548,6 +567,7 @@ function newConversation() {
   newWorkspace = null;
   convWorkspace = '';
   closeFolderPanel();
+  closeBriefPanel();
   showFolder();
   log.replaceChildren();
   statsEl.textContent = '';
@@ -621,6 +641,7 @@ function setBusy(val) {
   $('stop').hidden = !val;
   $('new').disabled = val;
   $('folderBtn').disabled = val;
+  $('briefBtn').disabled = val;
 }
 
 function showResumeCard() {
@@ -660,7 +681,7 @@ async function send(text, opts = {}) {
   warn('');
   if (opts.resume) {
     entry('notice', 'Resuming interrupted turn…');
-  } else {
+  } else if (!opts.brief) {
     entry('prompt', text);
   }
 
@@ -678,6 +699,7 @@ async function send(text, opts = {}) {
       } : {
         run_id: runID, message: text, model: modelEl.value || undefined,
         workspace: runID ? undefined : (newWorkspace || undefined),
+        brief: opts.brief || undefined,
       }),
     });
   } catch (e) {
@@ -686,52 +708,41 @@ async function send(text, opts = {}) {
     } else {
       entry('tool_result', 'Could not reach ariadne: ' + e.message, 'is_error');
     }
-    turn = null;
-    setBusy(false);
     return;
   }
 
   if (!resp.ok) {
-    const { error } = await resp.json().catch(() => ({ error: 'request refused' }));
-    entry('tool_result', error, 'is_error');
-    if (resp.status === 409 && (error || '').includes('unfinished tool call')) {
-      // The input was cleared when this was sent; put it back so resuming
-      // does not cost the person what they had just typed.
-      if (!opts.resume && text) $('input').value = text;
-      showResumeCard();
-    }
-    setBusy(false);
+    const { error } = await resp.json().catch(() => ({ error: 'refused' }));
+    warn(error);
+    if (!opts.resume && !opts.brief && text) $('input').value = text;
     return;
   }
 
-  const reader = resp.body.getReader(), dec = new TextDecoder();
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
   let buf = '';
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const { value, done } = await reader.read();
       if (done) break;
-      buf += dec.decode(value, { stream: true });
-      // Events are separated by a blank line; a partial one stays in the buffer
-      // until the rest of it arrives.
-      let i;
-      while ((i = buf.indexOf('\n\n')) !== -1) {
-        const block = buf.slice(0, i); buf = buf.slice(i + 2);
-        let name = '', data = '';
-        for (const line of block.split('\n')) {
-          if (line.startsWith('event: ')) name = line.slice(7);
-          else if (line.startsWith('data: ')) data = line.slice(6);
-        }
-        if (!name) continue;
+      buf += decoder.decode(value, { stream: true });
+      const frames = buf.split('\n\n');
+      buf = frames.pop();
+      for (const f of frames) {
+        if (!f.trim()) continue;
+        const name = (f.match(/^event: (.*)$/m) || [])[1];
+        const data = (f.match(/^data: (.*)$/m) || [])[1];
+        if (!name || !data) continue;
         let d = {};
         try { d = JSON.parse(data); } catch {}
 
         if (name === 'start') {
-          if (!runID) convWorkspace = newWorkspace || defaultWorkspace;
           runID = d.run_id;
-          closeFolderPanel();
           showFolder();
-        }
-        else if (name === 'tool') {
+          loadRuns();
+        } else if (name === 'brief') {
+          renderBrief(d);
+        } else if (name === 'tool') {
           entry('tool_call', '→ ' + d.name);
           working('calling ' + d.name);
           answer = null;
@@ -759,6 +770,13 @@ async function send(text, opts = {}) {
             p.el.classList.add('settled');
             pendingApprovals.delete(d.call_id);
           }
+        } else if (name === 'approval_waiting') {
+          const p = pendingApprovals.get(d.call_id);
+          if (p) {
+            p.note.textContent = 'waiting for operator review (run paused)';
+          }
+        } else if (name === 'waiting') {
+          showResumeCard();
         } else if (name === 'error') {
           entry('tool_result', d.error, 'is_error');
           answer = null;
@@ -785,6 +803,20 @@ async function send(text, opts = {}) {
   } else if (stopped) {
     entry('notice', 'Stopped.');
   }
+}
+
+function renderBrief(d) {
+  const el = document.createElement('div');
+  el.className = 'e brief';
+  const h = document.createElement('div');
+  h.className = 'brief-header dim';
+  h.textContent = '📋 Task brief (' + d.path + '):';
+  const body = document.createElement('div');
+  body.className = 'brief-body md';
+  body.append(renderMarkdown(d.content));
+  el.append(h, body);
+  log.append(el);
+  log.scrollTop = log.scrollHeight;
 }
 
 $('composer').onsubmit = e => {
@@ -999,6 +1031,7 @@ const HELP = `Commands (answered by this page, never sent to the model):
   /settings           provider, key and model
   /model [id]         show the model for the next message, or switch to id
   /folder             the folder this conversation reads and writes
+  /brief [path.md]    start a conversation from a markdown brief in the folder
   /theme [system|light|dark]
   /stop               stop the turn that is running
   //text              send a message that starts with a slash
@@ -1042,6 +1075,11 @@ function command(text) {
         '. A conversation keeps its folder; /new, then /folder, to choose another.');
       else $('folderBtn').onclick();
       break;
+    case 'brief':
+      if (runID) say('Briefs are only used to start new conversations. /new, then /brief, to start one.');
+      else if (arg) startBrief(arg);
+      else $('briefBtn').onclick();
+      break;
     case 'theme': {
       const pick = { system: 'auto', auto: 'auto', light: 'light', dark: 'dark' }[arg.toLowerCase()];
       if (arg && !pick) { say('/theme takes system, light or dark.'); break; }
@@ -1069,6 +1107,7 @@ function showFolder() {
   $('folder').textContent = f ? 'Folder: ' + f : '';
   $('folder').title = f ? f + ' — the folder this conversation can read and write' : '';
   $('folderBtn').hidden = !!runID;
+  $('briefBtn').hidden = !!runID;
 }
 
 function closeFolderPanel() {
@@ -1101,6 +1140,7 @@ async function useFolder(path) {
 $('folderBtn').onclick = () => {
   if (busy || runID) return;
   if (!$('memoryPanel').hidden) closeMemory();
+  closeBriefPanel();
   $('folderInput').value = newWorkspace || defaultWorkspace;
   $('folderErr').textContent = '';
   $('folderPanel').hidden = false;
@@ -1130,6 +1170,59 @@ $('browse').onclick = async () => {
     $('browse').disabled = false;
   }
 };
+
+// ---- brief for a new conversation ----
+
+function closeBriefPanel() {
+  $('briefPanel').hidden = true;
+  $('briefErr').textContent = '';
+}
+
+function openBriefPanel() {
+  if (busy || runID) return;
+  closeFolderPanel();
+  if (!$('memoryPanel').hidden) closeMemory();
+  $('briefInput').value = '';
+  $('briefErr').textContent = '';
+  $('briefPanel').hidden = false;
+  $('briefInput').focus();
+}
+
+$('briefBtn').onclick = () => {
+  if (busy || runID) return;
+  if ($('briefPanel').hidden) openBriefPanel();
+  else closeBriefPanel();
+};
+$('cancelBrief').onclick = closeBriefPanel;
+$('useBrief').onclick = () => {
+  const p = $('briefInput').value.trim();
+  if (!p) { $('briefErr').textContent = 'type the path to a .md file'; return; }
+  startBrief(p);
+};
+$('briefInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); $('useBrief').click(); }
+  if (e.key === 'Escape') closeBriefPanel();
+});
+
+async function startBrief(path) {
+  if (busy) return;
+  const folder = newWorkspace || '';
+  try {
+    const resp = await api('/api/brief', {
+      method: 'POST',
+      body: JSON.stringify({ path, workspace: folder })
+    });
+    const d = await resp.json().catch(() => ({ error: 'refused' }));
+    if (!resp.ok) {
+      $('briefErr').textContent = d.error || 'could not load brief';
+      return;
+    }
+    closeBriefPanel();
+    send('', { brief: d.path });
+  } catch (e) {
+    $('briefErr').textContent = 'could not load brief: ' + e.message;
+  }
+}
 
 // ---------------------------------------------------------------- memory
 //

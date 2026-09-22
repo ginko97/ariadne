@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -24,6 +25,8 @@ type chatRequest struct {
 	// Resume finishes an interrupted turn (a batch with pending tool calls)
 	// without appending a new message.
 	Resume bool `json:"resume,omitempty"`
+	// Brief is the relative or workspace path to a .md brief to seed a new conversation.
+	Brief string `json:"brief,omitempty"`
 }
 
 // handleChat runs one turn and streams it.
@@ -43,8 +46,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Message = strings.TrimSpace(req.Message)
-	if !req.Resume && req.Message == "" {
-		httpError(w, http.StatusBadRequest, "message is required")
+	req.Brief = strings.TrimSpace(req.Brief)
+	if !req.Resume && req.Message == "" && req.Brief == "" {
+		httpError(w, http.StatusBadRequest, "message or brief is required")
+		return
+	}
+	if req.Resume && req.Brief != "" {
+		httpError(w, http.StatusBadRequest, "cannot provide brief when resuming an interrupted turn")
 		return
 	}
 	if req.Resume && req.RunID == "" {
@@ -53,6 +61,14 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Resume && req.Message != "" {
 		httpError(w, http.StatusBadRequest, "cannot send a message when resuming an interrupted turn")
+		return
+	}
+	if req.RunID != "" && req.Brief != "" {
+		httpError(w, http.StatusBadRequest, "brief is only supported for new conversations")
+		return
+	}
+	if req.Brief != "" && req.Message != "" {
+		httpError(w, http.StatusBadRequest, "cannot provide both brief and message")
 		return
 	}
 	req.Model = strings.TrimSpace(req.Model)
@@ -75,6 +91,30 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		workspace = ws
+	} else if fresh && s.DefaultWorkspace != "" {
+		workspace = s.DefaultWorkspace
+	}
+
+	var briefContent string
+	var briefRelPath string
+	if fresh && req.Brief != "" {
+		bws := workspace
+		if bws == "" {
+			if cwd, err := os.Getwd(); err == nil {
+				bws = cwd
+			}
+		}
+		rel, content, err := readWorkspaceBrief(bws, req.Brief)
+		if err != nil {
+			httpError(w, http.StatusBadRequest, "brief: "+err.Error())
+			return
+		}
+		briefRelPath = rel
+		briefContent = content
+		req.Message = content
+		if workspace == "" {
+			workspace = bws
+		}
 	}
 	if fresh {
 		runID = s.NewRunID()
@@ -96,6 +136,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		state = loop.NewState(runID, req.Message)
 		state.Workspace = workspace
 		state.Memory = s.MemoryStore.Path != ""
+		if briefRelPath != "" {
+			state.Brief = briefRelPath
+		}
 	} else {
 		st, err := s.Store.Load(runID)
 		if err != nil {
@@ -151,6 +194,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	out := &sseWriter{w: w, f: flusher}
 	out.event("start", map[string]any{"run_id": runID})
+	if briefRelPath != "" {
+		out.event("brief", map[string]any{"path": briefRelPath, "content": briefContent})
+	}
 
 	agent, cleanup := s.NewAgent(runID, state, deltaEvents(out))
 	if cleanup != nil {
@@ -160,8 +206,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// this request's stream, which the factory has no way to know about, and
 	// Agent.Approve being a plain func field is exactly why no interface was
 	// built for it.
-	agent.ApproveBatch = s.batchApprover(runID, out, state.Workspace)
-	agent.Approve = s.approver(runID, out, state.Workspace)
+	isBrief := state.Brief != ""
+	agent.ApproveBatch = s.batchApprover(runID, out, state.Workspace, isBrief)
+	agent.Approve = s.approver(runID, out, state.Workspace, isBrief)
 
 	if req.Model != "" {
 		agent.Model = req.Model
@@ -185,6 +232,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		answer, err = agent.ChatTurn(ctx, state, req.Message)
 	}
 	if err != nil {
+		if errors.Is(err, errApprovalWaiting) {
+			out.event("waiting", map[string]any{"run_id": runID, "brief": state.Brief})
+			return
+		}
 		// The status line went out with the headers, so a failure is an event.
 		// The run id goes with it: the turn failed, the conversation did not,
 		// and resuming it is the whole point of having checkpointed it.

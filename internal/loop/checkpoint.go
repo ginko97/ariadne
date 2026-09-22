@@ -56,6 +56,7 @@ type Summary struct {
 	Messages int       `json:"messages"`
 	Cost     float64   `json:"cost_usd"`
 	Updated  time.Time `json:"updated"`
+	Pending  bool      `json:"pending,omitempty"`
 }
 
 // List returns every run that has a checkpoint, most recently written first,
@@ -109,6 +110,7 @@ func (s *Store) List() ([]Summary, int, error) {
 			Messages: len(st.Messages),
 			Cost:     st.Cost,
 			Updated:  updated,
+			Pending:  st.HasPendingToolCalls(),
 		})
 	}
 

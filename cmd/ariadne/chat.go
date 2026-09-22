@@ -32,6 +32,7 @@ func cmdChat(args []string) int {
 	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
 	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")
 	httpTimeout := fs.Duration("http-timeout", defaultHTTPTimeout, "bound one provider request, body included (0: only the context)")
+	taskFile := fs.String("task", "", "markdown file containing the task (shows brief before running)")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -42,8 +43,28 @@ func cmdChat(args []string) int {
 		return exitUsage
 	}
 
-	store := &loop.Store{Dir: runsDir}
 	resuming := len(fs.Args()) == 1
+	if resuming && *taskFile != "" {
+		fmt.Fprintln(os.Stderr, "ariadne chat: cannot use -task when resuming an existing conversation")
+		return exitUsage
+	}
+
+	var briefContent string
+	if !resuming && *taskFile != "" {
+		data, err := os.ReadFile(*taskFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
+			return exitFail
+		}
+		briefContent = strings.TrimSpace(string(data))
+		if briefContent == "" {
+			fmt.Fprintf(os.Stderr, "ariadne chat: %s is empty\n", *taskFile)
+			return exitUsage
+		}
+		fmt.Fprintf(os.Stderr, "task from %s:\n%s\n\n", *taskFile, briefContent)
+	}
+
+	store := &loop.Store{Dir: runsDir}
 
 	var state *loop.State
 	if resuming {
@@ -185,6 +206,14 @@ func cmdChat(args []string) int {
 	if resuming {
 		fmt.Fprintf(os.Stderr, "chat %s  model=%s  from step %d (%d messages)  (/help for commands, /exit to leave)\n",
 			state.RunID, state.Model, state.Steps, len(state.Messages))
+	} else if briefContent != "" {
+		state = loop.NewState(runID, briefContent)
+		state.Brief = *taskFile
+		state.Workspace = workspaceDir
+		state.Memory = mem
+		if err := chatTurn(agent, state, *stream); err != nil {
+			fmt.Fprintf(os.Stderr, "! %v\n", err)
+		}
 	} else {
 		fmt.Fprint(os.Stderr, "chat: type your message (/help for commands, /exit to leave)\n")
 	}

@@ -31,6 +31,7 @@ func cmdRun(args []string) int {
 	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
 	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")
 	httpTimeout := fs.Duration("http-timeout", defaultHTTPTimeout, "bound one provider request, body included (0: only the context)")
+	taskFile := fs.String("task", "", "markdown file containing the task (shows brief before running)")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -40,10 +41,31 @@ func cmdRun(args []string) int {
 		*model = defaultModelFor(*baseURL)
 	}
 
-	task := strings.TrimSpace(strings.Join(fs.Args(), " "))
-	if task == "" {
-		fmt.Fprintln(os.Stderr, "ariadne run: a task is required")
-		return exitUsage
+	var task string
+	var briefPath string
+	if *taskFile != "" {
+		if len(fs.Args()) > 0 {
+			fmt.Fprintln(os.Stderr, "ariadne run: cannot provide both -task <file> and positional task text")
+			return exitUsage
+		}
+		data, err := os.ReadFile(*taskFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ariadne run: %v\n", err)
+			return exitFail
+		}
+		task = strings.TrimSpace(string(data))
+		if task == "" {
+			fmt.Fprintf(os.Stderr, "ariadne run: %s is empty\n", *taskFile)
+			return exitUsage
+		}
+		briefPath = *taskFile
+		fmt.Fprintf(os.Stderr, "task from %s:\n%s\n\n", briefPath, task)
+	} else {
+		task = strings.TrimSpace(strings.Join(fs.Args(), " "))
+		if task == "" {
+			fmt.Fprintln(os.Stderr, "ariadne run: a task is required")
+			return exitUsage
+		}
 	}
 
 	rememberFor := ""
@@ -97,6 +119,7 @@ func cmdRun(args []string) int {
 
 	store := &loop.Store{Dir: runsDir}
 	state := loop.NewState(newRunID(), task)
+	state.Brief = briefPath
 
 	tw, err := trace.NewFileWriter(runsDir, state.RunID)
 	if err != nil {
