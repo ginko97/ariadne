@@ -238,7 +238,11 @@ func newAgentFor(o agentOpts) *loop.Agent {
 
 		RequireApproval: approve,
 		Approve:         approveFn,
-		Redact:          redactSecrets(os.Getenv),
+		// Which calls a turn-scoped grant may cover. Wired for every agent;
+		// only a front end with ApproveBatch can ever make a grant, so the
+		// terminal and eval are unaffected.
+		GrantKey: webFetchGrantKey,
+		Redact:   redactSecrets(os.Getenv),
 
 		RunTool:       reg.Call,
 		Checkpoint:    o.Store.Save,

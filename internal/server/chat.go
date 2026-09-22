@@ -160,6 +160,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// this request's stream, which the factory has no way to know about, and
 	// Agent.Approve being a plain func field is exactly why no interface was
 	// built for it.
+	agent.ApproveBatch = s.batchApprover(runID, out, state.Workspace)
 	agent.Approve = s.approver(runID, out, state.Workspace)
 
 	if req.Model != "" {

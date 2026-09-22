@@ -73,6 +73,7 @@ it lists the models you have pulled and checks that the one you pick can call to
 | `/help` | the page's commands — `/new`, `/memory`, `/model`, `/folder`, `/settings`, `/theme`, `/stop`. Answered by the page, never sent to the model; `//text` sends a message starting with `/` |
 | **Working…** | shown while a turn runs: how long, and whether it is thinking, calling a tool, waiting for you, or writing |
 | **Stop** / **Resume turn** | end a turn at any point; finish one that was interrupted, without repeating what already ran |
+| approval cards | several calls the model makes at once arrive as one card, each listed in full, and you can leave any of them out. A web fetch card can also allow that site until the turn ends, so reading ten pages of one site is one question, not ten; a new site still asks |
 | **×** on a conversation | delete it for good — the conversation and its record of every tool call and cost. It asks first; a running turn is refused until it stops |
 | answers | formatted (headings, lists, tables, code); images are never loaded. Each one says which model wrote it — the model that served the turn, not what the picker shows |
 | ◐ | theme: system, light or dark |
@@ -87,7 +88,7 @@ Support/ariadne` on macOS, `~/.config/ariadne` on Linux — wherever you run ari
 | --- | --- |
 | Files | list, read, write and edit in one folder per conversation — pick it in the browser (**Folder…**), or `-workspace <folder>`. Writing and editing ask first, showing the lines that would change; `edit_file` touches only the text it names. It saves text (`.md`, `.txt`), not PDF or Word files |
 | Documents | read Word, Excel and PowerPoint files (`.docx`, `.xlsx`, `.pptx`) and their LibreOffice counterparts (`.odt`, `.ods`, `.odp`) — spreadsheets as rows, dates as dates, a long document in 256 KB parts; PDFs when [Poppler](https://poppler.freedesktop.org)'s `pdftotext` is installed |
-| The web | read a page by URL (`web_fetch`), asking before every fetch; never your own machine or local network |
+| The web | read a page by URL (`web_fetch`), asking before it fetches — in the browser you can allow one site until the turn ends; never your own machine or local network |
 | Tools from anywhere | any MCP server: filesystem, search, git, ... (`-mcp-config`) |
 | Run programs | `-exec`, asking before every single one |
 | Remember | notes that carry across conversations in `MEMORY.md`: curated in the browser (**🧠** or `/memory`) or `-remember` in the terminal; every fact asks for your approval before being saved |
@@ -348,7 +349,7 @@ Four controls went in afterwards, each measured against the same fixture:
 | untrusted-content fencing | marks tool output as data and says so in the system prompt | the model choosing to comply |
 | `-allow calc,fetch` | refuses unlisted tools at the loop; a grant can never be widened on resume | nothing |
 | `write_file`, `edit_file` | ask per call unless `-trust`ed, showing what the file would become; deny when there is no terminal and when there is no approver | a human being there |
-| `web_fetch` | asks before every fetch, with the whole URL on the card, unless `-trust web_fetch`; refuses private, loopback and link-local addresses on every connection, redirects included; sends no cookies or keys | nothing, for the address rule; a human being there, for the rest |
+| `web_fetch` | asks before fetching, with the whole URL on the card, unless `-trust web_fetch`; in the browser a card can allow one origin until the turn ends, after which fetches to it do not ask — and redirects are followed without asking again, grant or not; refuses private, loopback and link-local addresses on every connection, redirects included; sends no cookies or keys | nothing, for the address rule; a human being there, for the rest |
 | MCP default gate, `-exec` | every MCP tool asks unless `-trust`ed; `exec` always asks, gets an environment allow-list, and ariadne's own API keys are redacted from every tool result. `exec` is **not** confined: an approved program can open any file you can, `.env` included, and only ariadne's own provider keys are redacted | a human being there |
 
 ```mermaid

@@ -58,6 +58,15 @@ const (
 	// "We gave up on it" and "it failed" are different facts and only one of
 	// them means nothing happened.
 	KindToolTimeout = "tool_timeout"
+	// KindHostGrant is the operator allowing one destination for the rest of a
+	// turn, so later calls to it are not asked about again. Its own kind
+	// because it is a decision about *future* calls: an approval event says
+	// "this call was allowed", this says "these will be", and an audit after
+	// the fact has to be able to find the second without inferring it from
+	// approvals that were never asked. A refused grant is recorded too, with
+	// IsError, because a front end that sent a key nobody was shown is itself
+	// worth finding.
+	KindHostGrant = "host_grant"
 )
 
 // Event is one thing that happened. Fields are shared across kinds and omitted

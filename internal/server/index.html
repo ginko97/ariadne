@@ -86,6 +86,10 @@
   .approval .removed { background:#c332; color:#b32; }
   .approval .warn { color:var(--err); font-weight:600; }
   .approval details { font-size:.85em; color:var(--dim); }
+  .approval .call + .call { border-top:1px dashed var(--edge); padding-top:.45rem; }
+  .approval .pick { font-size:.85em; color:var(--dim); }
+  .approval .grants { display:flex; flex-direction:column; gap:.2rem; font-size:.88em; }
+  .approval .grants code { font-family:ui-monospace,SFMono-Regular,monospace; }
   .approval .row { display:flex; gap:.5rem; align-items:center; }
   .approval button { font:inherit; padding:.3rem .9rem; cursor:pointer; }
   .approval.settled { border-left-color:var(--edge); color:var(--dim); }
@@ -275,30 +279,86 @@ function approvalCard(d) {
   const el = document.createElement('div');
   el.className = 'e approval';
 
-  const q = document.createElement('div');
-  q.textContent = `Allow ${d.tool}?`;
+  // One card per model step and tool: several fetches arrive together and are
+  // decided together. An older server sends one call's fields at the top level.
+  const calls = d.calls && d.calls.length ? d.calls
+    : [{ call_id: d.call_id, tool: d.tool, args: d.args, preview: d.preview }];
+  const many = calls.length > 1;
 
-  // What the call would do, in words, built by the server. textContent only:
-  // a preview line carries a path, a URL or a line of somebody's file, and
-  // none of that is ever treated as markup.
-  const preview = document.createElement('div');
-  preview.className = 'preview';
-  for (const line of d.preview || []) {
-    const row = document.createElement('div');
-    if (line.kind && line.kind !== 'plain') row.className = line.kind;
-    row.textContent = line.text;
-    preview.append(row);
+  const q = document.createElement('div');
+  q.textContent = many ? `Allow ${d.tool}? ${calls.length} calls` : `Allow ${d.tool}?`;
+  el.append(q);
+
+  // Every call is listed in full — nothing is summarised into a count, because
+  // the point of the card is that each destination is seen. With several, each
+  // line can be left out on its own.
+  const skipBoxes = [];
+  for (const c of calls) {
+    const item = document.createElement('div');
+    item.className = 'call';
+
+    if (many) {
+      const label = document.createElement('label');
+      label.className = 'pick';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = true;
+      box.dataset.callId = c.call_id;
+      skipBoxes.push(box);
+      label.append(box, document.createTextNode(' run this one'));
+      item.append(label);
+    }
+
+    // What the call would do, in words, built by the server. textContent
+    // only: a preview line carries a path, a URL or a line of somebody's
+    // file, and none of that is ever treated as markup.
+    const preview = document.createElement('div');
+    preview.className = 'preview';
+    for (const line of c.preview || []) {
+      const row = document.createElement('div');
+      if (line.kind && line.kind !== 'plain') row.className = line.kind;
+      row.textContent = line.text;
+      preview.append(row);
+    }
+
+    // The raw arguments stay one click away: the preview is what the
+    // decision is made on, but a preview is a summary and the exact call is
+    // the truth.
+    const args = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = 'arguments';
+    const code = document.createElement('code');
+    code.textContent = c.args || '';
+    args.append(summary, code);
+    if (!preview.childElementCount) args.open = true;
+
+    item.append(preview, args);
+    el.append(item);
   }
 
-  // The raw arguments stay one click away: the preview is what the decision
-  // is made on, but a preview is a summary and the exact call is the truth.
-  const args = document.createElement('details');
-  const summary = document.createElement('summary');
-  summary.textContent = 'arguments';
-  const code = document.createElement('code');
-  code.textContent = d.args || '';
-  args.append(summary, code);
-  if (!preview.childElementCount) args.open = true;
+  // One box per destination the card may allow for the rest of this turn.
+  // Unticked by default: allowing a destination is a decision, not a
+  // convenience, and the server and the loop each refuse any destination this
+  // card did not offer.
+  const grantBoxes = [];
+  const offered = [...new Set(calls.map(c => c.grant).filter(Boolean))];
+  if (offered.length) {
+    const grants = document.createElement('div');
+    grants.className = 'grants';
+    for (const g of offered) {
+      const label = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.value = g;
+      grantBoxes.push(box);
+      label.append(box, document.createTextNode(' also allow '));
+      const where = document.createElement('code');
+      where.textContent = g;
+      label.append(where, document.createTextNode(' until this turn ends'));
+      grants.append(label);
+    }
+    el.append(grants);
+  }
 
   const row = document.createElement('div');
   row.className = 'row';
@@ -308,14 +368,18 @@ function approvalCard(d) {
   no.textContent = 'Deny';
   const note = document.createElement('span');
   note.className = 'dim';
+  const inputs = [...skipBoxes, ...grantBoxes];
 
   async function answer(approve) {
     yes.disabled = no.disabled = true;
+    inputs.forEach(b => { b.disabled = true; });
     if (busy) working(approve ? 'running ' + d.tool : 'thinking');
+    const deny = approve ? skipBoxes.filter(b => !b.checked).map(b => b.dataset.callId) : [];
+    const grant = approve ? grantBoxes.filter(b => b.checked).map(b => b.value) : [];
     try {
       const resp = await api('/api/approve', {
         method: 'POST',
-        body: JSON.stringify({ run_id: d.run_id, call_id: d.call_id, approve }),
+        body: JSON.stringify({ run_id: d.run_id, call_id: d.call_id, approve, deny, grant }),
       });
       if (!resp.ok) {
         // 410 is the usual one: the turn stopped waiting before this got sent.
@@ -327,19 +391,23 @@ function approvalCard(d) {
         pendingApprovals.delete(d.call_id);
         return;
       }
-      note.textContent = approve ? 'approved' : 'denied';
+      const ran = calls.length - deny.length;
+      note.textContent = !approve ? 'denied'
+        : (many && deny.length ? `approved ${ran} of ${calls.length}` : 'approved')
+          + (grant.length ? ` · allowed ${grant.join(', ')} for this turn` : '');
       el.classList.add('settled');
       pendingApprovals.delete(d.call_id);
     } catch (e) {
       note.textContent = 'could not send: ' + e.message;
       yes.disabled = no.disabled = false;
+      inputs.forEach(b => { b.disabled = false; });
     }
   }
   yes.onclick = () => answer(true);
   no.onclick = () => answer(false);
 
   row.append(yes, no, note);
-  el.append(q, preview, args, row);
+  el.append(row);
   log.append(el);
   log.scrollTop = log.scrollHeight;
   // Held so a timeout can settle the card rather than leaving two live buttons

@@ -13,6 +13,28 @@ plainly, what protects you and what does not.
   a write replaces, the URL in full, the program and its arguments — with
   the exact arguments still there to open. No answer is not a yes, and with
   no terminal to ask, a gated call is denied.
+- **Allowing a site for the rest of a turn — what it does and does not do.**
+  In the browser, several calls the model makes at once to one tool arrive as
+  one card, every call listed in full. A `web_fetch` card can also allow a
+  destination until the turn ends, so the next fetch to it does not ask
+  again. The destination is the *origin* — scheme, host and port — so
+  allowing `https://github.com` does not cover `http://github.com` or
+  `api.github.com`. A grant ends with the turn: it is never saved, never
+  carried to your next message, and never widened when a conversation is
+  resumed. Each one is recorded in the trace, with the calls it let through.
+  Only `web_fetch` can be allowed this way; `write_file` and `edit_file`
+  ask for every change, and `exec` for every program.
+
+  **What a grant does not protect:** anything the model puts in a URL to an
+  allowed destination reaches it, without asking. That is the decision you
+  made when you allowed it, and why nothing is allowed by default. And
+  **redirects are not re-approved** — not for a grant, and not for a single
+  approved fetch either. `web_fetch` follows a redirect wherever the site
+  sends it, checking only that it is a public address. So a site you allow
+  that redirects anywhere it is told to — an *open redirect* — can pass a URL
+  on to a destination you never saw. Allow sites you trust to behave, not
+  just sites you recognise. The terminal has no grants; it asks for every
+  call.
 - **What is not protected: the download itself.** The release binaries are
   **not code-signed**, so Windows SmartScreen warns about them and macOS
   Gatekeeper may refuse them. The only integrity check this project offers is

@@ -461,3 +461,141 @@ func TestApprovalEventCarriesAPreview(t *testing.T) {
 		t.Errorf("the arguments were dropped from the event:\n%s", body)
 	}
 }
+
+func answerVia(t *testing.T, s *Server, ts *httptest.Server, req approveRequest) *http.Response {
+	t.Helper()
+	body, _ := json.Marshal(req)
+	r, err := http.NewRequest("POST", ts.URL+"/api/approve", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("X-Ariadne-CSRF", s.CSRFToken)
+	resp, err := ts.Client().Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+func fetchCall(id, u string) llm.ToolCall {
+	args, _ := json.Marshal(map[string]string{"url": u})
+	return llm.ToolCall{ID: id, Name: "web_fetch", Args: args}
+}
+
+// Several calls go out as one card that lists every one of them, with the
+// destination each could be allowed under. Nothing is summarised into a count.
+func TestBatchCardListsEveryCallAndItsDestination(t *testing.T) {
+	s, ts := newTestServer(t)
+	rec := newSyncRecorder()
+	out := &sseWriter{w: rec, f: rec}
+
+	calls := []llm.ToolCall{
+		fetchCall("b1", "https://github.com/a"),
+		fetchCall("b2", "https://github.com/b"),
+		fetchCall("b3", "https://api.github.com/c"),
+	}
+	keys := []string{"https://github.com", "https://github.com", "https://api.github.com"}
+
+	done := make(chan loop.BatchDecision, 1)
+	go func() {
+		d, _ := s.batchApprover("run_card", out, t.TempDir())(context.Background(), calls, keys)
+		done <- d
+	}()
+	waitFor(t, func() bool { return strings.Contains(rec.body(), "approval_required") })
+
+	body := rec.body()
+	for _, want := range []string{
+		`"call_id":"b1"`, `"call_id":"b2"`, `"call_id":"b3"`,
+		`GET https://github.com/a`, `GET https://api.github.com/c`,
+		`"grant":"https://github.com"`, `"grant":"https://api.github.com"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the card is missing %s:\n%s", want, body)
+		}
+	}
+
+	resp := answerVia(t, s, ts, approveRequest{RunID: "run_card", CallID: "b1", Approve: true,
+		Deny: []string{"b2"}, Grant: []string{"https://github.com"}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("answer status = %d", resp.StatusCode)
+	}
+	select {
+	case d := <-done:
+		if len(d.Approved) != 3 || !d.Approved[0] || d.Approved[1] || !d.Approved[2] {
+			t.Errorf("approved %v, want [true false true]", d.Approved)
+		}
+		if len(d.Grants) != 1 || d.Grants[0] != "https://github.com" {
+			t.Errorf("grants %v, want [https://github.com]", d.Grants)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the card never received its answer")
+	}
+}
+
+// An answer that names a destination the card did not offer, or a call that
+// was not on it, is refused — and the question stays open, so the operator's
+// real answer can still arrive. This is the server's half of "the page cannot
+// widen a grant"; the loop checks again.
+func TestAnswerNamingSomethingOffTheCardIsRefused(t *testing.T) {
+	s, ts := newTestServer(t)
+	rec := newSyncRecorder()
+	out := &sseWriter{w: rec, f: rec}
+
+	calls := []llm.ToolCall{fetchCall("o1", "https://github.com/a")}
+	keys := []string{"https://github.com"}
+	done := make(chan loop.BatchDecision, 1)
+	go func() {
+		d, _ := s.batchApprover("run_off", out, t.TempDir())(context.Background(), calls, keys)
+		done <- d
+	}()
+	waitFor(t, func() bool { return strings.Contains(rec.body(), "approval_required") })
+
+	for _, bad := range []approveRequest{
+		{RunID: "run_off", CallID: "o1", Approve: true, Grant: []string{"https://evil.example"}},
+		{RunID: "run_off", CallID: "o1", Approve: true, Deny: []string{"not-on-card"}},
+	} {
+		if resp := answerVia(t, s, ts, bad); resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("answer %+v: status %d, want 400", bad, resp.StatusCode)
+		}
+	}
+
+	// Still open: the proper answer goes through.
+	if resp := answerVia(t, s, ts, approveRequest{RunID: "run_off", CallID: "o1", Approve: true}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("the question was consumed by a refused answer: status %d", resp.StatusCode)
+	}
+	select {
+	case d := <-done:
+		if len(d.Approved) != 1 || !d.Approved[0] || len(d.Grants) != 0 {
+			t.Errorf("decision %+v, want one approval and no grants", d)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no decision arrived")
+	}
+}
+
+// Deny allows nothing: grants sent with a refusal are dropped.
+func TestADenialCarriesNoGrants(t *testing.T) {
+	s, ts := newTestServer(t)
+	rec := newSyncRecorder()
+	out := &sseWriter{w: rec, f: rec}
+
+	done := make(chan loop.BatchDecision, 1)
+	go func() {
+		d, _ := s.batchApprover("run_no", out, t.TempDir())(context.Background(),
+			[]llm.ToolCall{fetchCall("n1", "https://github.com/a")}, []string{"https://github.com"})
+		done <- d
+	}()
+	waitFor(t, func() bool { return strings.Contains(rec.body(), "approval_required") })
+
+	answerVia(t, s, ts, approveRequest{RunID: "run_no", CallID: "n1", Approve: false, Grant: []string{"https://github.com"}})
+	select {
+	case d := <-done:
+		if d.Approved[0] || len(d.Grants) != 0 {
+			t.Errorf("a denial produced %+v", d)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no decision arrived")
+	}
+}

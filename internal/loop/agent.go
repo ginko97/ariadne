@@ -96,6 +96,29 @@ type Agent struct {
 	// continuing would mean guessing on the operator's behalf.
 	Approve func(ctx context.Context, call llm.ToolCall) (bool, error)
 
+	// ApproveBatch, when set, replaces Approve: the gated calls one model step
+	// makes to one tool are put to the operator together, and the answer can
+	// allow a destination for the rest of the turn. keys[i] is the grant key
+	// for calls[i], or "" where that call may not be granted.
+	//
+	// It exists because one research request raised twenty approval cards,
+	// and nobody reads the twentieth. Leaving it nil keeps one prompt per
+	// call, which is what the terminal and the eval harness want.
+	ApproveBatch func(ctx context.Context, calls []llm.ToolCall, keys []string) (BatchDecision, error)
+
+	// GrantKey says which calls may be covered by a turn-scoped grant, and
+	// under what key. The loop does not import internal/tool and so does not
+	// know which tools reach the network; the wiring decides. A nil GrantKey
+	// means no call can ever be granted, which is the safe default for
+	// anything that builds an agent without saying.
+	GrantKey func(call llm.ToolCall) (key string, ok bool)
+
+	// grants holds the keys allowed for the turn in progress. Deliberately on
+	// the agent and not on State: State is checkpointed, and a grant must
+	// never be written down, carried into the next message, or widened by a
+	// resume. Run clears it on the way in and on the way out.
+	grants map[string]bool
+
 	// Redact, if set, rewrites every tool result before anything else sees it:
 	// the fence, the trace, the checkpoint, and the model.
 	//
@@ -164,6 +187,12 @@ type Agent struct {
 // It mutates s as it goes, so a caller holding s can checkpoint it at any point
 // and can inspect Steps and Cost after an error.
 func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
+	// A grant lasts one turn. Cleared on entry so an agent reused for the next
+	// message starts with none, and on exit so nothing outlives the turn even
+	// if a caller inspects the agent afterwards.
+	a.grants = nil
+	defer func() { a.grants = nil }()
+
 	// Where this call started. The step ceiling is measured from here rather
 	// than from zero, so resuming or taking another turn gets its own budget
 	// instead of inheriting a spent one.
@@ -403,6 +432,9 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 	// This prevents interleaved interactive approval prompts on stdin and ensures
 	// denied tools are recorded deterministically.
 	var runnable []llm.ToolCall
+	var admitted []llm.ToolCall // passed the allow-list and denial limit
+	var gated []llm.ToolCall    // need a decision from the operator
+	coveredBy := map[string]string{}
 	for _, c := range calls {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -440,32 +472,58 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 
 		// Permitted is not the same as wanted. The allow-list was decided before
 		// the run, by someone who could not know what the arguments would be;
-		// this asks about these arguments, now.
+		// this asks about these arguments, now — unless the operator already
+		// allowed this call's destination earlier in the same turn.
 		if s.needsApproval(c.Name) {
-			ok, err := a.askApproval(ctx, c)
-			if err != nil {
-				return err
+			if key, ok := a.granted(c); ok {
+				coveredBy[c.ID] = key
+			} else {
+				gated = append(gated, c)
 			}
+		}
+		admitted = append(admitted, c)
+	}
+
+	// Asked together, so a step that fetches six pages is one card rather
+	// than six. Serial still: nothing runs until every question is answered.
+	decisions, err := a.decide(ctx, s, gated)
+	if err != nil {
+		return err
+	}
+
+	for _, c := range admitted {
+		if !s.needsApproval(c.Name) {
+			runnable = append(runnable, c)
+			continue
+		}
+		if key, ok := coveredBy[c.ID]; ok {
 			a.emit(trace.Event{
 				Kind: trace.KindApproval, Step: s.Steps,
 				CallID: c.ID, Tool: c.Name, Args: c.Args,
-				Content: map[bool]string{true: "granted", false: "denied"}[ok],
-				IsError: !ok,
+				Content: "granted: " + key + " was allowed earlier in this turn",
 			})
-			if !ok {
-				denials := s.recordDenial(c.Name)
-				msg := fmt.Sprintf("call to %q was not approved", c.Name)
-				if denials >= maxToolDenials {
-					msg = fmt.Sprintf("call to %q was not approved (%d denials reached; tool will no longer be offered in this run)",
-						c.Name, denials)
-				}
-				if err := a.deny(s, i, c, msg); err != nil {
-					return err
-				}
-				continue
-			}
+			runnable = append(runnable, c)
+			continue
 		}
-
+		ok := decisions[c.ID]
+		a.emit(trace.Event{
+			Kind: trace.KindApproval, Step: s.Steps,
+			CallID: c.ID, Tool: c.Name, Args: c.Args,
+			Content: map[bool]string{true: "granted", false: "denied"}[ok],
+			IsError: !ok,
+		})
+		if !ok {
+			denials := s.recordDenial(c.Name)
+			msg := fmt.Sprintf("call to %q was not approved", c.Name)
+			if denials >= maxToolDenials {
+				msg = fmt.Sprintf("call to %q was not approved (%d denials reached; tool will no longer be offered in this run)",
+					c.Name, denials)
+			}
+			if err := a.deny(s, i, c, msg); err != nil {
+				return err
+			}
+			continue
+		}
 		runnable = append(runnable, c)
 	}
 

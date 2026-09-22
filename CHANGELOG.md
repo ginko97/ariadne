@@ -5,6 +5,17 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **One card per decision, not one per call.** A research request that read
+  twenty web pages used to raise twenty approval cards, and nobody reads the
+  twentieth — which quietly turns "asks before it acts" into "clicks yes
+  before it acts". Now, in the browser, several calls the model makes at once
+  to one tool arrive as one card listing every call, with a box to leave any
+  of them out. A web fetch card can also **allow that site until the turn
+  ends**: later fetches to it go ahead without asking, and a fetch to any
+  other site still asks. A grant is never saved, never carried to your next
+  message, and is recorded in the trace with the calls it let through. Only
+  web fetches can be allowed this way; writes, edits and programs still ask
+  every time. See SECURITY.md for what a grant does not protect.
 - **An answer typed after a terminal prompt times out is no longer lost.**
   Since v0.5.4, a prompt that timed out left a reader behind on the
   terminal, and the next line you typed went to it and was thrown away —
