@@ -5,6 +5,21 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **A brief is shown before it runs.** In the browser, **Brief…** and
+  `/brief <file.md>` now open the brief in full, and nothing is sent to the
+  model until **Start this brief**. If the file changed after it was shown,
+  starting is refused, because what you agreed to has to be what runs. In
+  v0.6.4 the brief started at once and appeared as the model began reading it.
+- **SECURITY.md says what a brief is:** your own instruction, not untrusted
+  text. Use briefs you wrote.
+- **A paused card closes.** When a card in a brief conversation stops
+  waiting, its buttons are disabled and it points at **Resume**. Before this
+  they stayed clickable and returned an error.
+- **`chat -task` prints the conversation id**, like any first message does.
+- **A refused message no longer freezes the page.** When the server turned a
+  message away (the conversation already busy in another tab, no provider
+  set up, ariadne unreachable), the page stayed on "Working…" with Send
+  hidden until you reloaded it.
 - **MCP SDK 1.8.0** (from 1.7.0). Same protocol (2026-07-28). Per its
   release notes, a cancelled tool call is now given up at once instead of
   waiting up to five seconds for the cancel notice to be delivered, and JSON

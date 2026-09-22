@@ -27,6 +27,11 @@ type chatRequest struct {
 	Resume bool `json:"resume,omitempty"`
 	// Brief is the relative or workspace path to a .md brief to seed a new conversation.
 	Brief string `json:"brief,omitempty"`
+	// BriefSHA256 is the digest POST /api/brief returned for the text the
+	// page showed. Required with Brief, and it must match the file as it is
+	// read now: Start is consent to the text on the screen, not to whatever
+	// the file holds by the time the request arrives.
+	BriefSHA256 string `json:"brief_sha256,omitempty"`
 }
 
 // handleChat runs one turn and streams it.
@@ -71,6 +76,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "cannot provide both brief and message")
 		return
 	}
+	if req.Brief != "" && req.BriefSHA256 == "" {
+		httpError(w, http.StatusBadRequest, "a brief runs only after it has been shown: brief_sha256 is required")
+		return
+	}
 	req.Model = strings.TrimSpace(req.Model)
 	req.Workspace = strings.TrimSpace(req.Workspace)
 	if req.RunID != "" && !sanitiseRunID(req.RunID) {
@@ -107,6 +116,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		rel, content, err := readWorkspaceBrief(bws, req.Brief)
 		if err != nil {
 			httpError(w, http.StatusBadRequest, "brief: "+err.Error())
+			return
+		}
+		if briefDigest(content) != req.BriefSHA256 {
+			httpError(w, http.StatusConflict, "brief: "+rel+" changed since it was shown; show it again before starting")
 			return
 		}
 		briefRelPath = rel

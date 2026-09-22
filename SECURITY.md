@@ -94,6 +94,13 @@ plainly, what protects you and what does not.
   read tool in `-trust`, a document in the workspace can get the model to read
   a secret file next to it and repeat it in its answer. Keep secrets out of
   the workspace.
+- **A brief is your own instruction.** A brief (`-task`, **Brief…**,
+  `/brief`) is sent as your message, not as untrusted text, so nothing marks
+  it and the model treats every line as yours. Use briefs you wrote. A
+  downloaded `.md` used as a brief has the authority a web page is denied.
+  The browser shows the whole brief before it starts and refuses to start if
+  the file changed since; the terminal prints it and starts at once.
+  Approval still applies to what the brief leads to.
 
 The attacks behind every line above, with traces, are in
 [`docs/injection-postmortem.md`](docs/injection-postmortem.md).

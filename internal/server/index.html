@@ -71,6 +71,10 @@
   #log { flex:1; overflow-y:auto; padding:1rem; display:flex; flex-direction:column; gap:.7rem; }
   .e { max-width:52rem; white-space:pre-wrap; overflow-wrap:anywhere; }
   .brief { border-left:3px solid var(--edge); padding-left:.7rem; }
+  #briefPreview { flex-basis:100%; display:flex; flex-direction:column; gap:.4rem; }
+  #briefPreview[hidden] { display:none; }
+  #briefText { max-height:40vh; overflow-y:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+  #briefPreview button { align-self:flex-start; }
   .brief-header { font-size:.85em; margin-bottom:.3rem; font-weight:600; }
   .prompt { align-self:flex-end; background:#8882; padding:.5rem .75rem; border-radius:.6rem; }
   .tool_call, .tool_result { color:var(--dim); font-family:ui-monospace,SFMono-Regular,monospace;
@@ -155,9 +159,14 @@
   </div>
   <div id="briefPanel" hidden>
     <input id="briefInput" type="text" spellcheck="false" placeholder="Path to brief.md (in the folder)">
-    <button type="button" id="useBrief" class="primary">Start</button>
+    <button type="button" id="useBrief">Show</button>
     <button type="button" id="cancelBrief">Cancel</button>
     <span id="briefErr" class="is_error"></span>
+    <div id="briefPreview" hidden>
+      <div class="dim">This brief becomes your own instruction to the model. Read it before you start; only use files you wrote.</div>
+      <div id="briefText" class="brief md"></div>
+      <button type="button" id="startBrief" class="primary">Start this brief</button>
+    </div>
   </div>
   <div id="memoryPanel" hidden>
     <div class="row" style="justify-content:space-between; align-items:center;">
@@ -423,7 +432,18 @@ function approvalCard(d) {
   log.scrollTop = log.scrollHeight;
   // Held so a timeout can settle the card rather than leaving two live buttons
   // for a question the server has already stopped waiting on.
-  pendingApprovals.set(d.call_id, { el, note, yes, no });
+  pendingApprovals.set(d.call_id, { el, note, yes, no, inputs });
+}
+
+// settleApproval closes a card the server is no longer waiting on.
+function settleApproval(callID, why) {
+  const p = pendingApprovals.get(callID);
+  if (!p) return;
+  p.yes.disabled = p.no.disabled = true;
+  p.inputs.forEach(b => { b.disabled = true; });
+  p.note.textContent = why;
+  p.el.classList.add('settled');
+  pendingApprovals.delete(callID);
 }
 
 function render(entries) {
@@ -700,6 +720,7 @@ async function send(text, opts = {}) {
         run_id: runID, message: text, model: modelEl.value || undefined,
         workspace: runID ? undefined : (newWorkspace || undefined),
         brief: opts.brief || undefined,
+        brief_sha256: opts.briefSHA || undefined,
       }),
     });
   } catch (e) {
@@ -708,13 +729,20 @@ async function send(text, opts = {}) {
     } else {
       entry('tool_result', 'Could not reach ariadne: ' + e.message, 'is_error');
     }
+    turn = null;
+    setBusy(false);
     return;
   }
 
+  // A refusal is the end of this send: without setBusy(false) the page kept
+  // "Working…" and a Stop button for a turn that never started, and hid Send
+  // until a reload.
   if (!resp.ok) {
     const { error } = await resp.json().catch(() => ({ error: 'refused' }));
     warn(error);
     if (!opts.resume && !opts.brief && text) $('input').value = text;
+    turn = null;
+    setBusy(false);
     return;
   }
 
@@ -763,18 +791,11 @@ async function send(text, opts = {}) {
           working('waiting for your approval');
           answer = null;
         } else if (name === 'approval_timeout') {
-          const p = pendingApprovals.get(d.call_id);
-          if (p) {
-            p.yes.disabled = p.no.disabled = true;
-            p.note.textContent = 'timed out — denied';
-            p.el.classList.add('settled');
-            pendingApprovals.delete(d.call_id);
-          }
+          settleApproval(d.call_id, 'timed out — denied');
         } else if (name === 'approval_waiting') {
-          const p = pendingApprovals.get(d.call_id);
-          if (p) {
-            p.note.textContent = 'waiting for operator review (run paused)';
-          }
+          // The server has stopped listening for this card, so its buttons
+          // could only earn a 410. Nothing ran; the Resume card below asks again.
+          settleApproval(d.call_id, 'paused — nothing ran. Resume below asks again.');
         } else if (name === 'waiting') {
           showResumeCard();
         } else if (name === 'error') {
@@ -1077,7 +1098,7 @@ function command(text) {
       break;
     case 'brief':
       if (runID) say('Briefs are only used to start new conversations. /new, then /brief, to start one.');
-      else if (arg) startBrief(arg);
+      else if (arg) { openBriefPanel(); $('briefInput').value = arg; showBrief(arg); }
       else $('briefBtn').onclick();
       break;
     case 'theme': {
@@ -1173,9 +1194,21 @@ $('browse').onclick = async () => {
 
 // ---- brief for a new conversation ----
 
+// shownBrief is the brief on the screen: its path and the digest the server
+// computed for that text. Start sends the digest back, and the server refuses
+// if the file no longer matches — consent covers the text shown, not the file.
+let shownBrief = null;
+
+function clearBriefPreview() {
+  shownBrief = null;
+  $('briefPreview').hidden = true;
+  $('briefText').replaceChildren();
+}
+
 function closeBriefPanel() {
   $('briefPanel').hidden = true;
   $('briefErr').textContent = '';
+  clearBriefPreview();
 }
 
 function openBriefPanel() {
@@ -1184,6 +1217,7 @@ function openBriefPanel() {
   if (!$('memoryPanel').hidden) closeMemory();
   $('briefInput').value = '';
   $('briefErr').textContent = '';
+  clearBriefPreview();
   $('briefPanel').hidden = false;
   $('briefInput').focus();
 }
@@ -1197,15 +1231,23 @@ $('cancelBrief').onclick = closeBriefPanel;
 $('useBrief').onclick = () => {
   const p = $('briefInput').value.trim();
   if (!p) { $('briefErr').textContent = 'type the path to a .md file'; return; }
-  startBrief(p);
+  showBrief(p);
 };
 $('briefInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); $('useBrief').click(); }
   if (e.key === 'Escape') closeBriefPanel();
 });
+// A different path is a different brief: the one on screen no longer
+// describes what Start would send.
+$('briefInput').addEventListener('input', clearBriefPreview);
 
-async function startBrief(path) {
+// showBrief loads a brief and puts its full text in the panel. Nothing is sent
+// to the model until Start: a brief is promoted to the operator's own
+// instruction, so the operator reads it first.
+async function showBrief(path) {
   if (busy) return;
+  clearBriefPreview();
+  $('briefErr').textContent = '';
   const folder = newWorkspace || '';
   try {
     const resp = await api('/api/brief', {
@@ -1217,12 +1259,21 @@ async function startBrief(path) {
       $('briefErr').textContent = d.error || 'could not load brief';
       return;
     }
-    closeBriefPanel();
-    send('', { brief: d.path });
+    shownBrief = { path: d.path, sha256: d.sha256 };
+    $('briefText').replaceChildren(renderMarkdown(d.content));
+    $('briefPreview').hidden = false;
+    $('startBrief').focus();
   } catch (e) {
     $('briefErr').textContent = 'could not load brief: ' + e.message;
   }
 }
+
+$('startBrief').onclick = () => {
+  if (busy || !shownBrief) return;
+  const b = shownBrief;
+  closeBriefPanel();
+  send('', { brief: b.path, briefSHA: b.sha256 });
+};
 
 // ---------------------------------------------------------------- memory
 //

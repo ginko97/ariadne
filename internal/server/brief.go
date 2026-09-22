@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,6 +20,15 @@ type briefRequest struct {
 type briefResponse struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
+	// SHA256 names the text shown, so starting the brief can prove it is
+	// running the same one (chatRequest.BriefSHA256).
+	SHA256 string `json:"sha256"`
+}
+
+// briefDigest is the hex SHA-256 of a brief's text as read from disk.
+func briefDigest(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
 }
 
 // readWorkspaceBrief validates that path is a markdown file within workspace,
@@ -106,5 +117,6 @@ func (s *Server) handleBrief(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(briefResponse{
 		Path:    relPath,
 		Content: content,
+		SHA256:  briefDigest(content),
 	})
 }

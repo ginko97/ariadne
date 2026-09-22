@@ -211,6 +211,9 @@ func cmdChat(args []string) int {
 		state.Brief = *taskFile
 		state.Workspace = workspaceDir
 		state.Memory = mem
+		// The same line a typed first message prints: without it a brief
+		// conversation has no id on screen to resume it by.
+		fmt.Fprintf(os.Stderr, "chat %s  model=%s\n", state.RunID, agent.Model)
 		if err := chatTurn(agent, state, *stream); err != nil {
 			fmt.Fprintf(os.Stderr, "! %v\n", err)
 		}
