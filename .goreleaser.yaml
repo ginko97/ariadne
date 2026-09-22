@@ -26,11 +26,14 @@ archives:
 checksum:
   name_template: checksums.txt
 
-changelog:
-  # Commit subjects are not release notes. The workflow passes the annotated
-  # tag's message with --release-notes, which is where this project writes
-  # them.
-  disable: true
+# No changelog block, deliberately. The workflow passes the annotated tag's
+# message with --release-notes, and GoReleaser reads that file inside the
+# changelog pipe's Run — which never executes when changelog.disable is true,
+# because Skip() returns first. That setting silently threw the notes away:
+# v0.5.0 through v0.6.1 each published a 1.5-2 KB tag message as an empty
+# release page. With a notes file present, Run returns before generating a
+# changelog from commit subjects, so leaving the pipe enabled produces the tag
+# message and nothing else. scripts/goreleaser_test.go keeps it that way.
 
 release:
   draft: false

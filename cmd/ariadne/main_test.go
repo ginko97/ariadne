@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -517,7 +516,7 @@ func TestApproveFromReader(t *testing.T) {
 
 	call := llm.ToolCall{Name: "bash", Args: json.RawMessage(`{}`)}
 	for _, tc := range cases {
-		r := bufio.NewReader(strings.NewReader(tc.input))
+		r := newLineSource(strings.NewReader(tc.input))
 		var out strings.Builder
 		got, err := approveFromReader(context.Background(), r, &out, call, t.TempDir())
 		if err != nil {
@@ -531,9 +530,9 @@ func TestApproveFromReader(t *testing.T) {
 
 func TestApproveSharedReaderPreservesInput(t *testing.T) {
 	input := "first line\ny\nsecond line\n"
-	r := bufio.NewReader(strings.NewReader(input))
+	r := newLineSource(strings.NewReader(input))
 
-	line1, err := r.ReadString('\n')
+	line1, err := r.next(context.Background(), 0)
 	if err != nil || strings.TrimSpace(line1) != "first line" {
 		t.Fatalf("reading line 1: %q, %v", line1, err)
 	}
@@ -544,7 +543,7 @@ func TestApproveSharedReaderPreservesInput(t *testing.T) {
 		t.Fatalf("approval: %v, %v", ok, err)
 	}
 
-	line2, err := r.ReadString('\n')
+	line2, err := r.next(context.Background(), 0)
 	if err != nil || strings.TrimSpace(line2) != "second line" {
 		t.Fatalf("reading line 2: %q, %v", line2, err)
 	}
@@ -557,7 +556,7 @@ func TestApproveOnTerminalFailsClosedOnNonTerminal(t *testing.T) {
 	}
 	defer f.Close()
 
-	r := bufio.NewReader(f)
+	r := newLineSource(f)
 	fn := approveOnTerminalReader(f, r, t.TempDir())
 	approved, err := fn(context.Background(), llm.ToolCall{Name: "write_file"})
 	if err != nil {
@@ -987,7 +986,7 @@ func TestTerminalApprovalShowsThePreviewNotTheJSON(t *testing.T) {
 	})
 
 	var out strings.Builder
-	r := bufio.NewReader(strings.NewReader("n\n"))
+	r := newLineSource(strings.NewReader("n\n"))
 	if _, err := approveFromReader(context.Background(), r, &out, llm.ToolCall{Name: "edit_file", Args: args}, dir); err != nil {
 		t.Fatal(err)
 	}
@@ -1018,7 +1017,7 @@ func TestNonTerminalDenialNamesTheTrustFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Stderr = pw
-	fn := approveOnTerminalReader(f, bufio.NewReader(f), t.TempDir())
+	fn := approveOnTerminalReader(f, newLineSource(f), t.TempDir())
 	approved, err := fn(context.Background(), llm.ToolCall{Name: "write_file"})
 	pw.Close()
 	os.Stderr = stderr
@@ -1042,7 +1041,7 @@ func TestApproveFromReaderTimesOut(t *testing.T) {
 	defer pr.Close()
 	defer pw.Close()
 
-	r := bufio.NewReader(pr)
+	r := newLineSource(pr)
 	var out strings.Builder
 	call := llm.ToolCall{Name: "write_file", Args: json.RawMessage(`{}`)}
 
@@ -1068,7 +1067,7 @@ func TestApproveFromReaderCancelsOnContext(t *testing.T) {
 	defer pr.Close()
 	defer pw.Close()
 
-	r := bufio.NewReader(pr)
+	r := newLineSource(pr)
 	var out strings.Builder
 	call := llm.ToolCall{Name: "write_file", Args: json.RawMessage(`{}`)}
 
@@ -1081,5 +1080,81 @@ func TestApproveFromReaderCancelsOnContext(t *testing.T) {
 	}
 	if approved {
 		t.Error("cancelled prompt returned approved = true")
+	}
+}
+
+// An answer typed after a prompt times out reaches the next reader, not a
+// goroutine the timed-out prompt left behind.
+//
+// The regression this locks: v0.5.4 bounded the terminal prompt with a
+// goroutine per read. os.Stdin cannot be cancelled, so on timeout that
+// goroutine stayed blocked on a reader shared with the chat REPL and every
+// later prompt, and took the next line with it. Prompt 2's "y" was read by
+// prompt 1's orphan and dropped; prompt 2 then waited for whatever the
+// operator typed after that. Under -race it was also a data race on the
+// bufio.Reader.
+func TestAnswerAfterATimeoutReachesTheNextPrompt(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	src := newLineSource(pr)
+	call := llm.ToolCall{Name: "calc", Args: json.RawMessage(`{}`)}
+
+	ok, err := approveFromReaderWithTimeout(context.Background(), src, io.Discard, call, t.TempDir(), 20*time.Millisecond)
+	if err != nil || ok {
+		t.Fatalf("prompt 1: ok=%v err=%v, want a timed-out denial", ok, err)
+	}
+
+	go func() { _, _ = pw.Write([]byte("y\n")) }()
+
+	ok, err = approveFromReaderWithTimeout(context.Background(), src, io.Discard, call, t.TempDir(), 2*time.Second)
+	if err != nil || !ok {
+		t.Errorf("prompt 2 did not receive the operator's \"y\" (ok=%v err=%v): "+
+			"something left behind by prompt 1 read it first", ok, err)
+	}
+}
+
+// The same guarantee for the chat REPL, which shares the reader: a prompt
+// that times out must not eat the next message typed at "> ".
+func TestTimedOutPromptDoesNotEatTheNextChatMessage(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	src := newLineSource(pr)
+	call := llm.ToolCall{Name: "calc", Args: json.RawMessage(`{}`)}
+
+	if ok, _ := approveFromReaderWithTimeout(context.Background(), src, io.Discard, call, t.TempDir(), 20*time.Millisecond); ok {
+		t.Fatal("an unanswered prompt approved")
+	}
+
+	go func() { _, _ = pw.Write([]byte("what is 2+2?\n")) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	line, err := src.next(ctx, 0)
+	if err != nil || strings.TrimSpace(line) != "what is 2+2?" {
+		t.Errorf("the REPL read %q (err %v); the message typed after a timed-out prompt was lost", line, err)
+	}
+}
+
+// The end of input is sticky, as it is for bufio.Reader: a caller after EOF
+// gets EOF, not a wait on a goroutine that has already finished.
+func TestLineSourceEndOfInputIsSticky(t *testing.T) {
+	src := newLineSource(strings.NewReader("only\n"))
+	ctx := context.Background()
+
+	if line, err := src.next(ctx, 0); err != nil || line != "only\n" {
+		t.Fatalf("first read: %q, %v", line, err)
+	}
+	for i := 0; i < 2; i++ {
+		done := make(chan struct{})
+		var err error
+		go func() { _, err = src.next(ctx, 0); close(done) }()
+		select {
+		case <-done:
+			if !errors.Is(err, io.EOF) {
+				t.Errorf("read %d after the end: err = %v, want io.EOF", i+2, err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("read %d after the end blocked instead of returning io.EOF", i+2)
+		}
 	}
 }

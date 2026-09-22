@@ -1,8 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,10 +27,16 @@ import (
 // Unanswered prompts time out after 5 minutes (matching the browser UI) and
 // deny the call; a cancelled context (e.g. Ctrl-C) unblocks immediately.
 func approveOnTerminal(in *os.File, workspace string) func(context.Context, llm.ToolCall) (bool, error) {
-	return approveOnTerminalReader(in, bufio.NewReader(in), workspace)
+	// os.Stdin is read through the one source every other reader in the
+	// process shares; anything else — a test's file — gets its own.
+	src := stdinSource()
+	if in != os.Stdin {
+		src = newLineSource(in)
+	}
+	return approveOnTerminalReader(in, src, workspace)
 }
 
-func approveOnTerminalReader(in *os.File, reader *bufio.Reader, workspace string) func(context.Context, llm.ToolCall) (bool, error) {
+func approveOnTerminalReader(in *os.File, src *lineSource, workspace string) func(context.Context, llm.ToolCall) (bool, error) {
 	return func(ctx context.Context, c llm.ToolCall) (bool, error) {
 		if !isTerminal(in) {
 			// A gated built-in names the flag that would let it run
@@ -43,7 +49,7 @@ func approveOnTerminalReader(in *os.File, reader *bufio.Reader, workspace string
 			fmt.Fprintf(os.Stderr, "denied %s: approval required and no terminal to ask%s\n", c.Name, hint)
 			return false, nil
 		}
-		return approveFromReader(ctx, reader, os.Stderr, c, workspace)
+		return approveFromReader(ctx, src, os.Stderr, c, workspace)
 	}
 }
 
@@ -67,12 +73,17 @@ const terminalApprovalTimeout = 5 * time.Minute
 
 // approveFromReader prompts the operator on out and reads an approval answer, with
 // a 5-minute timeout matching the browser interface.
-func approveFromReader(ctx context.Context, reader *bufio.Reader, out io.Writer, c llm.ToolCall, workspace string) (bool, error) {
-	return approveFromReaderWithTimeout(ctx, reader, out, c, workspace, terminalApprovalTimeout)
+func approveFromReader(ctx context.Context, src *lineSource, out io.Writer, c llm.ToolCall, workspace string) (bool, error) {
+	return approveFromReaderWithTimeout(ctx, src, out, c, workspace, terminalApprovalTimeout)
 }
 
 // approveFromReaderWithTimeout prompts the operator on out and bounds the wait by timeout.
-func approveFromReaderWithTimeout(ctx context.Context, reader *bufio.Reader, out io.Writer, c llm.ToolCall, workspace string, timeout time.Duration) (bool, error) {
+//
+// A timeout or a cancelled context stops waiting and takes nothing with it:
+// the line the operator types afterwards goes to whoever reads next, not to a
+// goroutine this prompt left behind. See lineSource for why that needed a
+// single reader rather than a goroutine per prompt.
+func approveFromReaderWithTimeout(ctx context.Context, src *lineSource, out io.Writer, c llm.ToolCall, workspace string, timeout time.Duration) (bool, error) {
 	// What the call does, not the JSON it arrived as: the arguments of an edit
 	// are three escaped strings on one line, and a gate nobody reads is not a
 	// gate. tool.Preview reads the file to say what would change; it is shown
@@ -83,42 +94,23 @@ func approveFromReaderWithTimeout(ctx context.Context, reader *bufio.Reader, out
 	}
 	fmt.Fprint(out, "[y/N] ")
 
-	type readResult struct {
-		line string
-		err  error
-	}
-	ch := make(chan readResult, 1)
-	go func() {
-		line, err := reader.ReadString('\n')
-		ch <- readResult{line: line, err: err}
-	}()
-
-	var timer *time.Timer
-	var timeoutCh <-chan time.Time
-	if timeout > 0 {
-		timer = time.NewTimer(timeout)
-		defer timer.Stop()
-		timeoutCh = timer.C
-	}
-
-	select {
-	case <-ctx.Done():
-		return false, ctx.Err()
-	case <-timeoutCh:
+	line, err := src.next(ctx, timeout)
+	switch {
+	case errors.Is(err, errLineTimeout):
 		fmt.Fprintln(out, "\napproval timed out; denied")
 		return false, nil
-	case res := <-ch:
-		if res.err != nil {
-			// EOF on a terminal means the operator closed the input rather than
-			// answering. Not an answer, so not a yes.
-			fmt.Fprintln(out, "no answer; denied")
-			return false, nil
-		}
-		switch strings.ToLower(strings.TrimSpace(res.line)) {
-		case "y", "yes":
-			return true, nil
-		default:
-			return false, nil
-		}
+	case ctx.Err() != nil:
+		return false, ctx.Err()
+	case err != nil:
+		// EOF on a terminal means the operator closed the input rather than
+		// answering. Not an answer, so not a yes.
+		fmt.Fprintln(out, "no answer; denied")
+		return false, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
 	}
 }

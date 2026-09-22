@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -165,7 +164,10 @@ func cmdChat(args []string) int {
 		}
 	}
 
-	stdinReader := bufio.NewReader(os.Stdin)
+	// The same reader the approval prompts use: one owner of os.Stdin for the
+	// process, so a prompt that times out cannot leave a goroutine behind to
+	// swallow the next message typed here.
+	stdinReader := stdinSource()
 	// Built on first use: a chat that never asks for the list never fetches it.
 	var models *llm.ModelCache
 
@@ -197,7 +199,7 @@ func cmdChat(args []string) int {
 		}
 
 		fmt.Fprint(os.Stderr, "> ")
-		line, err := stdinReader.ReadString('\n')
+		line, err := stdinReader.next(context.Background(), 0)
 		if err != nil && (len(line) == 0 || !errors.Is(err, io.EOF)) {
 			break // Ctrl-D or error
 		}

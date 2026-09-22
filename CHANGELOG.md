@@ -3,6 +3,19 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## Unreleased
+
+- **An answer typed after a terminal prompt times out is no longer lost.**
+  Since v0.5.4, a prompt that timed out left a reader behind on the
+  terminal, and the next line you typed went to it and was thrown away —
+  so a "y" meant for the next approval was dropped, and that prompt waited
+  for whatever you typed after it, possibly your next message. The
+  terminal now has one reader for the whole session; a prompt that stops
+  waiting takes nothing with it.
+- **Release pages on GitHub show the release notes.** Every release from
+  v0.5.0 to v0.6.1 published an empty page, because a setting in the
+  release configuration made GoReleaser discard them.
+
 ## v0.6.1 — 2026-09-22 — correctness and concurrency hardening
 
 - **Disjoint grant rejection on resume (B1).** `checkResumeGrants` now verifies that
