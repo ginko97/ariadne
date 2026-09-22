@@ -3,6 +3,13 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## Unreleased
+
+- **MCP SDK 1.8.0** (from 1.7.0). Same protocol (2026-07-28). Per its
+  release notes, a cancelled tool call is now given up at once instead of
+  waiting up to five seconds for the cancel notice to be delivered, and JSON
+  nested past 1000 levels is refused.
+
 ## v0.6.4 — 2026-09-23 — research briefs & jobs that wait for you
 
 - **Research briefs (`-task <file.md>` and `/brief <file.md>`).** Seed a
