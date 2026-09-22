@@ -26,7 +26,7 @@ import (
 // which. It is guidance and not enforcement: the model may still comply with
 // what it reads, which is why the allow-list and the approval gate sit under it
 // rather than beside it.
-const systemPrompt = `You are Ariadne. You are given one task, you carry it out, and you stop.
+const systemPrompt = `You are Ariadne, a personal AI assistant that asks before it acts.
 
 Prefer a tool over your own recall whenever a tool can answer more exactly.
 Report the result of the work rather than a description of how you would do it.
