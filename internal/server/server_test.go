@@ -67,6 +67,14 @@ func post(t *testing.T, s *Server, ts *httptest.Server, body string, mutate func
 	return resp
 }
 
+// finish reads a response to its end. For a chat that was allowed, that is
+// the turn running to completion. Without it the handler is still running
+// when the next request arrives on another connection, and two turns call one
+// llm.Fake, which is not safe for concurrent use: the data race macOS CI
+// reported in TestGuardRefusesWhatLoopbackBindingDoesNot (run 35875819697,
+// and very likely 35775759963 before it).
+func finish(resp *http.Response) { _, _ = io.Copy(io.Discard, resp.Body) }
+
 // events parses an SSE body into ordered (name, data) pairs, which is what
 // every assertion here is actually about.
 func events(t *testing.T, body string) []struct {
@@ -412,6 +420,7 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
 			r.Header.Set("Origin", "https://evil.example")
 		})
+		finish(resp)
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("status = %d, want 403", resp.StatusCode)
 		}
@@ -421,6 +430,7 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
 			r.Header.Del("X-Ariadne-CSRF")
 		})
+		finish(resp)
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("status = %d, want 403", resp.StatusCode)
 		}
@@ -430,6 +440,7 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
 			r.Header.Set("X-Ariadne-CSRF", "not-the-token")
 		})
+		finish(resp)
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("status = %d, want 403", resp.StatusCode)
 		}
@@ -439,6 +450,7 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
 			r.Host = "ariadne.example.com"
 		})
+		finish(resp)
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("status = %d, want 403", resp.StatusCode)
 		}
@@ -448,6 +460,7 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
 			r.Header.Set("Origin", ts.URL)
 		})
+		finish(resp)
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status = %d, want 200 — a same-origin request was refused", resp.StatusCode)
 		}
@@ -457,6 +470,7 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
 			r.Host = "[::1]"
 		})
+		finish(resp)
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status = %d, want 200", resp.StatusCode)
 		}
@@ -466,6 +480,7 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
 			r.Host = "[::1]:8080"
 		})
+		finish(resp)
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status = %d, want 200", resp.StatusCode)
 		}
@@ -475,6 +490,7 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
 			r.Header.Set("Origin", "http://[::1]")
 		})
+		finish(resp)
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status = %d, want 200", resp.StatusCode)
 		}
@@ -484,6 +500,7 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
 			r.Header.Set("Origin", "http://[::1]:3000")
 		})
+		finish(resp)
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status = %d, want 200", resp.StatusCode)
 		}
@@ -493,6 +510,7 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
 			r.Host = "Localhost:8080"
 		})
+		finish(resp)
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status = %d, want 200", resp.StatusCode)
 		}
@@ -502,6 +520,7 @@ func TestGuardRefusesWhatLoopbackBindingDoesNot(t *testing.T) {
 		resp := post(t, s, ts, `{"message":"hi"}`, func(r *http.Request) {
 			r.Header.Set("Origin", "http://Localhost:3000")
 		})
+		finish(resp)
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status = %d, want 200", resp.StatusCode)
 		}
