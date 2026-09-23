@@ -75,6 +75,21 @@ changes provider, key or model later, and never shows the key again. With
 Conversations, notes and settings live in one folder: `%AppData%\ariadne` on Windows,
 `~/Library/Application Support/ariadne` on macOS, `~/.config/ariadne` on Linux.
 
+### If it stops halfway
+
+Kill it mid-task — Ctrl-C, a closed window, a crash — and pick the task up again. What
+already ran is not run twice:
+
+```bash
+ariadne run "Read the three reports in this folder and total them"
+# run run_20260913T064046_9ffee0  model=...     <- killed here, after one tool call
+ariadne resume run_20260913T064046_9ffee0
+# resume run_20260913T064046_9ffee0  model=...  from step 1 (3 messages)
+```
+
+In the browser the same thing is **Resume turn**, and **Try again** when the connection
+dropped before an answer arrived.
+
 ## What it can do
 
 | | |

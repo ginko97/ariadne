@@ -3,6 +3,21 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## v0.6.7 — 2026-09-23 — a redirect to another site asks again
+
+- **A redirect to another site is no longer followed.** Approving a fetch,
+  or allowing a site until the turn ends, approves that site. Until now a
+  page that redirected somewhere else was followed without asking, so an
+  open redirect on an allowed site could pass a request on to a site you
+  never saw. Now `web_fetch` stops and tells the model where it was sent;
+  reading that page is a new fetch, which asks unless that site is allowed
+  too. Redirects within the same site, and `http` upgraded to `https` on
+  the same host, are still followed. This applies even with
+  `-trust web_fetch`.
+- **SECURITY.md names the read gate that already existed.** Start with
+  `-approve fetch,list_files` to be asked before every file read.
+- **The README shows kill-and-resume** near the top.
+
 ## v0.6.6 — 2026-09-23 — try again, and see what it can do
 
 - **Try again, for an answer that never arrived.** When the connection drops,

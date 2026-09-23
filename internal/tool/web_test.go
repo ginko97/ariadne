@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -109,12 +110,131 @@ func TestWebFetchRefusesARedirectToABlockedAddress(t *testing.T) {
 		return &addrRefused{addr, "a private network address"}
 	}
 
+	// The internal server is another site (another port), so since v0.6.7 the
+	// redirect stops before any connection is attempted; the address check
+	// below is the backstop for a redirect that stays on the site.
 	out, isErr, _ := fetchURL(t, w, public.URL)
-	if !isErr || !strings.Contains(out, "refused") {
-		t.Errorf("result = %q, want the redirect refused", out)
+	if !isErr || !strings.Contains(out, "not followed") {
+		t.Errorf("result = %q, want the redirect not followed", out)
 	}
 	if internalHits.Load() != 0 {
 		t.Errorf("the blocked server received %d requests after a redirect", internalHits.Load())
+	}
+}
+
+// A redirect that stays on the site is followed, and every connection it makes
+// is still checked. Here the second connection is refused, as it would be if
+// the name resolved to a private address the second time (DNS rebinding).
+func TestWebFetchChecksTheAddressOfEveryConnection(t *testing.T) {
+	var secondHits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/second" {
+			secondHits.Add(1)
+			fmt.Fprint(w, "should not be read")
+			return
+		}
+		http.Redirect(w, r, "/second", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	var dials atomic.Int32
+	w := NewWebFetch("test")
+	w.allowAddr = func(addr string) error {
+		if dials.Add(1) == 1 {
+			return nil
+		}
+		return &addrRefused{addr, "a private network address"}
+	}
+
+	out, isErr, _ := fetchURL(t, w, srv.URL+"/first")
+	if !isErr || !strings.Contains(out, "refused") {
+		t.Errorf("result = %q, want the second connection refused", out)
+	}
+	if secondHits.Load() != 0 {
+		t.Errorf("the redirect target was read %d times", secondHits.Load())
+	}
+}
+
+// Approving a URL approves that site. A redirect elsewhere is not followed:
+// the model is told where it was sent, and fetching that is a new call that
+// goes through the gate. Other site never receives a request.
+func TestWebFetchDoesNotFollowARedirectToAnotherSite(t *testing.T) {
+	var otherHits atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		otherHits.Add(1)
+		fmt.Fprint(w, "a page nobody approved")
+	}))
+	defer other.Close()
+	approved := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			http.Redirect(w, r, "/hop", http.StatusFound) // same site: followed
+			return
+		}
+		http.Redirect(w, r, other.URL+"/page?d=secret", http.StatusFound)
+	}))
+	defer approved.Close()
+
+	w := NewWebFetch("test")
+	w.allowAddr = allowAll
+
+	out, isErr, untrusted := fetchURL(t, w, approved.URL+"/start")
+	if !isErr || !strings.Contains(out, "not followed") {
+		t.Fatalf("result = %q, want the redirect to another site not followed", out)
+	}
+	if !strings.Contains(out, other.URL+"/page?d=secret") {
+		t.Errorf("the result does not name the destination, so it cannot be fetched on purpose: %q", out)
+	}
+	if !untrusted {
+		t.Error("the destination came from the remote server and must be marked untrusted")
+	}
+	if otherHits.Load() != 0 {
+		t.Errorf("the other site received %d requests", otherHits.Load())
+	}
+}
+
+// A redirect within the site is followed as before.
+func TestWebFetchFollowsARedirectWithinTheSite(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/old" {
+			http.Redirect(w, r, "/new", http.StatusMovedPermanently)
+			return
+		}
+		fmt.Fprint(w, "the moved page")
+	}))
+	defer srv.Close()
+	w := NewWebFetch("test")
+	w.allowAddr = allowAll
+
+	out, isErr, _ := fetchURL(t, w, srv.URL+"/old")
+	if isErr || !strings.Contains(out, "the moved page") {
+		t.Errorf("result = %q, want the page after a same-site redirect", out)
+	}
+}
+
+func TestSameSite(t *testing.T) {
+	for _, c := range []struct {
+		from, to string
+		want     bool
+	}{
+		{"https://docs.example/a", "https://docs.example/b", true},
+		{"https://Docs.Example./a", "https://docs.example/b", true},
+		{"https://docs.example/a", "https://docs.example:443/b", true},
+		{"http://docs.example/a", "https://docs.example/a", true},        // upgrade, same host
+		{"https://docs.example/a", "http://docs.example/a", false},       // downgrade
+		{"http://docs.example:8080/a", "https://docs.example/a", false},  // not the default port
+		{"https://docs.example/a", "https://www.docs.example/a", false},  // another host
+		{"https://docs.example/a", "https://docs.example:8443/a", false}, // another port
+		{"https://docs.example/a", "https://evil.example/a", false},
+		// The port alone is not an upgrade: plain http to port 443, and https
+		// served on port 80 moving to 443, are both different sites.
+		{"http://docs.example/a", "http://docs.example:443/a", false},
+		{"https://docs.example:80/a", "https://docs.example/a", false},
+	} {
+		from, _ := url.Parse(c.from)
+		to, _ := url.Parse(c.to)
+		if got := sameSite(from, to); got != c.want {
+			t.Errorf("sameSite(%s, %s) = %v, want %v", c.from, c.to, got, c.want)
+		}
 	}
 }
 

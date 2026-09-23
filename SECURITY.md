@@ -27,14 +27,17 @@ plainly, what protects you and what does not.
 
   **What a grant does not protect:** anything the model puts in a URL to an
   allowed destination reaches it, without asking. That is the decision you
-  made when you allowed it, and why nothing is allowed by default. And
-  **redirects are not re-approved** — not for a grant, and not for a single
-  approved fetch either. `web_fetch` follows a redirect wherever the site
-  sends it, checking only that it is a public address. So a site you allow
-  that redirects anywhere it is told to — an *open redirect* — can pass a URL
-  on to a destination you never saw. Allow sites you trust to behave, not
-  just sites you recognise. The terminal has no grants; it asks for every
-  call.
+  made when you allowed it, and why nothing is allowed by default. Any page
+  on an allowed site can be read without asking, not only the one you saw.
+  The terminal has no grants; it asks for every call.
+- **A redirect to another site is not followed.** Approving a fetch, or
+  allowing a site, approves that site. When a page redirects somewhere else,
+  `web_fetch` stops and tells the model where it was sent; reading that page
+  is a new fetch, which asks unless that site is allowed too. Two redirects
+  are still followed without asking: within the same site (same scheme, host
+  and port), and `http` upgraded to `https` on the same host. Before v0.6.7
+  every redirect was followed, so an *open redirect* on an allowed site could
+  pass a request on to a site you never saw.
 - **What is not protected: the download itself.** The release binaries are
   **not code-signed**, so Windows SmartScreen warns about them and macOS
   Gatekeeper may refuse them. The only integrity check this project offers is
@@ -87,6 +90,9 @@ plainly, what protects you and what does not.
   refused. Office and LibreOffice files are read by ariadne itself.
 - **Whatever a tool reads is sent to your model provider.** Approving a read
   approves sending what it reads. Redaction covers only ariadne's own keys.
+  Reading files in the workspace does not ask by default; start with
+  `-approve fetch,list_files` (in the terminal or with `ariadne ui`) to be
+  asked before every read, at the cost of a card on almost every step.
 - **Marking text as untrusted asks the model to behave; it does not make it.**
   A document can still talk the model into requesting something. That is why
   the approval gate exists.

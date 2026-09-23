@@ -39,7 +39,11 @@ jobs:
 
       # Windows runners are not guaranteed a GNU make, so the checks that
       # make runs are spelled out. The race detector needs cgo there, so it
-      # runs on the other two.
+      # runs on the other two. Three audits in make check are not repeated
+      # here on purpose: audit-tracked, audit-livetests and audit-docnames
+      # read the repository's files, which are identical on every OS, and
+      # they run on Linux and macOS. audit-skips does depend on the OS (which
+      # tests skip where), so it runs here too.
       - name: check (windows)
         if: runner.os == 'Windows'
         shell: bash
