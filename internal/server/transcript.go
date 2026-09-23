@@ -30,10 +30,13 @@ type transcriptResponse struct {
 	CostUnknown bool `json:"cost_unknown,omitempty"`
 	// Workspace is the folder the conversation works in, shown so the
 	// person can always see where it can read and write.
-	Workspace string            `json:"workspace,omitempty"`
-	Pending   bool              `json:"pending,omitempty"`
-	Brief     string            `json:"brief,omitempty"`
-	Messages  []transcriptEntry `json:"messages"`
+	Workspace string `json:"workspace,omitempty"`
+	Pending   bool   `json:"pending,omitempty"`
+	// AwaitsAnswer is a turn whose answer never arrived; the page offers
+	// "Try again" for it, as it offers "Resume turn" for Pending.
+	AwaitsAnswer bool              `json:"awaits_answer,omitempty"`
+	Brief        string            `json:"brief,omitempty"`
+	Messages     []transcriptEntry `json:"messages"`
 }
 
 // transcriptEntry is one thing that happened, in order.
@@ -81,17 +84,18 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := transcriptResponse{
-		RunID:       state.RunID,
-		Title:       state.Task,
-		Model:       state.Model,
-		Turns:       state.Turns(),
-		Steps:       state.Steps,
-		Cost:        state.Cost,
-		CostUnknown: state.UnpricedSteps > 0,
-		Workspace:   ws,
-		Pending:     state.HasPendingToolCalls(),
-		Brief:       state.Brief,
-		Messages:    entries(state.Messages),
+		RunID:        state.RunID,
+		Title:        state.Task,
+		Model:        state.Model,
+		Turns:        state.Turns(),
+		Steps:        state.Steps,
+		Cost:         state.Cost,
+		CostUnknown:  state.UnpricedSteps > 0,
+		Workspace:    ws,
+		Pending:      state.HasPendingToolCalls(),
+		AwaitsAnswer: state.AwaitsAnswer(),
+		Brief:        state.Brief,
+		Messages:     entries(state.Messages),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

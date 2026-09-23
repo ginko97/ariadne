@@ -5,6 +5,19 @@ carry the longer story for each release.
 
 ## Unreleased
 
+- **Try again, for an answer that never arrived.** When the connection drops,
+  the provider fails, or you press Stop mid-answer, the page now offers
+  **Try again**. It asks the model the same question again, adds nothing to
+  the conversation, and runs no tool a second time. You no longer have to
+  type "continue". Reopening such a conversation shows the same button.
+- **A cut-off answer is no longer saved as if it were complete.** If the
+  connection closed cleanly partway through an answer, the fragment that had
+  arrived ("IHSG closed at 7,1") was kept as the whole answer. A stream that
+  ends without the provider saying it finished is now an error, and nothing
+  from it is saved.
+
+## v0.6.5 — 2026-09-23 — a brief is shown before it runs
+
 - **A brief is shown before it runs.** In the browser, **Brief…** and
   `/brief <file.md>` now open the brief in full, and nothing is sent to the
   model until **Start this brief**. If the file changed after it was shown,

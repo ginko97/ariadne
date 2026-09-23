@@ -93,6 +93,32 @@ func (a *Agent) ChatTurn(ctx context.Context, s *State, text string) (string, er
 	return a.Run(ctx, s)
 }
 
+// ErrNothingToRetry is Retry on a conversation that is not waiting for an
+// answer: it already has one, or it has an unfinished batch to resume instead.
+var ErrNothingToRetry = errors.New("loop: the conversation is not waiting for an answer")
+
+// Retry asks the model again from where the conversation stopped, adding
+// nothing to it.
+//
+// For a turn whose model call failed or was stopped before the answer was
+// whole. The alternative the person had was typing "continue", which puts a
+// message into the history that nobody meant and the model reads as a new
+// instruction. Nothing is repeated: a failed model call ran no tool, and tools
+// from earlier in the turn already have their results on the checkpoint. A
+// model switch is allowed, as for any new message — a slow model is one reason
+// to try again.
+func (a *Agent) Retry(ctx context.Context, s *State) (string, error) {
+	if !s.AwaitsAnswer() {
+		return "", ErrNothingToRetry
+	}
+	if a.Model != "" && s.Model != "" && a.Model != s.Model {
+		if err := s.SetModel(a.Model); err != nil {
+			return "", err
+		}
+	}
+	return a.Run(ctx, s)
+}
+
 // turnPrompt is what this call to Run was asked to do: the most recent message
 // from the person.
 //

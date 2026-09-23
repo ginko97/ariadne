@@ -25,6 +25,11 @@ type chatRequest struct {
 	// Resume finishes an interrupted turn (a batch with pending tool calls)
 	// without appending a new message.
 	Resume bool `json:"resume,omitempty"`
+	// Retry asks the model again for a turn whose answer never arrived — the
+	// connection dropped, the provider failed, or Stop came mid-answer —
+	// without appending a message. Only for a conversation that awaits an
+	// answer (loop.State.AwaitsAnswer).
+	Retry bool `json:"retry,omitempty"`
 	// Brief is the relative or workspace path to a .md brief to seed a new conversation.
 	Brief string `json:"brief,omitempty"`
 	// BriefSHA256 is the digest POST /api/brief returned for the text the
@@ -52,8 +57,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Message = strings.TrimSpace(req.Message)
 	req.Brief = strings.TrimSpace(req.Brief)
-	if !req.Resume && req.Message == "" && req.Brief == "" {
+	if !req.Resume && !req.Retry && req.Message == "" && req.Brief == "" {
 		httpError(w, http.StatusBadRequest, "message or brief is required")
+		return
+	}
+	if req.Retry && (req.RunID == "" || req.Message != "" || req.Brief != "" || req.Resume) {
+		httpError(w, http.StatusBadRequest, "try again takes a conversation and nothing else: no message, brief or resume")
 		return
 	}
 	if req.Resume && req.Brief != "" {
@@ -171,7 +180,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 				"a conversation's folder cannot change; start a new conversation for another folder")
 			return
 		}
-		if req.Resume {
+		if req.Retry {
+			// Checked here rather than left to the loop so the refusal is a
+			// status code, not an event on a stream that already said 200.
+			if !state.AwaitsAnswer() {
+				httpError(w, http.StatusBadRequest,
+					"nothing to try again: this conversation is not waiting for an answer")
+				return
+			}
+		} else if req.Resume {
 			if !state.HasPendingToolCalls() {
 				httpError(w, http.StatusBadRequest,
 					"this conversation has no unfinished tool call to resume")
@@ -241,6 +258,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if fresh || req.Resume {
 		answer, err = agent.Run(ctx, state)
+	} else if req.Retry {
+		answer, err = agent.Retry(ctx, state)
 	} else {
 		answer, err = agent.ChatTurn(ctx, state, req.Message)
 	}

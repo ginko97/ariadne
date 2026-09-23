@@ -116,6 +116,7 @@ Conversations, notes and settings live in one folder: `%AppData%\ariadne` on Win
 | approval cards | several calls at once arrive as one card, and you can leave any out; a web card can allow one site until the turn ends |
 | **Needs you** | marks a conversation waiting on you |
 | **Stop** / **Resume turn** | end a turn at any point; finish an interrupted one without repeating what ran |
+| **Try again** | when an answer never arrived (a dropped connection, a provider error), ask again without adding a message |
 | **🧠** | the notes it remembers across conversations; delete any of them |
 | **⚙** · **◐** · **×** | provider, key and model · light or dark · delete a conversation for good |
 | `/help` | the page's own commands, never sent to the model |

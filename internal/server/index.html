@@ -560,6 +560,8 @@ async function open(id) {
   selectModel(t.model);
   if (t.pending) {
     showResumeCard();
+  } else if (t.awaits_answer) {
+    showRetryCard();
   }
   loadRuns();
 }
@@ -664,6 +666,43 @@ function setBusy(val) {
   $('briefBtn').disabled = val;
 }
 
+// showRetryCard offers to ask the model again for a turn whose answer never
+// arrived: the connection dropped, the provider failed, or Stop came mid-answer.
+// Nothing is added to the conversation and no tool runs twice; see
+// loop.Agent.Retry. why is the error, when this page saw it happen.
+function showRetryCard(why) {
+  const existing = $('retryCard');
+  if (existing) existing.remove();
+
+  const el = document.createElement('div');
+  el.id = 'retryCard';
+  el.className = 'e approval';
+
+  const q = document.createElement('div');
+  q.textContent = 'The answer to this turn never arrived. What already ran is kept, and trying again repeats none of it.';
+  el.append(q);
+  if (why) {
+    const w = document.createElement('div');
+    w.className = 'dim';
+    w.textContent = why;
+    el.append(w);
+  }
+
+  const row = document.createElement('div');
+  row.className = 'row';
+  const btn = document.createElement('button');
+  btn.className = 'primary';
+  btn.textContent = 'Try again';
+  btn.onclick = () => {
+    el.remove();
+    send('', { retry: true });
+  };
+  row.append(btn);
+  el.append(row);
+  log.append(el);
+  log.scrollTop = log.scrollHeight;
+}
+
 function showResumeCard() {
   const existing = $('resumeCard');
   if (existing) existing.remove();
@@ -701,11 +740,13 @@ async function send(text, opts = {}) {
   warn('');
   if (opts.resume) {
     entry('notice', 'Resuming interrupted turn…');
+  } else if (opts.retry) {
+    entry('notice', 'Trying again…');
   } else if (!opts.brief) {
     entry('prompt', text);
   }
 
-  let answer = null, resp, stopped = false;
+  let answer = null, resp, stopped = false, failed = '';
   turn = new AbortController();
   try {
     resp = await api('/api/chat', {
@@ -714,8 +755,12 @@ async function send(text, opts = {}) {
       // No model on resume: the server finishes the batch on the model that
       // started it, and refuses another — so a dropdown changed in the
       // meantime would only turn Resume into an error.
+      // A retry may switch model, like any new message: a slow model is one
+      // reason to try again.
       body: JSON.stringify(opts.resume ? {
         run_id: runID, resume: true,
+      } : opts.retry ? {
+        run_id: runID, retry: true, model: modelEl.value || undefined,
       } : {
         run_id: runID, message: text, model: modelEl.value || undefined,
         workspace: runID ? undefined : (newWorkspace || undefined),
@@ -805,6 +850,7 @@ async function send(text, opts = {}) {
         } else if (name === 'error') {
           entry('tool_result', d.error, 'is_error');
           answer = null;
+          failed = d.error;
         }
       }
     }
@@ -825,6 +871,13 @@ async function send(text, opts = {}) {
   if (stopped && runID) {
     await open(runID);
     entry('notice', 'Stopped. Anything that already ran is kept.');
+  } else if (failed && runID) {
+    // Same reason as Stop: the half-streamed answer was never saved. Reopening
+    // shows what was, and offers Try again when the turn has no answer; the
+    // card then carries the error that ended it.
+    await open(runID);
+    if ($('retryCard')) showRetryCard(failed);
+    else entry('tool_result', failed, 'is_error');
   } else if (stopped) {
     entry('notice', 'Stopped.');
   }

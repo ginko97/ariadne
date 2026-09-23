@@ -213,6 +213,19 @@ func (s *State) HasPendingToolCalls() bool {
 	return len(s.pendingToolCalls()) > 0
 }
 
+// AwaitsAnswer reports whether the conversation stopped between asking the
+// model and hearing back: the last message is the person's, or the results of
+// a batch that finished, and nothing is pending. A model call that failed —
+// a dropped connection, a provider error — or a turn stopped mid-answer leaves
+// it here, because an answer is only saved once it is whole. Asking again from
+// this point repeats no tool: the ones that ran already have their results.
+func (s *State) AwaitsAnswer() bool {
+	if len(s.Messages) == 0 || s.HasPendingToolCalls() {
+		return false
+	}
+	return s.Messages[len(s.Messages)-1].Role == llm.RoleUser
+}
+
 // isToolResults reports whether m is a results message: a user turn carrying
 // only tool_result blocks. A user turn with no blocks counts — that is the
 // moment between opening a batch and the first result landing. The initial task
