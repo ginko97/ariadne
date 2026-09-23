@@ -10,6 +10,12 @@ carry the longer story for each release.
   **Try again**. It asks the model the same question again, adds nothing to
   the conversation, and runs no tool a second time. You no longer have to
   type "continue". Reopening such a conversation shows the same button.
+- **The page says what a conversation can do.** The top bar shows how many
+  tools are on and how many ask first, says when ariadne can run programs or
+  has MCP tools, and names in red anything that normally asks but was
+  exempted with `-trust`. **⚙** lists every tool and shows the version.
+  These are still set only when `ariadne ui` starts. The page shows them;
+  it cannot change them.
 - **A cut-off answer is no longer saved as if it were complete.** If the
   connection closed cleanly partway through an answer, the fragment that had
   arrived ("IHSG closed at 7,1") was kept as the whole answer. A stream that

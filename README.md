@@ -118,7 +118,8 @@ Conversations, notes and settings live in one folder: `%AppData%\ariadne` on Win
 | **Stop** / **Resume turn** | end a turn at any point; finish an interrupted one without repeating what ran |
 | **Try again** | when an answer never arrived (a dropped connection, a provider error), ask again without adding a message |
 | **🧠** | the notes it remembers across conversations; delete any of them |
-| **⚙** · **◐** · **×** | provider, key and model · light or dark · delete a conversation for good |
+| **Tools:** in the top bar | what conversations here can use and how many ask first; anything that normally asks but was exempted with `-trust` shows in red. Hover for the full list |
+| **⚙** · **◐** · **×** | provider, key and model, plus the version and every tool · light or dark · delete a conversation for good |
 | `/help` | the page's own commands, never sent to the model |
 
 The browser and the terminal share conversations: start one in the page and continue it

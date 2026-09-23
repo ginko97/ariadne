@@ -74,6 +74,12 @@ type Server struct {
 	// a test shortens it before the server starts serving.
 	approvalTimeout time.Duration
 
+	// Version is the build, for the settings panel and bug reports.
+	Version string
+	// Tools is what every conversation here is offered, and which of them
+	// ask first, as the agent factory builds it. See handleAbout.
+	Tools []ToolInfo
+
 	// DefaultWorkspace is the folder a new conversation gets when the page
 	// sends none — the server's -workspace, or the home directory's
 	// workspace. Only a default: a conversation's recorded folder always
@@ -125,6 +131,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/runs/{id}", s.handleTranscript)
 	mux.HandleFunc("DELETE /api/runs/{id}", s.handleDelete)
 	mux.HandleFunc("POST /api/approve", s.handleApprove)
+	mux.HandleFunc("GET /api/about", s.handleAbout)
 	mux.HandleFunc("GET /api/workspace", s.handleWorkspace)
 	mux.HandleFunc("POST /api/workspace/check", s.handleWorkspaceCheck)
 	mux.HandleFunc("POST /api/workspace/pick", s.handleWorkspacePick)

@@ -63,6 +63,10 @@
          gap:.6rem; align-items:center; }
   #bar select { max-width:22rem; font:inherit; }
   #folder { max-width:28rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #tools { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; cursor:help; }
+  #tools .nocard { color:var(--err); }
+  #about { border-top:1px solid var(--edge); padding-top:.5rem; margin-top:.3rem; }
+  #about p { margin:.25rem 0; }
   #bar button { font:inherit; cursor:pointer; }
   #folderPanel, #briefPanel { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;
                  padding:.5rem .9rem; border-bottom:1px solid var(--edge); }
@@ -147,6 +151,7 @@
     <select id="model" title="Model for the next turn"></select>
     <span id="stats" class="dim"></span>
     <span id="folder" class="dim" title="The folder this conversation can read and write"></span>
+    <span id="tools" class="dim"></span>
     <button type="button" id="folderBtn" title="Choose the folder for this new conversation">Folder…</button>
     <button type="button" id="briefBtn" title="Start a conversation from a markdown brief in the workspace">Brief…</button>
   </div>
@@ -198,6 +203,7 @@
     </div>
     <div class="dim">The key is checked with one small request to that provider, saved in
       config.env on this computer, and never shown again, here or anywhere else.</div>
+    <div id="about" class="dim"></div>
   </form>
   <div id="warn" hidden></div>
   <div id="log"></div>
@@ -1193,6 +1199,60 @@ function closeFolderPanel() {
   $('folderErr').textContent = '';
 }
 
+// ---- what conversations here can do ----
+
+// Set once from GET /api/about. The tools are fixed when `ariadne ui` starts
+// (-exec, -trust, -allow, -mcp-config), so this never changes under the page.
+let about = null;
+
+// Built-ins that ask by default. One of these listed as running without a card
+// was exempted with -trust, which is worth seeing every time, not only in ⚙.
+const normallyAsks = ['web_fetch', 'edit_file', 'write_file'];
+
+async function loadAbout() {
+  try {
+    about = await (await api('/api/about')).json();
+  } catch (e) { return; }
+  const tools = about.tools || [];
+  const asks = tools.filter(t => t.asks).map(t => t.name);
+  const free = tools.filter(t => !t.asks).map(t => t.name);
+  const mcp = tools.filter(t => t.mcp).length;
+  const nocard = tools.filter(t => !t.asks && (t.mcp || normallyAsks.includes(t.name))).map(t => t.name);
+
+  const el = $('tools');
+  const parts = [`${tools.length} tools · ${asks.length} ask first`];
+  if (tools.some(t => t.name === 'exec')) parts.push('runs programs (asks)');
+  if (mcp) parts.push(`${mcp} MCP`);
+  el.replaceChildren(document.createTextNode('Tools: ' + parts.join(' · ')));
+  if (nocard.length) {
+    const w = document.createElement('span');
+    w.className = 'nocard';
+    w.textContent = ' · no card: ' + nocard.join(', ');
+    el.append(w);
+  }
+  el.title = 'Asks first: ' + (asks.join(', ') || 'none') +
+    '\nRuns without asking: ' + (free.join(', ') || 'none') +
+    '\nSet when ariadne ui starts (-exec, -trust, -allow, -mcp-config); the page cannot change them.';
+  renderAbout();
+}
+
+function renderAbout() {
+  if (!about) return;
+  const tools = about.tools || [];
+  const line = (label, names) => {
+    const p = document.createElement('p');
+    p.textContent = label + (names.length ? names.join(', ') : 'none');
+    return p;
+  };
+  $('about').replaceChildren(
+    line('Asks first: ', tools.filter(t => t.asks).map(t => t.name)),
+    line('Runs without asking: ', tools.filter(t => !t.asks).map(t => t.name)),
+    Object.assign(document.createElement('p'), {
+      textContent: 'Tools are set when ariadne ui starts (-exec, -trust, -allow, -mcp-config). ariadne ' + (about.version || 'dev'),
+    }),
+  );
+}
+
 async function loadWorkspace() {
   try {
     const d = await (await api('/api/workspace')).json();
@@ -1544,5 +1604,6 @@ loadSetup();
 loadModels();
 loadRuns();
 loadWorkspace();
+loadAbout();
 $('input').focus();
 </script>

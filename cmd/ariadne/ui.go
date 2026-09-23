@@ -98,17 +98,10 @@ func cmdUI(args []string) int {
 		serverWorkspace = abs
 	}
 
-	// One agent per request. The trace writer is opened here and closed by the
-	// returned cleanup, because a server has no end-of-main to defer to.
-	newAgent := func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
-		tw, err := trace.NewFileWriter(runsDir, runID)
-		if err != nil {
-			// A run that cannot be traced is still a run; say so and continue,
-			// the same trade closeTrace makes at the other end.
-			fmt.Fprintf(os.Stderr, "warning: trace unavailable for %s: %v\n", runID, err)
-			tw = nil
-		}
-
+	// The options every agent here is built from. One function for the agents
+	// that run turns and for the probe the page's tool list is read from, so
+	// the list cannot describe a different agent from the one that runs.
+	optsFor := func(runID string, state *loop.State, onDelta func(llm.Chunk), tw *trace.Writer) agentOpts {
 		workspaceDir := conversationWorkspace(serverWorkspace, state)
 
 		budgetVal := *budget
@@ -121,7 +114,7 @@ func cmdUI(args []string) int {
 		curURL, curKey, curModel := prov.current()
 		endpoint, endpointKey := conversationEndpoint(curURL, curKey, state)
 
-		agent := newAgentFor(agentOpts{
+		return agentOpts{
 			Key: endpointKey, Model: curModel, BaseURL: endpoint, RunID: runID,
 			MaxSteps: *maxSteps, Budget: budgetVal, Exec: *allowExec, Trust: trusted,
 			ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
@@ -137,7 +130,20 @@ func cmdUI(args []string) int {
 			// overwritten, and leaving one would imply a fallback that does not
 			// exist.
 			Store: store, Trace: tw,
-		})
+		}
+	}
+
+	// One agent per request. The trace writer is opened here and closed by the
+	// returned cleanup, because a server has no end-of-main to defer to.
+	newAgent := func(runID string, state *loop.State, onDelta func(llm.Chunk)) (*loop.Agent, func()) {
+		tw, err := trace.NewFileWriter(runsDir, runID)
+		if err != nil {
+			// A run that cannot be traced is still a run; say so and continue,
+			// the same trade closeTrace makes at the other end.
+			fmt.Fprintf(os.Stderr, "warning: trace unavailable for %s: %v\n", runID, err)
+			tw = nil
+		}
+		agent := newAgentFor(optsFor(runID, state, onDelta, tw))
 		if tw == nil {
 			return agent, nil
 		}
@@ -146,6 +152,8 @@ func cmdUI(args []string) int {
 
 	srv := server.New(store, newAgent, newRunID)
 	srv.MemoryStore = memory.Store{Path: memoryFile}
+	srv.Version = versionString()
+	srv.Tools = probeTools(func(runID string) agentOpts { return optsFor(runID, nil, nil, nil) })
 	// The picker's fallback is the model this process was started with: the one
 	// model known to work, because every turn here already uses it.
 	//
