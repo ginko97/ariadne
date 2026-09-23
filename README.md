@@ -93,9 +93,11 @@ Conversations, notes and settings live in one folder: `%AppData%\ariadne` on Win
 - **It asks first.** Web pages, file writes and edits, saved notes, MCP tools and programs
   all wait for your yes, on a card that shows exactly what would happen. No answer is not
   a yes: an unanswered card is denied after five minutes. In the browser, a conversation
-  started from a brief pauses instead, and nothing runs until you resume it.
+  started from a brief pauses instead, and nothing runs until you resume it. The top bar
+  shows which tools ask first, and flags in red any you exempted with `-trust`.
 - **It survives a crash.** A conversation is saved after every tool call. Kill the process
-  mid-task and it resumes without repeating what already ran.
+  mid-task and it resumes without repeating what already ran. If the connection drops
+  mid-answer, the half-written answer is not kept; **Try again** asks once more.
 - **It keeps a record.** Every request, tool call, approval and cost is traced and
   searchable with `ariadne traces`. A provider that does not report prices shows
   **cost unknown**, never a reassuring $0.0000.
