@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -171,5 +172,27 @@ func TestWriteFileIsGatedUnlessTrusted(t *testing.T) {
 
 	if _, err := gateMCP(nil, []string{tool.WriteFileName}, nil); err != nil {
 		t.Errorf("-trust write_file refused: %v", err)
+	}
+}
+
+// No Browse… button where it cannot work: without the program that shows the
+// dialog (zenity in WSL, most often) the server is given no picker, and the
+// page offers typing a path.
+func TestFolderPickerIsOfferedOnlyWhenInstalled(t *testing.T) {
+	var asked []string
+	missing := func(name string) (string, error) { asked = append(asked, name); return "", errors.New("not found") }
+	present := func(name string) (string, error) { return "/usr/bin/" + name, nil }
+
+	if folderPicker("linux", missing) != nil {
+		t.Error("linux without zenity: a picker was offered")
+	}
+	if len(asked) != 1 || asked[0] != "zenity" {
+		t.Errorf("looked for %q, want zenity", asked)
+	}
+	if folderPicker("linux", present) == nil {
+		t.Error("linux with zenity: no picker offered")
+	}
+	if folderPicker("windows", present) == nil || folderPicker("darwin", present) == nil {
+		t.Error("windows or macOS with the dialog program: no picker offered")
 	}
 }

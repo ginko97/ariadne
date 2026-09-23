@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -81,6 +82,32 @@ const (
 	exitUsage = 2
 )
 
+// homeDir is where this process keeps its data (internal/config), printed at
+// startup and shown in the page so nobody has to guess which runs/ it is.
+var homeDir string
+
+// checkoutHome is the ariadne checkout to use as the home directory, or ""
+// for the user's data directory.
+//
+// Only a development build uses a checkout. A released binary started from a
+// terminal inside the source tree used to take the checkout's runs/ and .env
+// as well, and a day's conversations landed there instead of in
+// %AppData%\ariadne, splitting the history in two (runs/run_20260923T202458_b47a5e).
+// Where a released binary keeps its data must not depend on the folder it was
+// started from; ARIADNE_HOME is the way to choose.
+//
+// version is main.version as the release build stamps it, not versionString:
+// since Go 1.24 a plain `go build` in the checkout carries a VCS
+// pseudo-version (v0.6.8-0.20260923184754-d4e4eef93430+dirty), and deciding
+// on that sent every local build to the user directory as well.
+func checkoutHome(version string, find func() (string, bool)) string {
+	if version != "dev" {
+		return ""
+	}
+	repo, _ := find()
+	return repo
+}
+
 func main() {
 	// Keys and settings, in precedence order: the process environment, a
 	// checkout's .env (development), then config.env in the home directory
@@ -88,8 +115,10 @@ func main() {
 	// variables already set alone, so the order of calls is the precedence.
 	// Best effort: none of them has to exist.
 	snapshotShellEnv()
-	_ = dotenv.Load()
-	repo, _ := dotenv.Repo()
+	repo := checkoutHome(version, dotenv.Repo)
+	if repo != "" {
+		_ = dotenv.LoadFile(filepath.Join(repo, ".env"))
+	}
 	paths, err := config.Resolve(os.Getenv, repo, os.UserConfigDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne: %v\n", err)
@@ -100,6 +129,7 @@ func main() {
 	}
 	runsDir, defaultWorkspace, memoryFile = paths.Runs, paths.Workspace, paths.Memory
 	configEnvFile = paths.Env
+	homeDir = paths.Home
 	mcp.ClientVersion = versionString()
 
 	if len(os.Args) < 2 {
@@ -165,7 +195,7 @@ usage:
 flags:
   -model          model id                   (env ARIADNE_MODEL)
   -base-url       OpenAI-compatible endpoint (env ARIADNE_BASE_URL)
-  -max-steps      ceiling on loop iterations (default 10)
+  -max-steps      ceiling on loop iterations per turn (default 10; 25 for a brief)
   -allow          comma-separated tools this run may call (default: all)
   -workspace      directory the file tools are confined to (default workspace)
   -approve        tools needing a yes before each call (terminal; the browser under ui)
@@ -212,8 +242,9 @@ environment:
   ARIADNE_HOME      where runs, workspace, MEMORY.md and config.env live
                     (default: your user config directory, e.g. %AppData%\ariadne)
 
-Keys come from the environment, then config.env (written by ariadne setup),
-then a .env in an ariadne source checkout.
+Keys come from the environment, then, for a development build run inside an
+ariadne source checkout, that checkout's .env, then config.env (written by
+ariadne setup). A released binary never uses a checkout's .env or runs/.
 
 setup flags:
   -provider       openrouter (default), openai, gemini, xai, ollama, or other

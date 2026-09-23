@@ -73,7 +73,9 @@ changes provider, key or model later, and never shows the key again. With
 [Ollama](https://ollama.com) running, `ariadne setup -provider ollama` needs no key.
 
 Conversations, notes and settings live in one folder: `%AppData%\ariadne` on Windows,
-`~/Library/Application Support/ariadne` on macOS, `~/.config/ariadne` on Linux.
+`~/Library/Application Support/ariadne` on macOS, `~/.config/ariadne` on Linux, whichever
+folder you start ariadne from. `ARIADNE_HOME` moves it; `ariadne ui` prints the one in use,
+and **⚙** shows it.
 
 ### If it stops halfway
 
@@ -97,7 +99,7 @@ dropped before an answer arrived.
 | **Files** | list, read, write and edit text in one folder per conversation; writes and edits show the lines that would change |
 | **Documents** | read `.docx`, `.xlsx`, `.pptx` and their LibreOffice counterparts; PDFs when [Poppler](https://poppler.freedesktop.org) is installed |
 | **The web** | read a page by URL, asking first; never your own machine or local network |
-| **Research briefs** | start a conversation from a markdown task file you wrote (`-task brief.md`, or **Brief…**) |
+| **Research briefs** | start a conversation from a markdown task file you wrote (`-task brief.md`, or **Brief…**); it gets 25 steps a turn instead of 10 |
 | **Memory** | notes that carry across conversations, each one approved before it is saved, all of them reviewable in **🧠** |
 | **MCP tools** | any MCP server — filesystem, search, git — through `-mcp-config` |
 | **Programs** | `-exec` lets it run programs in the folder, asking before every one |
@@ -116,6 +118,9 @@ dropped before an answer arrived.
 - **It keeps a record.** Every request, tool call, approval and cost is traced and
   searchable with `ariadne traces`. A provider that does not report prices shows
   **cost unknown**, never a reassuring $0.0000.
+- **It checks its sources.** Under an answer, ariadne lists any URL the answer, or a
+  file it just wrote, cites that the conversation never opened: a guessed link, or a
+  page that failed every time it was fetched. It checks the links, not what they say.
 - **It is honest about its limits.** [SECURITY.md](SECURITY.md) says what protects you and
   what does not, and the [injection postmortem](docs/injection-postmortem.md) shows the
   attacks that still work, with traces.
@@ -128,8 +133,8 @@ dropped before an answer arrived.
 
 | | |
 | --- | --- |
-| **New conversation**, **Folder…** | choose the folder a new conversation may read and write; it stays fixed after that |
-| **Brief…** | show a markdown brief in full, then **Start this brief**; it refuses to start if the file changed in between |
+| **New conversation**, **Folder…** | choose the folder a new conversation may read and write; it stays fixed after that. **Browse…** opens your system's folder dialog where one is installed (not in WSL without `zenity`) |
+| **Brief…** | lists the `.md` files in the folder, newest first; click one to read it in full, then **Start this brief**. It refuses to start if the file changed in between |
 | approval cards | several calls at once arrive as one card, and you can leave any out; a web card can allow one site until the turn ends |
 | **Needs you** | marks a conversation waiting on you |
 | **Stop** / **Resume turn** | end a turn at any point; finish an interrupted one without repeating what ran |

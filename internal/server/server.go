@@ -76,6 +76,9 @@ type Server struct {
 
 	// Version is the build, for the settings panel and bug reports.
 	Version string
+	// Home is the data directory: conversations, MEMORY.md, config.env.
+	// Shown because which one is in use is otherwise a guess.
+	Home string
 	// Tools is what every conversation here is offered, and which of them
 	// ask first, as the agent factory builds it. See handleAbout.
 	Tools []ToolInfo
@@ -136,6 +139,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/workspace/check", s.handleWorkspaceCheck)
 	mux.HandleFunc("POST /api/workspace/pick", s.handleWorkspacePick)
 	mux.HandleFunc("POST /api/brief", s.handleBrief)
+	mux.HandleFunc("POST /api/briefs", s.handleBriefs)
 	mux.HandleFunc("GET /api/setup", s.handleSetupStatus)
 	mux.HandleFunc("POST /api/setup", s.handleSetup)
 	mux.HandleFunc("POST /api/setup/ollama", s.handleSetupOllama)

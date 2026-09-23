@@ -19,7 +19,7 @@ func cmdRun(args []string) int {
 	fs.SetOutput(os.Stderr)
 	model := fs.String("model", envOr("ARIADNE_MODEL", ""), "model id (default depends on -base-url)")
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
-	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
+	maxSteps := fs.Int("max-steps", defaultMaxSteps, maxStepsHelp)
 	allow := fs.String("allow", "", "comma-separated tools this run may call (default: all)")
 	workspace := fs.String("workspace", defaultWorkspace, "directory the file tools are confined to")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
@@ -130,7 +130,7 @@ func cmdRun(args []string) int {
 
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: *model, BaseURL: *baseURL, RunID: state.RunID,
-		MaxSteps: *maxSteps, Budget: *budget, Stream: *stream, Memory: *remember, Exec: *allowExec, Trust: trusted,
+		MaxSteps: maxStepsFor(fs, *maxSteps, state), Budget: *budget, Stream: *stream, Memory: *remember, Exec: *allowExec, Trust: trusted,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: gated,
 		Workspace: *workspace,
@@ -154,7 +154,7 @@ func cmdResume(args []string) int {
 	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	baseURL := fs.String("base-url", "", "OpenAI-compatible endpoint (defaults to endpoint from checkpoint)")
-	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations")
+	maxSteps := fs.Int("max-steps", defaultMaxSteps, maxStepsHelp)
 	allow := fs.String("allow", "", "narrow the tools this run may call; it can never widen the grant in the checkpoint")
 	workspace := fs.String("workspace", "", "directory the file tools are confined to (defaults to the checkpoint's)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
@@ -252,7 +252,7 @@ func cmdResume(args []string) int {
 	}
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: state.Model, BaseURL: endpoint, RunID: state.RunID,
-		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem, Exec: *allowExec, Trust: trusted,
+		MaxSteps: maxStepsFor(fs, *maxSteps, state), Budget: budgetVal, Stream: *stream, Memory: mem, Exec: *allowExec, Trust: trusted,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: gated,
 		Workspace: workspaceDir,
@@ -296,6 +296,7 @@ func execute(ctx context.Context, agent *loop.Agent, state *loop.State, streamed
 	if !streamed || !isTerminal(os.Stdout) {
 		fmt.Println(answer)
 	}
+	noteUnopened(os.Stderr, state)
 	fmt.Fprintf(os.Stderr, "run %s  steps=%d  cost=%s  %s\n",
 		state.RunID, state.Steps, costText(state.Cost, state.UnpricedSteps > 0, 4), elapsed)
 	return exitOK

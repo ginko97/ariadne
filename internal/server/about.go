@@ -13,6 +13,7 @@ type ToolInfo struct {
 
 type aboutResponse struct {
 	Version string     `json:"version"`
+	Home    string     `json:"home,omitempty"`
 	Tools   []ToolInfo `json:"tools"`
 }
 
@@ -28,5 +29,5 @@ func (s *Server) handleAbout(w http.ResponseWriter, _ *http.Request) {
 	if tools == nil {
 		tools = []ToolInfo{}
 	}
-	writeJSON(w, http.StatusOK, aboutResponse{Version: s.Version, Tools: tools})
+	writeJSON(w, http.StatusOK, aboutResponse{Version: s.Version, Home: s.Home, Tools: tools})
 }

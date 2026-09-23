@@ -31,15 +31,21 @@ func TestAboutReportsTheBuildAndTheTools(t *testing.T) {
 		var a aboutResponse
 		_ = json.Unmarshal(raw["version"], &a.Version)
 		_ = json.Unmarshal(raw["tools"], &a.Tools)
+		_ = json.Unmarshal(raw["home"], &a.Home)
 		return a
 	}
 
 	get() // no tools set: must still be a list
 
 	s.Version = "v0.6.5"
+	s.Home = "/home/me/.config/ariadne"
 	s.Tools = []ToolInfo{{Name: "calc"}, {Name: "exec", Asks: true}, {Name: "fs__read_text_file", MCP: true}}
 	got := get()
 	if got.Version != "v0.6.5" || !reflect.DeepEqual(got.Tools, s.Tools) {
 		t.Errorf("got %+v, want version v0.6.5 and %+v", got, s.Tools)
+	}
+	// Which folder holds the conversations was a guess until the page said.
+	if got.Home != s.Home {
+		t.Errorf("home = %q, want %q", got.Home, s.Home)
 	}
 }

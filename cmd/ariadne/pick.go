@@ -48,6 +48,17 @@ func folderPickerCommand(goos string) []string {
 	}
 }
 
+// folderPicker is the dialog for goos, or nil when the program that shows it
+// is not installed, so the page offers typing a path instead of a Browse…
+// button that can only fail. WSL is the usual case: no zenity, and until this
+// check the button showed anyway.
+func folderPicker(goos string, lookPath func(string) (string, error)) func(context.Context) (string, error) {
+	if _, err := lookPath(folderPickerCommand(goos)[0]); err != nil {
+		return nil
+	}
+	return pickFolder
+}
+
 // pickFolder shows the dialog and returns the chosen folder, or "" when the
 // person cancelled.
 func pickFolder(ctx context.Context) (string, error) {

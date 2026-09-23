@@ -7,7 +7,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -31,7 +33,7 @@ func cmdUI(args []string) int {
 	noOpen := fs.Bool("no-open", false, "do not open the browser")
 	model := fs.String("model", envOr("ARIADNE_MODEL", ""), "model id (default depends on -base-url)")
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
-	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
+	maxSteps := fs.Int("max-steps", defaultMaxSteps, maxStepsHelp)
 	allow := fs.String("allow", "", "comma-separated tools a conversation may call (default: all)")
 	approve := fs.String("approve", "", "tools needing approval in the browser before each call")
 	trust := fs.String("trust", "", "MCP tools, or a gated built-in (web_fetch, edit_file, write_file), that run without approval; every other one asks first")
@@ -116,7 +118,7 @@ func cmdUI(args []string) int {
 
 		return agentOpts{
 			Key: endpointKey, Model: curModel, BaseURL: endpoint, RunID: runID,
-			MaxSteps: *maxSteps, Budget: budgetVal, Exec: *allowExec, Trust: trusted,
+			MaxSteps: maxStepsFor(fs, *maxSteps, state), Budget: budgetVal, Exec: *allowExec, Trust: trusted,
 			ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 			Allow:     splitList(*allow),
 			Workspace: workspaceDir,
@@ -153,6 +155,7 @@ func cmdUI(args []string) int {
 	srv := server.New(store, newAgent, newRunID)
 	srv.MemoryStore = memory.Store{Path: memoryFile}
 	srv.Version = versionString()
+	srv.Home = homeDir
 	srv.Tools = probeTools(func(runID string) agentOpts { return optsFor(runID, nil, nil, nil) })
 	// The picker's fallback is the model this process was started with: the one
 	// model known to work, because every turn here already uses it.
@@ -164,7 +167,7 @@ func cmdUI(args []string) int {
 	// answer is one model and a reason, not a longer list of wrong ones.
 	srv.Models = llm.NewModelCache(*model)
 	srv.DefaultWorkspace = serverWorkspace
-	srv.PickFolder = pickFolder
+	srv.PickFolder = folderPicker(runtime.GOOS, exec.LookPath)
 	if !strings.Contains(*baseURL, "openrouter.ai") {
 		srv.Models.Unsupported = noModelList(*baseURL)
 	}
@@ -198,6 +201,7 @@ func cmdUI(args []string) int {
 
 	pageURL := "http://" + ln.Addr().String()
 	fmt.Fprintf(os.Stderr, "ariadne ui  %s  model=%s\n", pageURL, *model)
+	fmt.Fprintf(os.Stderr, "home: %s\n", homeDir)
 	fmt.Fprintf(os.Stderr, "csrf token: %s\n", srv.CSRFToken)
 	fmt.Fprintln(os.Stderr, "Ctrl-C to stop")
 

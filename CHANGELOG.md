@@ -3,6 +3,34 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## Unreleased — v0.6.8, from a week of daily use
+
+- **Cited but never opened.** After an answer, ariadne checks every URL the
+  answer, or a file written in that turn, cites against the pages the
+  conversation actually opened. Any it never opened — a guessed link, or a
+  page that failed every time it was fetched — are listed under the answer
+  in the browser, and after it on stderr in the terminal. It checks links,
+  not what they say, and a source named only by its title is not checked.
+  Run over the week's real conversations, it found a cited page in the QRIS
+  report that timed out all three times it was fetched.
+- **Brief… lists the briefs.** The panel shows the `.md` files in the
+  conversation's folder, subfolders included, newest first; click one to
+  read it. Typing a path still works.
+- **A brief gets 25 steps a turn**, up from 10, unless `-max-steps` is
+  given. A research brief used exactly the 10 a turn allowed. Every gated
+  call still asks.
+- **A released binary keeps its data in one place.** Started from a
+  terminal inside an ariadne source checkout, it used the checkout's
+  `runs/` and `.env` instead of `%AppData%\ariadne`, and the day's
+  conversations were missing from the usual folder. Now only a development
+  build uses a checkout. `ariadne ui` prints the folder in use, and **⚙**
+  shows it. If you ran a release from inside a checkout, those
+  conversations are still in its `runs/`.
+- **No Browse… where it cannot work.** The button shows only when a folder
+  dialog is installed; in WSL without `zenity` you type the path.
+- **The message box grows** with what you type or paste, up to about ten
+  lines, instead of showing only the first line.
+
 ## v0.6.7 — 2026-09-23 — a redirect to another site asks again
 
 - **A redirect to another site is no longer followed.** Approving a fetch,

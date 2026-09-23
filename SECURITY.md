@@ -106,7 +106,15 @@ plainly, what protects you and what does not.
   downloaded `.md` used as a brief has the authority a web page is denied.
   The browser shows the whole brief before it starts and refuses to start if
   the file changed since; the terminal prints it and starts at once.
-  Approval still applies to what the brief leads to.
+  Approval still applies to what the brief leads to. A conversation started
+  from a brief may take 25 steps a turn instead of 10, so it can make more
+  model calls, and spend more, before it stops on its own.
+- **"Cited but never opened" is not fact-checking.** Under an answer, ariadne
+  lists the URLs the answer, or a file written in that turn, cites that no
+  fetch in the conversation opened. It checks URLs only: a source named by
+  its title is not checked, and a page that was opened can still be
+  misquoted. A page opened by an MCP tool counts only if the tool takes a
+  `url` argument.
 
 The attacks behind every line above, with traces, are in
 [`docs/injection-postmortem.md`](docs/injection-postmortem.md).

@@ -77,6 +77,12 @@
   .brief { border-left:3px solid var(--edge); padding-left:.7rem; }
   #briefPreview { flex-basis:100%; display:flex; flex-direction:column; gap:.4rem; }
   #briefPreview[hidden] { display:none; }
+  #briefList { flex-basis:100%; display:flex; flex-direction:column; gap:.15rem; max-height:14rem; overflow-y:auto; }
+  #briefList[hidden] { display:none; }
+  #briefList button { text-align:left; background:none; border:1px solid transparent; border-radius:4px;
+                      padding:.2rem .4rem; color:inherit; display:flex; justify-content:space-between; gap:1rem; }
+  #briefList button:hover, #briefList button.on { border-color:var(--edge); }
+  #briefList .when { color:var(--dim); font-size:.85em; white-space:nowrap; }
   #briefText { max-height:40vh; overflow-y:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
   #briefPreview button { align-self:flex-start; }
   .brief-header { font-size:.85em; margin-bottom:.3rem; font-weight:600; }
@@ -117,6 +123,8 @@
   @media (prefers-reduced-motion: reduce) { #working .spin { animation:none; } }
   .answer.md { white-space:normal; }
   .by { color:var(--dim); font-size:.78em; margin-top:.15rem; }
+  .unopened { color:var(--err); font-size:.85em; margin-top:.4rem; overflow-wrap:anywhere; }
+  .unopened ul { margin:.2rem 0 0; padding-left:1.2rem; }
   .md > :first-child { margin-top:0; }
   .md > :last-child { margin-bottom:0; }
   .md p, .md ul, .md ol, .md pre, .md blockquote, .md .tablewrap { margin:.45rem 0; }
@@ -167,6 +175,7 @@
     <button type="button" id="useBrief">Show</button>
     <button type="button" id="cancelBrief">Cancel</button>
     <span id="briefErr" class="is_error"></span>
+    <div id="briefList" hidden></div>
     <div id="briefPreview" hidden>
       <div class="dim">This brief becomes your own instruction to the model. Read it before you start; only use files you wrote.</div>
       <div id="briefText" class="brief md"></div>
@@ -457,7 +466,7 @@ function render(entries) {
   for (const e of entries) {
     if (e.kind === 'tool_call') entry('tool_call', `→ ${e.tool}(${e.args || ''})`);
     else if (e.kind === 'tool_result') entry('tool_result', `← ${e.text}`, e.is_error ? 'is_error' : '');
-    else if (e.kind === 'answer') showAnswer(entry('answer', ''), e.text, e.model);
+    else if (e.kind === 'answer') showAnswer(entry('answer', ''), e.text, e.model, e.unopened);
     else entry(e.kind, e.text);
   }
 }
@@ -791,7 +800,7 @@ async function send(text, opts = {}) {
   if (!resp.ok) {
     const { error } = await resp.json().catch(() => ({ error: 'refused' }));
     warn(error);
-    if (!opts.resume && !opts.brief && text) $('input').value = text;
+    if (!opts.resume && !opts.brief && text) { $('input').value = text; fitInput(); }
     turn = null;
     setBusy(false);
     return;
@@ -833,7 +842,7 @@ async function send(text, opts = {}) {
           // The streamed text and the final answer are the same words; replace
           // rather than append, so a provider that does not stream still shows one.
           if (!answer) answer = entry('answer', '');
-          showAnswer(answer, d.answer, d.answered_by || d.model);
+          showAnswer(answer, d.answer, d.answered_by || d.model, d.unopened);
           stats(d.turns, d.steps, d.cost, d.cost_unknown);
           selectModel(d.model);
           if (!$('memoryPanel').hidden) loadMemory();
@@ -909,6 +918,7 @@ $('composer').onsubmit = e => {
   const t = $('input').value.trim();
   if (!t) return;
   $('input').value = '';
+  fitInput();
   // "//" sends a message that starts with a slash; one "/" is a command for
   // the page, answered here, never sent to the model.
   if (t.startsWith('//')) { send(t.slice(1)); return; }
@@ -1089,9 +1099,28 @@ function mdLink(label, url, into) {
 }
 
 // showAnswer puts a finished answer on the page, formatted.
-function showAnswer(e, text, model) {
+function showAnswer(e, text, model, unopened) {
   e.classList.add('md');
   e.replaceChildren(renderMarkdown(text || ''));
+  // URLs this turn cited, in the answer or in a file it wrote, that no fetch
+  // in this conversation opened. Text, not links: a click would open a page
+  // the model may have invented, and the point is that nobody has read it.
+  if (unopened && unopened.length) {
+    const note = document.createElement('div');
+    note.className = 'unopened';
+    note.title = 'ariadne checked every URL this answer cites against the pages this conversation actually opened. ' +
+      'These were never opened, or every attempt failed, so nothing here was read from them. ' +
+      'A page that was opened can still be misquoted; this check cannot see that.';
+    note.textContent = `Cited but never opened in this conversation (${unopened.length}):`;
+    const ul = document.createElement('ul');
+    for (const u of unopened) {
+      const li = document.createElement('li');
+      li.textContent = u;
+      ul.append(li);
+    }
+    note.append(ul);
+    e.append(note);
+  }
   // Which model wrote this. Left off when the answer predates the field
   // rather than guessed from the picker — the picker is what the *next* turn
   // will use, and after a switch that is a different model entirely.
@@ -1181,6 +1210,15 @@ function command(text) {
 $('input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('composer').requestSubmit(); }
 });
+// The box grows with what is in it, up to the CSS max-height, then scrolls. At
+// rows="1" a pasted multi-line instruction showed only its first line, and
+// the rest was sent unread.
+function fitInput() {
+  const el = $('input');
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 2 + 'px';
+}
+$('input').addEventListener('input', fitInput);
 $('new').onclick = newConversation;
 $('stop').onclick = () => { if (turn) turn.abort(); };
 
@@ -1249,6 +1287,9 @@ function renderAbout() {
     line('Runs without asking: ', tools.filter(t => !t.asks).map(t => t.name)),
     Object.assign(document.createElement('p'), {
       textContent: 'Tools are set when ariadne ui starts (-exec, -trust, -allow, -mcp-config). ariadne ' + (about.version || 'dev'),
+    }),
+    Object.assign(document.createElement('p'), {
+      textContent: 'Conversations, memory and keys are kept in ' + (about.home || 'an unknown folder') + '.',
     }),
   );
 }
@@ -1337,6 +1378,58 @@ function openBriefPanel() {
   clearBriefPreview();
   $('briefPanel').hidden = false;
   $('briefInput').focus();
+  loadBriefList();
+}
+
+// loadBriefList shows the .md files in the folder this conversation would use,
+// newest first. Clicking one shows it, exactly as typing its path does; the
+// path box stays for anything the list leaves out.
+async function loadBriefList() {
+  const list = $('briefList');
+  list.replaceChildren();
+  list.hidden = true;
+  let d;
+  try {
+    const resp = await api('/api/briefs', {
+      method: 'POST',
+      body: JSON.stringify({ workspace: newWorkspace || '' })
+    });
+    d = await resp.json().catch(() => ({ error: 'refused' }));
+    if (!resp.ok) { $('briefErr').textContent = d.error || 'could not list briefs'; return; }
+  } catch (e) {
+    $('briefErr').textContent = 'could not list briefs: ' + e.message;
+    return;
+  }
+  if ($('briefPanel').hidden) return;
+  const head = document.createElement('div');
+  head.className = 'dim';
+  if (!d.briefs.length) {
+    head.textContent = 'No .md files in ' + d.folder + '. Type a path, or choose another folder with Folder….';
+    list.append(head);
+    list.hidden = false;
+    return;
+  }
+  head.textContent = (d.partial ? 'Newest ' + d.briefs.length + ' .md files in ' : '.md files in ') + d.folder +
+    (d.partial ? ' (not all shown; type a path for others)' : '');
+  list.append(head);
+  for (const b of d.briefs) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    const name = document.createElement('span');
+    name.textContent = b.path;
+    const when = document.createElement('span');
+    when.className = 'when';
+    when.textContent = new Date(b.modified).toLocaleString() + ' · ' + Math.max(1, Math.round(b.size / 1024)) + ' KB';
+    btn.append(name, when);
+    btn.onclick = () => {
+      list.querySelectorAll('button.on').forEach(x => x.classList.remove('on'));
+      btn.classList.add('on');
+      $('briefInput').value = b.path;
+      showBrief(b.path);
+    };
+    list.append(btn);
+  }
+  list.hidden = false;
 }
 
 $('briefBtn').onclick = () => {

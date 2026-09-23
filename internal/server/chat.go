@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ginko97/ariadne/internal/cite"
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
 )
@@ -289,6 +290,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		// They differ when a provider serves something other than what was
 		// asked for, and after a switch, when the picker is already ahead.
 		"answered_by": answeredBy(state),
+		// URLs this turn cited that nothing in the conversation opened. See
+		// internal/cite: a lookup in the checkpoint, not a judgement.
+		"unopened": cite.Unopened(state.Messages),
 	})
 }
 

@@ -31,8 +31,10 @@ type Paths struct {
 // Resolve picks the home directory, in order:
 //
 //  1. ARIADNE_HOME, when set — the operator's explicit choice.
-//  2. repo, when the binary runs inside an ariadne checkout — the layout this
-//     project has always had, so a developer's history does not move.
+//  2. repo, when a development build runs inside an ariadne checkout — the
+//     layout this project has always had, so a developer's history does not
+//     move. cmd/ariadne passes "" for a released binary (checkoutHome), whose
+//     data must not depend on the folder it was started from.
 //  3. userConfigDir()/ariadne — %AppData%\ariadne on Windows,
 //     ~/Library/Application Support/ariadne on macOS, ~/.config/ariadne
 //     elsewhere. Outside any workspace, so the keys in config.env are not

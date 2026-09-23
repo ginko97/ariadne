@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ginko97/ariadne/internal/cite"
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
 )
@@ -53,6 +54,9 @@ type transcriptEntry struct {
 	Tool    string `json:"tool,omitempty"`
 	Args    string `json:"args,omitempty"`
 	IsError bool   `json:"is_error,omitempty"`
+	// Unopened is set on a turn's last answer: URLs that turn cited, in the
+	// answer or in a file it wrote, that no call in the conversation opened.
+	Unopened []string `json:"unopened,omitempty"`
 }
 
 // handleTranscript returns one conversation's messages.
@@ -132,7 +136,22 @@ func compactJSON(raw []byte) string {
 // would suggest the model said nothing when it in fact did something.
 func entries(msgs []llm.Message) []transcriptEntry {
 	out := make([]transcriptEntry, 0, len(msgs))
-	for _, m := range msgs {
+	turns := cite.Turns(msgs)
+	turn, lastAnswer := 0, -1
+	// endTurn puts the turn's unopened citations on its last answer, which is
+	// where the page shows them after a reload, as it did when the turn ended.
+	endTurn := func() {
+		if turn < len(turns) && lastAnswer >= 0 {
+			t := turns[turn]
+			out[lastAnswer].Unopened = cite.Check(msgs, t[0], t[1])
+		}
+		lastAnswer = -1
+	}
+	for i, m := range msgs {
+		if turn < len(turns) && i == turns[turn][1] {
+			endTurn()
+			turn++
+		}
 		for _, b := range m.Blocks {
 			switch b.Type {
 			case llm.BlockText:
@@ -149,6 +168,7 @@ func entries(msgs []llm.Message) []transcriptEntry {
 				entry := transcriptEntry{Kind: kind, Text: b.Text}
 				if kind == "answer" {
 					entry.Model = m.Model
+					lastAnswer = len(out)
 				}
 				out = append(out, entry)
 
@@ -164,6 +184,7 @@ func entries(msgs []llm.Message) []transcriptEntry {
 			}
 		}
 	}
+	endTurn()
 	return out
 }
 

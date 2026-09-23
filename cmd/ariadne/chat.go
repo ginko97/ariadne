@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 
+	"github.com/ginko97/ariadne/internal/cite"
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
 	"github.com/ginko97/ariadne/internal/trace"
@@ -20,7 +21,7 @@ func cmdChat(args []string) int {
 	fs.SetOutput(os.Stderr)
 	model := fs.String("model", envOr("ARIADNE_MODEL", ""), "model id (default depends on -base-url)")
 	baseURL := fs.String("base-url", "", "OpenAI-compatible endpoint (fresh: default "+defaultBaseURL+"; resumed: checkpoint's unless overridden)")
-	maxSteps := fs.Int("max-steps", 10, "ceiling on loop iterations, per turn")
+	maxSteps := fs.Int("max-steps", defaultMaxSteps, maxStepsHelp)
 	allow := fs.String("allow", "", "comma-separated tools this run may call (resume can only narrow it)")
 	workspace := fs.String("workspace", "", "directory the file tools are confined to (fresh: default workspace; resumed: checkpoint's unless overridden)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
@@ -194,7 +195,7 @@ func cmdChat(args []string) int {
 
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: startModel, BaseURL: endpoint, RunID: runID,
-		MaxSteps: *maxSteps, Budget: budgetVal, Stream: *stream, Memory: mem, Exec: *allowExec, Trust: trusted,
+		MaxSteps: maxStepsFor(fs, *maxSteps, state), Budget: budgetVal, Stream: *stream, Memory: mem, Exec: *allowExec, Trust: trusted,
 		ToolTimeout: *toolTimeout, HTTPTimeout: *httpTimeout,
 		Allow: splitList(*allow), Approve: gated,
 		ApproveFn: approveOnTerminalReader(os.Stdin, stdinReader, workspaceDir),
@@ -211,6 +212,7 @@ func cmdChat(args []string) int {
 		state.Brief = *taskFile
 		state.Workspace = workspaceDir
 		state.Memory = mem
+		agent.MaxSteps = maxStepsFor(fs, *maxSteps, state)
 		// The same line a typed first message prints: without it a brief
 		// conversation has no id on screen to resume it by.
 		fmt.Fprintf(os.Stderr, "chat %s  model=%s\n", state.RunID, agent.Model)
@@ -333,6 +335,7 @@ func cmdChat(args []string) int {
 			continue
 		}
 		printAnswer(answer, *stream)
+		noteUnopened(os.Stderr, state)
 	}
 	return exitOK
 }
@@ -428,6 +431,7 @@ func chatTurn(agent *loop.Agent, state *loop.State, streamed bool) error {
 		return err
 	}
 	printAnswer(answer, streamed)
+	noteUnopened(os.Stderr, state)
 	return nil
 }
 
@@ -436,5 +440,19 @@ func chatTurn(agent *loop.Agent, state *loop.State, streamed bool) error {
 func printAnswer(answer string, streamed bool) {
 	if !streamed || !isTerminal(os.Stdout) {
 		fmt.Println(answer)
+	}
+}
+
+// noteUnopened tells the operator which URLs the turn just finished cited
+// that no call in the conversation opened (internal/cite). Stderr, like every
+// other note: stdout is the answer and nothing else.
+func noteUnopened(w io.Writer, state *loop.State) {
+	urls := cite.Unopened(state.Messages)
+	if len(urls) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "cited but never opened in this conversation (%d):\n", len(urls))
+	for _, u := range urls {
+		fmt.Fprintf(w, "  %s\n", u)
 	}
 }
