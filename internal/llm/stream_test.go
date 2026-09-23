@@ -213,6 +213,47 @@ func TestStreamHandlesDoneSentinel(t *testing.T) {
 	}
 }
 
+// A connection closed cleanly mid-answer is an ordinary end of body. With no
+// [DONE] and no finish_reason, what arrived is part of an answer and must be an
+// error — it used to be accepted whole, and saved.
+func TestStreamCutBeforeTheEndIsAnError(t *testing.T) {
+	o, _ := streamingClient([]byte("data: " + `{"choices":[{"index":0,"delta":{"content":"IHSG closed at 7,1"}}]}` + "\n\n"))
+
+	seq, err := o.Stream(context.Background(), Request{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got error
+	for _, err := range seq {
+		if err != nil {
+			got = err
+		}
+	}
+	if !errors.Is(got, ErrStreamCut) {
+		t.Fatalf("stream cut mid-answer: err = %v, want ErrStreamCut", got)
+	}
+
+	// Through the provider the loop uses: no Response, so nothing is saved.
+	o2, _ := streamingClient([]byte("data: " + `{"choices":[{"index":0,"delta":{"content":"IHSG closed at 7,1"}}]}` + "\n\n"))
+	if resp, err := (&Streaming{S: o2}).Complete(context.Background(), Request{Model: "m"}); !errors.Is(err, ErrStreamCut) {
+		t.Fatalf("Complete over a cut stream: resp %+v, err %v; want ErrStreamCut", resp, err)
+	}
+}
+
+// Some servers end with a finish_reason and never send [DONE]. That answer is
+// whole, and refusing it would turn a working provider into a broken one.
+func TestStreamFinishedWithoutDoneIsAccepted(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"content":"done"}}]}` + "\n\n" +
+		"data: " + `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\n"
+	o, _ := streamingClient([]byte(body))
+
+	seq, err := o.Stream(context.Background(), Request{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	collect(t, seq) // fails the test on any yielded error
+}
+
 // An HTTP failure is an ordinary body, not a stream, and the caller should get
 // it before iterating rather than as a first yielded error.
 func TestStreamHTTPErrorIsReturnedNotYielded(t *testing.T) {

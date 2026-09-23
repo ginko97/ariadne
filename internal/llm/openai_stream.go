@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -17,6 +18,11 @@ var _ Streamer = (*OpenAI)(nil)
 // sseDone is the sentinel the protocol ends with. It is not JSON, and decoding
 // it is the classic way a streaming client dies on the last line.
 const sseDone = "[DONE]"
+
+// ErrStreamCut is a stream that ended without the provider saying the answer
+// was over: no [DONE] and no finish_reason. The connection closed early, and
+// what arrived is part of an answer, not an answer.
+var ErrStreamCut = errors.New("openai: the connection closed before the answer was finished")
 
 // maxSSELine bounds one event. bufio.Scanner's default is 64KB, which a large
 // tool-call argument can exceed — and the failure is a truncated line that
@@ -94,6 +100,12 @@ func (o *OpenAI) Stream(ctx context.Context, req Request) (iter.Seq2[Chunk, erro
 		sc := bufio.NewScanner(resp.Body)
 		sc.Buffer(make([]byte, 0, 64*1024), maxSSELine)
 
+		// Whether the provider said the answer was over. A connection closed
+		// cleanly mid-answer reads as an ordinary end of body, and without
+		// this the half-sentence it carried was accepted as the whole answer
+		// and saved — found by a fake that closed after "IHSG closed at 7,1".
+		finished := false
+
 		for sc.Scan() {
 			line := strings.TrimSpace(sc.Text())
 			if line == "" || !strings.HasPrefix(line, "data:") {
@@ -115,6 +127,9 @@ func (o *OpenAI) Stream(ctx context.Context, req Request) (iter.Seq2[Chunk, erro
 			}
 
 			for _, c := range chunksOf(raw) {
+				if c.Stop != "" {
+					finished = true
+				}
 				if !yield(c, nil) {
 					return
 				}
@@ -126,6 +141,13 @@ func (o *OpenAI) Stream(ctx context.Context, req Request) (iter.Seq2[Chunk, erro
 				return
 			}
 			yield(Chunk{}, fmt.Errorf("openai: read stream: %w", err))
+			return
+		}
+		// [DONE] returns above. A finish_reason without [DONE] is accepted,
+		// because the answer is whole and some servers omit the sentinel;
+		// neither is a cut connection.
+		if !finished {
+			yield(Chunk{}, ErrStreamCut)
 		}
 	}, nil
 }
