@@ -3,7 +3,7 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
-## Unreleased
+## v0.6.6 — 2026-09-23 — try again, and see what it can do
 
 - **Try again, for an answer that never arrived.** When the connection drops,
   the provider fails, or you press Stop mid-answer, the page now offers
