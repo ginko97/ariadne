@@ -29,6 +29,10 @@ carry the longer story for each release.
   page loads, and `/models` does the same in `ariadne chat`. Ollama does
   not say which models can call tools, so a model without tool support is
   listed and fails on its first message.
+- **`edit_file` keeps blank lines added at the end of a replacement.** When
+  the model's copy of a file ended with a newline the file did not have,
+  every trailing newline of the replacement was dropped, including blank
+  lines it meant to add. Now only that extra newline is.
 - **Fixed on Windows: a turn could fail with "checkpoint failed … Access is
   denied".** Saving a conversation replaces its file, and Windows refused
   while the page was reading that file to refresh the conversation list,

@@ -181,10 +181,15 @@ func resolveEdit(content, oldText, newText string) editMatch {
 	if n == 0 {
 		if trimmed := strings.TrimRight(oldText, "\r\n"); trimmed != oldText && trimmed != "" {
 			if m := strings.Count(content, trimmed); m > 0 {
+				// Take off new_text exactly the newlines old_text had and
+				// the file does not, so blank lines the model added are
+				// kept. When new_text does not end with all of them — it
+				// has fewer, or different line endings — none of its
+				// trailing newlines can be additions, and all go.
 				suffix := oldText[len(trimmed):]
-				newTrimmed := newText
+				newTrimmed := strings.TrimRight(newText, "\r\n")
 				if strings.HasSuffix(newText, suffix) {
-					newTrimmed = newText[:len(newText)-len(suffix)]
+					newTrimmed = strings.TrimSuffix(newText, suffix)
 				}
 				oldText, newText, n = trimmed, newTrimmed, m
 			}

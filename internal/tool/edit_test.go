@@ -185,3 +185,31 @@ func TestEditFileToleratesAnExtraTrailingNewline(t *testing.T) {
 		t.Error("absent text was accepted")
 	}
 }
+
+// When old_text ends with newlines the file does not have, only those are
+// taken off new_text: blank lines the model added after them are kept, and a
+// new_text with fewer trailing newlines than that gains none.
+func TestEditFileTrailingNewlinesAgainstAFileWithoutOne(t *testing.T) {
+	for _, c := range []struct {
+		name, old, new, want string
+	}{
+		{"blank lines added are kept", "b\n", "b\n\n\n", "a\nb\n\n"},
+		{"the one extra newline goes", "b\n", "c\n", "a\nc"},
+		{"fewer than the extra: none are added", "b\n\n", "c\n", "a\nc"},
+		{"different line endings: none are added", "b\r\n", "c\n", "a\nc"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "f.txt")
+			if err := os.WriteFile(path, []byte("a\nb"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got, isErr := call(t, NewEditFile(dir), editArgs{Path: "f.txt", OldText: c.old, NewText: c.new}); isErr {
+				t.Fatalf("refused: %s", got)
+			}
+			if data, _ := os.ReadFile(path); string(data) != c.want {
+				t.Errorf("file = %q, want %q", data, c.want)
+			}
+		})
+	}
+}
