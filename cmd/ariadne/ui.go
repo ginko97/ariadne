@@ -170,7 +170,11 @@ func cmdUI(args []string) int {
 	// answer is one model and a reason, not a longer list of wrong ones.
 	srv.Models = llm.NewModelCache(*model)
 	srv.DefaultWorkspace = serverWorkspace
-	srv.SaveDefaultFolder = saveDefaultFolder
+	flagFolder := ""
+	if *workspace != "" {
+		flagFolder = serverWorkspace
+	}
+	srv.SaveDefaultFolder = folderSaver(flagFolder)
 	srv.PickFolder = folderPicker(runtime.GOOS, exec.LookPath)
 	unsupported, local := modelListFor(*baseURL)
 	srv.Models.Reconfigure(*model, unsupported, local)

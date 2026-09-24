@@ -53,3 +53,22 @@ func saveDefaultFolder(folder string) (string, []string, error) {
 	}
 	return effective, notes, nil
 }
+
+// folderSaver is what the settings panel saves the default folder with.
+// Started with -workspace, the folder is still saved for the next start, but
+// this session keeps the flag's folder and says so: a restart with the same
+// flag would use it too, and settings must do what a restart would — the
+// same rule a folder set in the shell follows.
+func folderSaver(flagFolder string) func(string) (string, []string, error) {
+	if flagFolder == "" {
+		return saveDefaultFolder
+	}
+	return func(folder string) (string, []string, error) {
+		_, notes, err := saveDefaultFolder(folder)
+		if err != nil {
+			return "", nil, err
+		}
+		return flagFolder, append(notes, "Saved for the next start. This session was started with -workspace "+
+			flagFolder+" and keeps it; start without -workspace to use the saved folder."), nil
+	}
+}

@@ -97,3 +97,30 @@ func TestSaveDefaultFolderHonoursShellOverride(t *testing.T) {
 		t.Errorf("config.env not updated: %s", data)
 	}
 }
+
+// Started with -workspace, saving a default folder writes it for the next
+// start but keeps the flag's folder for this session, and says so.
+func TestFolderSaverKeepsTheWorkspaceFlagForThisSession(t *testing.T) {
+	cfg := useConfigFile(t)
+	t.Setenv(workspaceEnv, "")
+	flagDir, newDir := t.TempDir(), t.TempDir()
+
+	got, notes, err := folderSaver(flagDir)(newDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != flagDir {
+		t.Errorf("this session moved to %q; it was started with -workspace %q", got, flagDir)
+	}
+	if len(notes) == 0 || !strings.Contains(notes[len(notes)-1], "-workspace") {
+		t.Errorf("notes = %v, want one saying the flag is kept", notes)
+	}
+	if data, _ := os.ReadFile(cfg); !strings.Contains(string(data), workspaceEnv+"="+newDir) {
+		t.Errorf("not saved for the next start:\n%s", data)
+	}
+
+	// Without the flag, the saved folder applies now.
+	if got, _, _ := folderSaver("")(newDir); got != newDir {
+		t.Errorf("without -workspace: %q, want %q", got, newDir)
+	}
+}
