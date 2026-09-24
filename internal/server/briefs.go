@@ -96,6 +96,9 @@ func walkBriefs(fsys fs.FS) (briefsResponse, error) {
 		if err != nil {
 			return nil
 		}
+		if fi.Size() == 0 || fi.Size() > 2<<20 {
+			return nil
+		}
 		out.Briefs = append(out.Briefs, briefEntry{Path: p, Size: fi.Size(), Modified: fi.ModTime()})
 		return nil
 	})

@@ -68,6 +68,12 @@ func TestReadWorkspaceBrief_Rejections(t *testing.T) {
 	if err := os.WriteFile(outsideFile, []byte("outside"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(ws, "empty.md"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "whitespace.md"), []byte("   \n\t  "), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	cases := []struct {
 		name string
@@ -79,6 +85,8 @@ func TestReadWorkspaceBrief_Rejections(t *testing.T) {
 		{"traversal escaping workspace", "../outside.md"},
 		{"absolute outside workspace", outsideFile},
 		{"nonexistent file", "nonexistent.md"},
+		{"empty file", "empty.md"},
+		{"whitespace file", "whitespace.md"},
 	}
 
 	for _, tc := range cases {

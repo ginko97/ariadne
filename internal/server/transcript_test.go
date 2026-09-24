@@ -88,6 +88,26 @@ func TestTranscriptSeparatesPromptsAnswersAndTools(t *testing.T) {
 	}
 }
 
+// A brief conversation records the brief path on its transcript, so reopening
+// it in the browser renders the task brief card rather than an ordinary chat bubble.
+func TestTranscriptIncludesBriefWhenStartedFromBrief(t *testing.T) {
+	s, ts := newTestServer(t)
+
+	st := loop.NewState("run_brief_transcript", "# My Brief\n\nTask details.")
+	st.Brief = "reports/brief.md"
+	if err := s.Store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, got := getTranscript(t, ts, "run_brief_transcript")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got.Brief != "reports/brief.md" {
+		t.Errorf("brief = %q, want reports/brief.md", got.Brief)
+	}
+}
+
 // A tool-only assistant turn has no prose. Rendering it as an empty entry would
 // suggest the model said nothing, when in fact it did something.
 func TestTranscriptDropsEmptyTextBlocks(t *testing.T) {

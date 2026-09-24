@@ -83,3 +83,17 @@ func TestIndexDeclaresAnInlineIcon(t *testing.T) {
 		t.Error("the icon does not follow the colour scheme")
 	}
 }
+
+// Reopening a conversation started from a brief must render the brief as a
+// task brief card rather than falling back to an ordinary prompt bubble.
+func TestIndexRendersBriefCardOnReopen(t *testing.T) {
+	if !strings.Contains(indexHTML, "render(t.messages, t.brief)") {
+		t.Error("open(id) does not pass t.brief to render")
+	}
+	if !strings.Contains(indexHTML, "function render(entries, briefPath)") {
+		t.Error("render does not accept briefPath")
+	}
+	if !strings.Contains(indexHTML, "renderBrief({ path: briefPath, content: e.text })") {
+		t.Error("render does not call renderBrief for the initial prompt of a brief conversation")
+	}
+}

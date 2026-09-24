@@ -44,6 +44,7 @@ func TestListBriefsFindsMarkdownNewestFirst(t *testing.T) {
 	writeAt(t, filepath.Join(ws, "reports", "new.MD"), "new", now.Add(-1*time.Hour))
 	writeAt(t, filepath.Join(ws, "middle.md"), "mid", now.Add(-2*time.Hour))
 	writeAt(t, filepath.Join(ws, "notes.txt"), "not a brief", now)
+	writeAt(t, filepath.Join(ws, "empty.md"), "", now)
 	writeAt(t, filepath.Join(ws, ".git", "HEAD.md"), "hidden", now)
 
 	got, err := listBriefs(ws)
@@ -149,6 +150,8 @@ func TestWalkBriefsListsOnlyRegularFiles(t *testing.T) {
 	fsys := fstest.MapFS{
 		"mine.md":        {Data: []byte("inside")},
 		"secret-link.md": {Data: []byte("../outside/secret.md"), Mode: fs.ModeSymlink},
+		"empty.md":       {Data: []byte{}},
+		"huge.md":        {Data: make([]byte, (2<<20)+1)},
 	}
 	got, err := walkBriefs(fsys)
 	if err != nil {

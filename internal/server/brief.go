@@ -86,6 +86,9 @@ func readWorkspaceBrief(workspace, path string) (relPath, content string, err er
 	if err != nil {
 		return "", "", err
 	}
+	if strings.TrimSpace(string(data)) == "" {
+		return "", "", errors.New("brief file is empty")
+	}
 
 	return filepath.ToSlash(rel), string(data), nil
 }

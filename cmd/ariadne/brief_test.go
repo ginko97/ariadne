@@ -30,6 +30,22 @@ func TestCmdRunTaskFlagMissingFile(t *testing.T) {
 	}
 }
 
+func runWithStderr(fn func() int) (int, string) {
+	oldErr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	read := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		read <- string(b)
+	}()
+	code := fn()
+	w.Close()
+	os.Stderr = oldErr
+	out := <-read
+	return code, out
+}
+
 func TestCmdRunTaskFlagEmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	emptyFile := filepath.Join(tmpDir, "empty.md")
@@ -37,9 +53,67 @@ func TestCmdRunTaskFlagEmptyFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code := cmdRun([]string{"-task", emptyFile})
-	if code != exitUsage {
-		t.Errorf("cmdRun with empty -task got exit code %d, want exitUsage (%d)", code, exitUsage)
+	code, errText := runWithStderr(func() int { return cmdRun([]string{"-task", emptyFile}) })
+	if code != exitUsage || !strings.Contains(errText, "is empty") {
+		t.Errorf("got code %d, stderr %q; want exitUsage and 'is empty'", code, errText)
+	}
+}
+
+func TestCmdRunTaskFlagNonMarkdownFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	txtFile := filepath.Join(tmpDir, "task.txt")
+	if err := os.WriteFile(txtFile, []byte("plain text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, errText := runWithStderr(func() int { return cmdRun([]string{"-task", txtFile}) })
+	if code != exitUsage || !strings.Contains(errText, "task file must be a markdown (.md) file") {
+		t.Errorf("got code %d, stderr %q; want exitUsage and 'task file must be a markdown (.md) file'", code, errText)
+	}
+}
+
+func TestCmdRunTaskFlagDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	dir := filepath.Join(tmpDir, "folder.md")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	code, errText := runWithStderr(func() int { return cmdRun([]string{"-task", dir}) })
+	if code != exitUsage || !strings.Contains(errText, "is a directory") {
+		t.Errorf("got code %d, stderr %q; want exitUsage and 'is a directory'", code, errText)
+	}
+}
+
+func TestCmdRunTaskFlagFileTooLarge(t *testing.T) {
+	tmpDir := t.TempDir()
+	largeFile := filepath.Join(tmpDir, "large.md")
+	f, err := os.Create(largeFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate((2 << 20) + 1); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	f.Close()
+
+	code, errText := runWithStderr(func() int { return cmdRun([]string{"-task", largeFile}) })
+	if code != exitUsage || !strings.Contains(errText, "is too large (max 2MB)") {
+		t.Errorf("got code %d, stderr %q; want exitUsage and 'is too large (max 2MB)'", code, errText)
+	}
+}
+
+func TestCmdChatTaskFlagNonMarkdownFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	txtFile := filepath.Join(tmpDir, "task.txt")
+	if err := os.WriteFile(txtFile, []byte("plain text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, errText := runWithStderr(func() int { return cmdChat([]string{"-task", txtFile}) })
+	if code != exitUsage || !strings.Contains(errText, "task file must be a markdown (.md) file") {
+		t.Errorf("got code %d, stderr %q; want exitUsage and 'task file must be a markdown (.md) file'", code, errText)
 	}
 }
 

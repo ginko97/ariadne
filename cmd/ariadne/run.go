@@ -48,16 +48,11 @@ func cmdRun(args []string) int {
 			fmt.Fprintln(os.Stderr, "ariadne run: cannot provide both -task <file> and positional task text")
 			return exitUsage
 		}
-		data, err := os.ReadFile(*taskFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "ariadne run: %v\n", err)
-			return exitFail
+		t, code := readTaskFile("ariadne run", *taskFile)
+		if code != exitOK {
+			return code
 		}
-		task = strings.TrimSpace(string(data))
-		if task == "" {
-			fmt.Fprintf(os.Stderr, "ariadne run: %s is empty\n", *taskFile)
-			return exitUsage
-		}
+		task = t
 		briefPath = *taskFile
 		fmt.Fprintf(os.Stderr, "task from %s:\n%s\n\n", briefPath, task)
 	} else {

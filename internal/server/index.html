@@ -461,10 +461,13 @@ function settleApproval(callID, why) {
   pendingApprovals.delete(callID);
 }
 
-function render(entries) {
+function render(entries, briefPath) {
   log.replaceChildren();
-  for (const e of entries) {
-    if (e.kind === 'tool_call') entry('tool_call', `→ ${e.tool}(${e.args || ''})`);
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (i === 0 && briefPath && e.kind === 'prompt') {
+      renderBrief({ path: briefPath, content: e.text });
+    } else if (e.kind === 'tool_call') entry('tool_call', `→ ${e.tool}(${e.args || ''})`);
     else if (e.kind === 'tool_result') entry('tool_result', `← ${e.text}`, e.is_error ? 'is_error' : '');
     else if (e.kind === 'answer') showAnswer(entry('answer', ''), e.text, e.model, e.unopened);
     else entry(e.kind, e.text);
@@ -570,7 +573,7 @@ async function open(id) {
   closeFolderPanel();
   closeBriefPanel();
   showFolder();
-  render(t.messages);
+  render(t.messages, t.brief);
   stats(t.turns, t.steps, t.cost_usd, t.cost_unknown);
   selectModel(t.model);
   if (t.pending) {

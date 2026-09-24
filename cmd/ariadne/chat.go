@@ -52,16 +52,11 @@ func cmdChat(args []string) int {
 
 	var briefContent string
 	if !resuming && *taskFile != "" {
-		data, err := os.ReadFile(*taskFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "ariadne chat: %v\n", err)
-			return exitFail
+		t, code := readTaskFile("ariadne chat", *taskFile)
+		if code != exitOK {
+			return code
 		}
-		briefContent = strings.TrimSpace(string(data))
-		if briefContent == "" {
-			fmt.Fprintf(os.Stderr, "ariadne chat: %s is empty\n", *taskFile)
-			return exitUsage
-		}
+		briefContent = t
 		fmt.Fprintf(os.Stderr, "task from %s:\n%s\n\n", *taskFile, briefContent)
 	}
 
