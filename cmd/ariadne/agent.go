@@ -243,6 +243,7 @@ func newAgentFor(o agentOpts) *loop.Agent {
 		// terminal and eval are unaffected.
 		GrantKey: webFetchGrantKey,
 		Redact:   redactSecrets(os.Getenv),
+		Today:    time.Now,
 
 		RunTool:       reg.Call,
 		Checkpoint:    o.Store.Save,
@@ -295,7 +296,7 @@ func retryMessage(status int, delay time.Duration) string {
 
 // secretEnvNames are the variables this process holds credentials in: the
 // ones apiKey reads, which dotenv.Load fills from .env.
-var secretEnvNames = []string{"ARIADNE_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY"}
+var secretEnvNames = []string{"ARIADNE_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY", "HF_TOKEN"}
 
 // minRedactLen keeps a short or placeholder value from redacting ordinary
 // text: a key set to "x" would otherwise blank every x in every result.

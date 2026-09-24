@@ -13,6 +13,7 @@ import (
 	"github.com/ginko97/ariadne/internal/cite"
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
+	"github.com/ginko97/ariadne/internal/memory"
 	"github.com/ginko97/ariadne/internal/trace"
 )
 
@@ -247,9 +248,8 @@ func cmdChat(args []string) int {
 			(rest == "" || strings.HasPrefix(rest, " ")) {
 			if models == nil {
 				models = llm.NewModelCache(*model)
-				if !strings.Contains(endpoint, "openrouter.ai") {
-					models.Unsupported = noModelList(endpoint)
-				}
+				unsupported, local := modelListFor(endpoint)
+				models.Reconfigure(*model, unsupported, local)
 			}
 			listModels(models, strings.TrimSpace(rest))
 			continue
@@ -292,6 +292,10 @@ func cmdChat(args []string) int {
 			}
 			agent.Model = newModel
 			fmt.Fprintf(os.Stderr, "model set to %s, takes effect next turn\n", agent.Model)
+			continue
+		}
+
+		if memoryCommand(os.Stderr, memory.Store{Path: memoryFile}, mem, line) {
 			continue
 		}
 
@@ -342,6 +346,9 @@ const chatCommands = `commands:
   /models all     list every one of them
   /model <id>     switch model starting next turn
   /model          show the current model
+  /memory         list remembered facts, numbered
+  /remember <fact> save a fact exactly as typed (needs -remember)
+  /forget <n>     delete fact n
   /help           this list
   //text          send a line that really does start with a slash
   /exit           leave (Ctrl-D on Unix; Ctrl-Z then Enter on Windows)
@@ -405,6 +412,11 @@ func listModels(cache *llm.ModelCache, filter string) {
 		return
 	}
 	for _, r := range shown {
+		// A model on this computer has no price to show, not an unknown one.
+		if source == "local" {
+			fmt.Fprintf(os.Stderr, "  %s\n", r.ID)
+			continue
+		}
 		price := "     —"
 		if r.PromptPerMTok > 0 {
 			price = fmt.Sprintf("%6.2f", r.PromptPerMTok)

@@ -65,6 +65,13 @@ type ModelCache struct {
 	// correct one.
 	Unsupported string
 
+	// Local, when set, is where the list comes from instead of OpenRouter: a
+	// server on this machine that names the models it has (Ollama). Asked on
+	// every Get and never cached — it is local and quick, and a model pulled
+	// a minute ago should be in the list. It reports nothing about tool
+	// support, so nothing is filtered out. Set it with Reconfigure.
+	Local func(ctx context.Context) ([]string, error)
+
 	mu       sync.Mutex
 	rows     []ModelRow
 	fetched  time.Time
@@ -92,6 +99,12 @@ func NewModelCache(fallback string) *ModelCache {
 // looking at a measurement or a guess.
 func (m *ModelCache) Get(ctx context.Context) (rows []ModelRow, source string, warning string) {
 	m.mu.Lock()
+
+	if m.Local != nil {
+		local, fallback := m.Local, m.Fallback
+		m.mu.Unlock()
+		return localRows(ctx, local, fallback)
+	}
 
 	if m.Unsupported != "" {
 		defer m.mu.Unlock()
@@ -174,10 +187,38 @@ func (m *ModelCache) Get(ctx context.Context) (rows []ModelRow, source string, w
 // Reconfigure points the cache at a new configured model and endpoint, for a
 // server whose provider was changed while it runs. Under the lock, because Get
 // reads both fields there; setting them directly would race with it.
-func (m *ModelCache) Reconfigure(fallback, unsupported string) {
+//
+// local is the list for a server on this machine, or nil for everything else;
+// it replaces both OpenRouter's list and Unsupported while it is set.
+func (m *ModelCache) Reconfigure(fallback, unsupported string, local func(context.Context) ([]string, error)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Fallback, m.Unsupported = fallback, unsupported
+	m.Fallback, m.Unsupported, m.Local = fallback, unsupported, local
+}
+
+// localRows is the list a local server gave, with the configured model kept
+// in it even when the server no longer has it, so the picker can still show
+// what the conversation is on — and say why that model may fail.
+func localRows(ctx context.Context, local func(context.Context) ([]string, error), fallback string) ([]ModelRow, string, string) {
+	names, err := local(ctx)
+	if err != nil {
+		rows := []ModelRow{}
+		if fallback != "" {
+			rows = append(rows, ModelRow{ID: fallback, Name: fallback})
+		}
+		return rows, "fallback", "could not list the models on this computer, offering the configured model only: " + err.Error()
+	}
+	rows := make([]ModelRow, 0, len(names)+1)
+	found := fallback == ""
+	for _, n := range names {
+		rows = append(rows, ModelRow{ID: n, Name: n})
+		found = found || n == fallback
+	}
+	if !found {
+		rows = append([]ModelRow{{ID: fallback, Name: fallback}}, rows...)
+		return rows, "local", fallback + " is not among the models on this computer; pull it, or pick another"
+	}
+	return rows, "local", ""
 }
 
 // Configured is the model the process is set up with.

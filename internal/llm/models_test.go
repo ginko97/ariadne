@@ -350,3 +350,49 @@ func TestModelsConcurrentGetDoesNotBlockStaleCache(t *testing.T) {
 		t.Error("the background refresh did not finish after release")
 	}
 }
+
+// With a local list set, the picker shows what the local server has, asked
+// fresh each time, and OpenRouter is never contacted.
+func TestLocalListReplacesTheCatalogue(t *testing.T) {
+	ts, hits := upstream(t, `{"data":[]}`, http.StatusOK)
+	m := NewModelCache("qwen3:4b")
+	m.URL = ts.URL
+	pulled := []string{"qwen3:4b", "llama3.2:3b"}
+	m.Reconfigure("qwen3:4b", "", func(context.Context) ([]string, error) { return pulled, nil })
+
+	rows, source, warning := m.Get(context.Background())
+	if source != "local" || warning != "" || len(rows) != 2 || rows[1].ID != "llama3.2:3b" {
+		t.Fatalf("got %v %q %q", rows, source, warning)
+	}
+	pulled = append(pulled, "qwen3:1.7b") // pulled a moment ago
+	if rows, _, _ := m.Get(context.Background()); len(rows) != 3 {
+		t.Errorf("a newly pulled model is missing: %v", rows)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("OpenRouter was asked %d times while the list was local", hits.Load())
+	}
+
+	// Back to a remote endpoint: the local list is gone.
+	m.Reconfigure("gpt-4o-mini", "no list here", nil)
+	if _, source, warning := m.Get(context.Background()); source != "fallback" || warning != "no list here" {
+		t.Errorf("after reconfiguring away from local: %q %q", source, warning)
+	}
+}
+
+// The configured model stays in the picker even when the server no longer
+// has it, with a warning that says so; a server that cannot be reached
+// leaves the configured model and the reason.
+func TestLocalListKeepsTheConfiguredModelAndSaysWhy(t *testing.T) {
+	m := NewModelCache("qwen3:8b")
+	m.Reconfigure("qwen3:8b", "", func(context.Context) ([]string, error) { return []string{"qwen3:4b"}, nil })
+	rows, _, warning := m.Get(context.Background())
+	if len(rows) != 2 || rows[0].ID != "qwen3:8b" || warning == "" {
+		t.Errorf("configured model not pulled: %v, warning %q", rows, warning)
+	}
+
+	m.Reconfigure("qwen3:8b", "", func(context.Context) ([]string, error) { return nil, errors.New("connection refused") })
+	rows, source, warning := m.Get(context.Background())
+	if source != "fallback" || len(rows) != 1 || rows[0].ID != "qwen3:8b" || warning == "" {
+		t.Errorf("unreachable: %v %q %q", rows, source, warning)
+	}
+}

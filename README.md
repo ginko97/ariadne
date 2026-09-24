@@ -100,10 +100,10 @@ dropped before an answer arrived.
 | **Documents** | read `.docx`, `.xlsx`, `.pptx` and their LibreOffice counterparts; PDFs when [Poppler](https://poppler.freedesktop.org) is installed |
 | **The web** | read a page by URL, asking first; never your own machine or local network |
 | **Research briefs** | start a conversation from a markdown task file you wrote (`-task brief.md`, or **Brief…**); it gets 25 steps a turn instead of 10 |
-| **Memory** | notes that carry across conversations, each one approved before it is saved, all of them reviewable in **🧠** |
+| **Memory** | notes that carry across conversations: ones you type into **🧠** or `/remember`, saved word for word, and ones the model proposes, each approved before it is saved |
 | **MCP tools** | any MCP server — filesystem, search, git — through `-mcp-config` |
 | **Programs** | `-exec` lets it run programs in the folder, asking before every one |
-| **Any model** | OpenRouter, OpenAI, Gemini, xAI, Groq, Together, or a local Ollama |
+| **Any model** | OpenRouter, OpenAI, Gemini, xAI, Hugging Face, Groq, Together, or a local Ollama, whose downloaded models the picker lists |
 
 ## Why you can trust it
 
@@ -139,7 +139,8 @@ dropped before an answer arrived.
 | **Needs you** | marks a conversation waiting on you |
 | **Stop** / **Resume turn** | end a turn at any point; finish an interrupted one without repeating what ran |
 | **Try again** | when an answer never arrived (a dropped connection, a provider error), ask again without adding a message |
-| **🧠** | the notes it remembers across conversations; delete any of them |
+| **🧠** | the notes it remembers across conversations: type one and **Save**, or delete any. `/remember <fact>` saves one from the message box |
+| **Copy** | on every answer (its markdown, tables and all) and on every code block |
 | **Tools:** in the top bar | what conversations here can use and how many ask first; anything that normally asks but was exempted with `-trust` shows in red. Hover for the full list |
 | **⚙** · **◐** · **×** | provider, key and model, plus the version and every tool · light or dark · delete a conversation for good |
 | `/help` | the page's own commands, never sent to the model |
@@ -152,6 +153,7 @@ with `ariadne chat <run-id>`.
 ```bash
 ariadne chat                                   # talk
 ariadne chat <run-id>                          # pick a conversation back up
+ariadne chat -remember                         # with memory: /memory, /remember <fact>, /forget <n>
 ariadne run "What is 15% of 240?"              # one task, answer on stdout
 ariadne run -task brief.md                     # the task from a file you wrote
 ariadne run -trust write_file "..."            # unattended: write without asking
@@ -180,8 +182,8 @@ ariadne version                                # which build this is
 ### Keys
 
 `ariadne setup` stores your key in `config.env`; an environment variable takes precedence.
-`OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` and `XAI_API_KEY` are only ever
-sent to their own provider's host, and `ARIADNE_API_KEY` to any endpoint. An endpoint
+`OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` and `HF_TOKEN` (Hugging
+Face) are only ever sent to their own provider's host, and `ARIADNE_API_KEY` to any endpoint. An endpoint
 ariadne does not recognise never gets a provider's key, and one on this machine, like
 Ollama, needs none.
 

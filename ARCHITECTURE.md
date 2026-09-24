@@ -322,7 +322,7 @@ file the task never mentioned and printed the credentials.
 Fencing a document asks the model to distrust a stranger. Fencing memory asks it to
 distrust itself, and a preference recorded by its own past self reads as policy. So the
 control moved to the side a control can actually hold: memory is off by default, every
-write is gated behind approval, and an unattended run — no terminal, so nothing to ask —
+note the model proposes is gated behind approval, and an unattended run — no terminal, so nothing to ask —
 cannot write a note at all. That is the right way round, because an unattended run is
 where a planted note is both most dangerous and least likely to be noticed.
 
@@ -356,8 +356,9 @@ side can tell which one wrote a turn, because there is nothing to tell apart.
 nothing to install. It offers the model list from OpenRouter filtered to models that can
 actually call tools, and a model may change between turns but never inside one. Memory
 is enabled with forced approval gating: facts the model offers to remember across conversations
-require explicit approval on screen, and past notes can be reviewed and deleted from the
-**🧠** drawer.
+require explicit approval on screen. Facts the person types into the **🧠** drawer or
+`/remember` are saved word for word without a card, because nobody else wrote them; all of
+them can be reviewed and deleted there.
 
 ---
 
@@ -379,9 +380,10 @@ require explicit approval on screen, and past notes can be reviewed and deleted 
   *abandoned* rather than cancelled, because a context cannot stop a function that never
   checks one — and the result says "may still be running" rather than claiming failure.
 - **Memory** (`-remember` in the terminal, enabled with forced approval in `ariadne ui`):
-  cross-conversation notes in `MEMORY.md` that can be reviewed and deleted from the **🧠**
-  drawer or `/memory`. Gated behind approval in both interfaces — the model can never record a note
-  unattended without you saying yes. Notes can be deleted with atomic dual-key verification
+  cross-conversation notes in `MEMORY.md` that can be reviewed, added and deleted from the
+  **🧠** drawer, and with `/memory`, `/remember` and `/forget` in `ariadne chat`. A note the model
+  proposes is gated behind approval in both interfaces — the model can never record one
+  unattended without you saying yes; a note you type is saved as typed. Notes can be deleted with atomic dual-key verification
   (index + expected text). What comes back out is fenced like a fetched document, because a
   note may have been written by a run that was reading one, and that fence was measured failing.
 - **JSONL traces** per run: every request, response, tool call, denial, approval, retry,

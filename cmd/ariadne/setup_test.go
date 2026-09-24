@@ -138,6 +138,7 @@ func TestDefaultModelFor(t *testing.T) {
 		{"https://openrouter.ai/api/v1", defaultOpenRouterModel},
 		{"https://api.openai.com/v1", defaultOpenAIModel},
 		{"https://api.x.ai/v1", defaultXAIModel},
+		{"https://router.huggingface.co/v1", defaultHuggingFaceModel},
 		{"https://generativelanguage.googleapis.com/v1beta/openai", defaultModel},
 		{"http://localhost:11434/v1", defaultModel},
 		{"https://max.ai/v1", defaultModel},
@@ -358,5 +359,44 @@ func TestSetupOllamaElsewhereStoresThePlaceholder(t *testing.T) {
 	data, _ := os.ReadFile(cfg)
 	if !strings.Contains(string(data), "ARIADNE_API_KEY="+localNoKey) {
 		t.Errorf("no placeholder key for a remote Ollama:\n%s", data)
+	}
+}
+
+// Hugging Face is a named provider: its token is stored as HF_TOKEN, the name
+// its own tools read, with its endpoint and a default model, and never as
+// ARIADNE_API_KEY, which would go to every endpoint.
+func TestSetupHuggingFaceStoresHFToken(t *testing.T) {
+	cfg := useConfigFile(t)
+	var out strings.Builder
+	if code := runSetup(strings.NewReader("hf_abcdefghijklmnop\n"), &out, []string{"-provider", "huggingface", "-no-check"}); code != exitOK {
+		t.Fatalf("exit %d:\n%s", code, out.String())
+	}
+	data, _ := os.ReadFile(cfg)
+	for _, want := range []string{"HF_TOKEN=hf_abcdefghijklmnop", "ARIADNE_BASE_URL=https://router.huggingface.co/v1",
+		"ARIADNE_MODEL=" + defaultHuggingFaceModel} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("config.env lacks %q:\n%s", want, data)
+		}
+	}
+	if strings.Contains(string(data), "ARIADNE_API_KEY=hf_") {
+		t.Errorf("the token went into ARIADNE_API_KEY:\n%s", data)
+	}
+}
+
+// The picker's list comes from OpenRouter, from Ollama itself, or nowhere
+// with a reason, according to the endpoint.
+func TestModelListForEachKindOfEndpoint(t *testing.T) {
+	if u, l := modelListFor("https://openrouter.ai/api/v1"); u != "" || l != nil {
+		t.Errorf("OpenRouter: %q, local %v", u, l != nil)
+	}
+	for _, e := range []string{ollamaURL, "http://127.0.0.1:11434/v1"} {
+		if u, l := modelListFor(e); u != "" || l == nil {
+			t.Errorf("%s: %q, local %v; want Ollama's own list", e, u, l != nil)
+		}
+	}
+	for _, e := range []string{"https://router.huggingface.co/v1", "http://localhost:1234/v1", "http://192.168.1.5:11434/v1"} {
+		if u, l := modelListFor(e); u == "" || l != nil {
+			t.Errorf("%s: %q, local %v; want no list and a reason", e, u, l != nil)
+		}
 	}
 }

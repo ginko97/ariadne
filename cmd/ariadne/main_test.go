@@ -871,6 +871,7 @@ func TestAPIKeyGoesOnlyToItsOwnProvider(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "k-gemini")
 	t.Setenv("OPENAI_API_KEY", "k-openai")
 	t.Setenv("XAI_API_KEY", "k-xai")
+	t.Setenv("HF_TOKEN", "k-hf")
 
 	for _, c := range []struct{ url, want string }{
 		{"https://openrouter.ai/api/v1", "k-openrouter"},
@@ -879,6 +880,7 @@ func TestAPIKeyGoesOnlyToItsOwnProvider(t *testing.T) {
 		{"https://api.openai.com/v1", "k-openai"},
 		{"api.openai.com/v1", "k-openai"},
 		{"https://api.x.ai/v1", "k-xai"},
+		{"https://router.huggingface.co/v1", "k-hf"},
 		// Unrecognised: no provider's key, whichever are set.
 		{"https://api.groq.com/openai/v1", ""},
 		// This machine: no provider's key, a placeholder so commands start.
@@ -893,6 +895,8 @@ func TestAPIKeyGoesOnlyToItsOwnProvider(t *testing.T) {
 		{"https://max.ai/v1", ""},
 		{"https://openrouter.ai.attacker.example/v1", ""},
 		{"https://notopenai.com/v1", ""},
+		{"https://router.huggingface.co.attacker.example/v1", ""},
+		{"https://nothuggingface.co/v1", ""},
 	} {
 		if got, _ := apiKey(c.url); got != c.want {
 			t.Errorf("apiKey(%s) = %q, want %q", c.url, got, c.want)
@@ -1156,5 +1160,22 @@ func TestLineSourceEndOfInputIsSticky(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatalf("read %d after the end blocked instead of returning io.EOF", i+2)
 		}
+	}
+}
+
+// A Hugging Face token the process holds is redacted from tool output like
+// every other provider key.
+func TestRedactSecretsCoversHFToken(t *testing.T) {
+	r := redactSecrets(func(k string) string {
+		if k == "HF_TOKEN" {
+			return "hf_abcdefghijklmnopqrst"
+		}
+		return ""
+	})
+	if r == nil {
+		t.Fatal("HF_TOKEN set, but no redactor was built")
+	}
+	if got := r("token: hf_abcdefghijklmnopqrst"); strings.Contains(got, "hf_abcdefghijklmnopqrst") || !strings.Contains(got, "[REDACTED HF_TOKEN]") {
+		t.Errorf("HF_TOKEN not redacted: %s", got)
 	}
 }

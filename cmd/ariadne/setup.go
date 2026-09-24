@@ -30,6 +30,8 @@ var providers = map[string]string{
 	"openai":     "https://api.openai.com/v1",
 	"gemini":     "https://generativelanguage.googleapis.com/v1beta/openai",
 	"xai":        "https://api.x.ai/v1",
+	// Hugging Face's router: hosted models, nothing downloaded.
+	"huggingface": "https://router.huggingface.co/v1",
 	// Ollama needs no key; setup asks it which models are pulled instead.
 	"ollama": ollamaURL,
 }
@@ -47,7 +49,7 @@ func cmdSetup(args []string) int {
 func runSetup(stdin io.Reader, out io.Writer, args []string) int {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	fs.SetOutput(out)
-	provider := fs.String("provider", "", "openrouter (default), openai, gemini, xai, ollama, or other")
+	provider := fs.String("provider", "", "openrouter (default), openai, gemini, xai, huggingface, ollama, or other")
 	baseURL := fs.String("base-url", "", "endpoint, for -provider other (or Ollama somewhere other than "+ollamaURL+")")
 	model := fs.String("model", "", "model to use by default (default: one chosen for the provider)")
 	noCheck := fs.Bool("no-check", false, "write the config without testing the key")

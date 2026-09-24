@@ -150,3 +150,55 @@ func TestChatEnablesMemoryWhenStoreConfigured(t *testing.T) {
 		t.Error("state.Memory is false, want true")
 	}
 }
+
+// The person can save a fact from the page, word for word, and it is marked as
+// theirs. The token is required, the store's limits apply, and saving a fact
+// that is already there says so rather than adding it twice.
+func TestMemoryAddSavesTheOperatorsWords(t *testing.T) {
+	s, ts := newTestServer(t)
+	s.MemoryStore = memory.Store{Path: filepath.Join(t.TempDir(), "MEMORY.md")}
+
+	add := func(text string, token bool) (int, map[string]any) {
+		t.Helper()
+		body, _ := json.Marshal(memoryAddRequest{Text: text})
+		req, _ := http.NewRequest("POST", ts.URL+"/api/memory", strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		if token {
+			req.Header.Set("X-Ariadne-CSRF", s.CSRFToken)
+		}
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		out := map[string]any{}
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+
+	if code, _ := add("I live on Earth", false); code != http.StatusForbidden {
+		t.Errorf("without the token: status %d, want 403", code)
+	}
+	code, out := add("I live on Earth", true)
+	if code != http.StatusOK || out["added"] != true {
+		t.Fatalf("save: status %d, %v", code, out)
+	}
+	notes, err := s.MemoryStore.Load()
+	if err != nil || len(notes) != 1 {
+		t.Fatalf("notes = %v (err %v), want one", notes, err)
+	}
+	if notes[0].Text != "I live on Earth" || notes[0].RunID != memory.ByOperator {
+		t.Errorf("saved %+v, want the exact words marked %q", notes[0], memory.ByOperator)
+	}
+
+	if code, out := add("i live on earth", true); code != http.StatusOK || out["added"] != false {
+		t.Errorf("same fact again: status %d, %v; want ok and added=false", code, out)
+	}
+	if code, out := add(strings.Repeat("x", memory.MaxNote+1), true); code != http.StatusBadRequest ||
+		!strings.Contains(out["error"].(string), "limit") {
+		t.Errorf("over the length limit: status %d, %v", code, out)
+	}
+	if code, _ := add("   ", true); code != http.StatusBadRequest {
+		t.Errorf("blank: status %d, want 400", code)
+	}
+}

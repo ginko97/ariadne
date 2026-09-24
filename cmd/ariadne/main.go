@@ -44,6 +44,11 @@ const (
 	defaultOpenRouterModel = "deepseek/deepseek-v4-flash-0731"
 	defaultOpenAIModel     = "gpt-4o-mini"
 	defaultXAIModel        = "grok-2"
+	// defaultHuggingFaceModel had the most live tool-capable providers on
+	// router.huggingface.co when it was added (10 of them, 2026-09-24), and
+	// is among the cheapest there. Hugging Face's list moves; setup checks
+	// the model before saving it.
+	defaultHuggingFaceModel = "openai/gpt-oss-120b"
 	// OpenRouter by default: one key reaches most models, and it is what
 	// `ariadne setup` offers first. defaultModelFor pairs it with
 	// defaultOpenRouterModel.
@@ -237,7 +242,8 @@ traces flags (must come before the search text):
 
 environment:
   ARIADNE_API_KEY   key for any endpoint; without it, the provider's own by host:
-                    OPENROUTER_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, XAI_API_KEY.
+                    OPENROUTER_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, XAI_API_KEY,
+                    HF_TOKEN (Hugging Face).
                     Other endpoints (Groq, Ollama, ...) need ARIADNE_API_KEY
   ARIADNE_HOME      where runs, workspace, MEMORY.md and config.env live
                     (default: your user config directory, e.g. %AppData%\ariadne)
@@ -247,7 +253,7 @@ ariadne source checkout, that checkout's .env, then config.env (written by
 ariadne setup). A released binary never uses a checkout's .env or runs/.
 
 setup flags:
-  -provider       openrouter (default), openai, gemini, xai, ollama, or other
+  -provider       openrouter (default), openai, gemini, xai, huggingface, ollama, or other
   -base-url       endpoint, for -provider other (or Ollama somewhere other than
                   http://localhost:11434/v1)
   -model          model to use by default
@@ -345,6 +351,9 @@ var providerKeys = []struct{ domain, env string }{
 	{"googleapis.com", "GEMINI_API_KEY"},
 	{"x.ai", "XAI_API_KEY"},
 	{"openai.com", "OPENAI_API_KEY"},
+	// HF_TOKEN, the name Hugging Face's own tools read, so a token already
+	// exported for them is found; it goes only to huggingface.co hosts.
+	{"huggingface.co", "HF_TOKEN"},
 }
 
 // providerKeyName returns the key variable for baseURL's host, or "" for a host

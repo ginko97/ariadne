@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/ginko97/ariadne/internal/llm"
 )
@@ -57,5 +58,17 @@ func TestAgentsCarryTheGrantPolicy(t *testing.T) {
 		if _, ok := a.GrantKey(llm.ToolCall{Name: name, Args: args}); ok {
 			t.Errorf("%s is grantable; each change must be its own decision", name)
 		}
+	}
+}
+
+// Every agent is told the date. Without it a model takes its training year as
+// the present and doubts current pages (docs/planning.md, 2026-09-24).
+func TestAgentsAreToldTheDate(t *testing.T) {
+	a := newAgentFor(agentOpts{Key: "k", Model: "m", BaseURL: "https://example.test/v1", RunID: "run_test", MaxSteps: 5})
+	if a.Today == nil {
+		t.Fatal("newAgentFor built an agent that does not know the date")
+	}
+	if d := time.Since(a.Today()); d < -time.Minute || d > time.Minute {
+		t.Errorf("Today() is %v away from now", d)
 	}
 }

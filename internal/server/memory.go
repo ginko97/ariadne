@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/ginko97/ariadne/internal/memory"
 )
 
 type memoryItem struct {
@@ -11,6 +13,10 @@ type memoryItem struct {
 	Text  string    `json:"text"`
 	RunID string    `json:"run_id"`
 	At    time.Time `json:"at"`
+}
+
+type memoryAddRequest struct {
+	Text string `json:"text"`
 }
 
 type memoryDeleteRequest struct {
@@ -46,6 +52,44 @@ func (s *Server) handleMemoryList(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(items); err != nil {
 		httpError(w, http.StatusInternalServerError, "failed to encode memory notes")
 	}
+}
+
+// handleMemoryAdd saves a fact the person typed, exactly as typed.
+//
+// No approval card: the card exists because the model proposes a note and
+// may reword it on the way (it once turned "I live on Earth" into a claim
+// that 2026 web pages were hypothetical). Here nobody else wrote the text.
+// The limits are the store's, so a note saved here is the same shape as one
+// the tool saves. Behind the CSRF token like the delete: a page that could
+// write to memory would be putting words into every later conversation.
+//
+// Saving a note that is already there changes nothing; Added says whether
+// this one was new.
+func (s *Server) handleMemoryAdd(w http.ResponseWriter, r *http.Request) {
+	if s.MemoryStore.Path == "" {
+		httpError(w, http.StatusNotFound, "memory store is not configured")
+		return
+	}
+	var req memoryAddRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "malformed request body")
+		return
+	}
+	before, err := s.MemoryStore.Load()
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "failed to load memory notes: "+err.Error())
+		return
+	}
+	if err := s.MemoryStore.Append(memory.Note{Text: req.Text, RunID: memory.ByOperator}); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	after, err := s.MemoryStore.Load()
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "failed to load memory notes: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "added": len(after) > len(before), "count": len(after)})
 }
 
 // handleMemoryDelete deletes a remembered note matching index and text.

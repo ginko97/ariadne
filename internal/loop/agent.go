@@ -134,6 +134,15 @@ type Agent struct {
 	// injected, which is the one that needs no cleverness.
 	Redact func(string) string
 
+	// Today, when set, puts today's date at the end of the system prompt of
+	// every request. Read per request and never stored on State: a
+	// conversation picked up tomorrow is told tomorrow's date, not the day it
+	// began. Without it a model takes the year its training ended as the
+	// present, and treats real, current pages as future or invented — one
+	// proposed remembering that 2026 web pages were "hypothetical" on
+	// 2026-09-24.
+	Today func() time.Time
+
 	BaseURL string
 	Tools   []llm.ToolDef
 	RunTool ToolRunner
@@ -321,7 +330,7 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		started := time.Now()
 		resp, err := a.Provider.Complete(ctx, llm.Request{
 			Model:    s.Model,
-			Messages: withSystem(s.System, s.Messages),
+			Messages: withSystem(a.systemFor(s), s.Messages),
 			Tools:    a.offeredTools(s),
 		})
 		latency := time.Since(started).Milliseconds()
@@ -805,6 +814,19 @@ func (a *Agent) offeredTools(s *State) []llm.ToolDef {
 		out = append(out, t)
 	}
 	return out
+}
+
+// systemFor is the system prompt for this request: the conversation's own,
+// and today's date when the agent knows it.
+func (a *Agent) systemFor(s *State) string {
+	if a.Today == nil {
+		return s.System
+	}
+	date := "Today's date is " + a.Today().Format("Monday 2 January 2006") + "."
+	if s.System == "" {
+		return date
+	}
+	return s.System + "\n\n" + date
 }
 
 // withSystem prepends the system prompt without storing it in the conversation.

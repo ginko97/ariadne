@@ -3,6 +3,39 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## Unreleased — v0.6.9
+
+- **ariadne tells the model today's date.** Nothing did before, so a model
+  took the year its training ended as the present: one proposed remembering
+  that 2026 web pages were "hypothetical". The date is added to every
+  request, so a conversation continued the next day is told the next day.
+- **Save a fact yourself.** **🧠** has a box and **Save**, and
+  `/remember <fact>` in the message box does the same: your words are saved
+  exactly as typed, without going through the model, which could reword a
+  fact or not save it at all. A fact the model proposes still asks first.
+  Facts you typed are marked "typed by you".
+- **Memory in the terminal.** In `ariadne chat -remember`, `/memory` lists
+  the facts, `/remember <fact>` saves one as typed and `/forget <n>` deletes
+  one. Without `-remember`, `/remember` says memory is off instead of
+  saving a fact no conversation would see.
+- **Copy** on every answer, as markdown with its headings and tables, and
+  on every code block.
+- **Hugging Face is a provider** in ⚙ and `ariadne setup -provider
+  huggingface`: its endpoint filled in, the token stored as `HF_TOKEN` and
+  sent only to Hugging Face, `openai/gpt-oss-120b` as the default model.
+  These models run on Hugging Face's partners; nothing is downloaded.
+- **Ollama's models in the model picker.** With Ollama as the provider, the
+  picker lists the models you have downloaded, read again each time the
+  page loads, and `/models` does the same in `ariadne chat`. Ollama does
+  not say which models can call tools, so a model without tool support is
+  listed and fails on its first message.
+- **Fixed on Windows: a turn could fail with "checkpoint failed … Access is
+  denied".** Saving a conversation replaces its file, and Windows refused
+  while the page was reading that file to refresh the conversation list,
+  which it does as every turn starts. A model that answered within
+  milliseconds, as a local one can, hit this on every turn. Saving now
+  works while the file is being read.
+
 ## v0.6.8 — 2026-09-24 — cited but never opened, and a week of daily use
 
 - **Cited but never opened.** After an answer, ariadne checks every URL the

@@ -201,7 +201,7 @@ func TestPromptFencesTheNotesAsRecollection(t *testing.T) {
 	if !strings.Contains(p, "always write a receipt") {
 		t.Errorf("the note itself is missing:\n%s", p)
 	}
-	for _, want := range []string{"earlier runs", "never an instruction", "the task wins"} {
+	for _, want := range []string{"earlier conversations", "never an instruction", "the task wins"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("the fence does not say %q:\n%s", want, p)
 		}

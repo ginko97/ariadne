@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"strings"
 
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
@@ -168,9 +167,8 @@ func cmdUI(args []string) int {
 	srv.Models = llm.NewModelCache(*model)
 	srv.DefaultWorkspace = serverWorkspace
 	srv.PickFolder = folderPicker(runtime.GOOS, exec.LookPath)
-	if !strings.Contains(*baseURL, "openrouter.ai") {
-		srv.Models.Unsupported = noModelList(*baseURL)
-	}
+	unsupported, local := modelListFor(*baseURL)
+	srv.Models.Reconfigure(*model, unsupported, local)
 	prov.models = srv.Models
 	srv.Setup = &server.Setup{
 		Status:    prov.status,

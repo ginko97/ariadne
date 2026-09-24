@@ -37,6 +37,8 @@ func defaultModelFor(baseURL string) string {
 		return defaultXAIModel
 	case host == "googleapis.com" || strings.HasSuffix(host, ".googleapis.com"):
 		return defaultModel
+	case host == "huggingface.co" || strings.HasSuffix(host, ".huggingface.co"):
+		return defaultHuggingFaceModel
 	default:
 		return defaultModel
 	}

@@ -176,7 +176,7 @@ func (s *Store) Save(st *State) error {
 		os.Remove(tmp)
 		return fmt.Errorf("loop: close checkpoint: %w", err)
 	}
-	if err := os.Rename(tmp, final); err != nil {
+	if err := replaceFile(tmp, final); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("loop: rename checkpoint: %w", err)
 	}
@@ -201,7 +201,7 @@ func (s *Store) LoadCheckpoint(runID string) (*Checkpoint, error) {
 		return nil, fmt.Errorf("loop: refusing to load run id %q", runID)
 	}
 
-	data, err := os.ReadFile(filepath.Join(s.Dir, runID, "checkpoint.json"))
+	data, err := readShared(filepath.Join(s.Dir, runID, "checkpoint.json"))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("%w: %s", ErrNoCheckpoint, runID)
 	}

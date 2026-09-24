@@ -25,7 +25,7 @@ var shellEnv = map[string]bool{}
 // settingNames are the variables a configuration can write.
 var settingNames = []string{
 	"ARIADNE_API_KEY", "ARIADNE_BASE_URL", "ARIADNE_MODEL",
-	"OPENROUTER_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY",
+	"OPENROUTER_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", "HF_TOKEN",
 }
 
 // snapshotShellEnv records which settings came from the shell. Called first
@@ -90,6 +90,7 @@ func savedKey(endpoint string) string {
 func setupProviders() []server.SetupProvider {
 	named := []struct{ id, name string }{
 		{"openrouter", "OpenRouter"}, {"openai", "OpenAI"}, {"gemini", "Google Gemini"}, {"xai", "xAI"},
+		{"huggingface", "Hugging Face"},
 	}
 	var out []server.SetupProvider
 	for _, n := range named {
@@ -103,6 +104,20 @@ func setupProviders() []server.SetupProvider {
 		server.SetupProvider{ID: "ollama", Name: "Ollama (on this computer)", BaseURL: ollamaURL},
 		server.SetupProvider{ID: "other", Name: "Other (OpenAI-compatible)", NeedsKey: true, KeyName: "ARIADNE_API_KEY"},
 	)
+}
+
+// modelListFor says where the model picker's list comes from for endpoint:
+// OpenRouter's catalogue (both results empty), Ollama's own list of pulled
+// models (local set), or nowhere, with the reason (unsupported set).
+func modelListFor(endpoint string) (unsupported string, local func(context.Context) ([]string, error)) {
+	switch {
+	case strings.Contains(endpoint, "openrouter.ai"):
+		return "", nil
+	case providerID(endpoint) == "ollama":
+		return "", func(ctx context.Context) ([]string, error) { return ollamaModels(ctx, endpoint) }
+	default:
+		return noModelList(endpoint), nil
+	}
 }
 
 // providerID names the setup choice an endpoint belongs to.
@@ -216,15 +231,12 @@ func (p *uiProvider) configure(ctx context.Context, req server.SetupRequest) (se
 	// exported in the shell still wins, and this process should do what a
 	// restart would.
 	effective, _ := apiKey(endpoint)
-	unsupported := ""
-	if !strings.Contains(endpoint, "openrouter.ai") {
-		unsupported = noModelList(endpoint)
-	}
+	unsupported, local := modelListFor(endpoint)
 	p.mu.Lock()
 	p.baseURL, p.key, p.model, p.notes = endpoint, effective, model, notes
 	p.mu.Unlock()
 	if p.models != nil {
-		p.models.Reconfigure(model, unsupported)
+		p.models.Reconfigure(model, unsupported, local)
 	}
 	return p.status(), nil
 }

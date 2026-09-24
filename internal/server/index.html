@@ -20,6 +20,9 @@
   #memoryPanel h2 { margin:0; font-size:1.05em; }
   #memoryPanel .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
   #memoryPanel button { font:inherit; cursor:pointer; }
+  #memoryAdd input { flex:1; min-width:14rem; font:inherit; padding:.35rem .5rem; }
+  #memoryAddCount { font-size:.8em; }
+  #memoryAddCount.over { color:var(--err); }
   .note-card { border:1px solid var(--edge); border-radius:.35rem; padding:.5rem .7rem;
                display:flex; justify-content:space-between; align-items:flex-start; gap:.6rem; }
   .note-text { flex:1; white-space:pre-wrap; overflow-wrap:anywhere; }
@@ -135,6 +138,12 @@
              background:#8882; padding:.05rem .3rem; border-radius:.25rem; }
   .md pre { background:#8881; padding:.6rem .75rem; border-radius:.4rem; overflow-x:auto; }
   .md pre code { background:none; padding:0; white-space:pre; }
+  .answer, .codewrap { position:relative; }
+  .copy { position:absolute; top:.25rem; right:.25rem; font:inherit; font-size:.75em; cursor:pointer;
+          padding:.1rem .45rem; border:1px solid var(--edge); border-radius:.3rem;
+          background:Canvas; color:var(--dim); opacity:.35; }
+  .answer:hover > .copy, .codewrap:hover > .copy, .copy:focus-visible, .copy.done { opacity:1; }
+  .answer.md { padding-right:3.6rem; }
   .md blockquote { border-left:3px solid var(--edge); padding-left:.7rem; color:var(--dim); }
   .md .tablewrap { overflow-x:auto; }
   .md table { border-collapse:collapse; }
@@ -187,10 +196,16 @@
       <h2>Remembered facts</h2>
       <span id="memoryCount" class="dim"></span>
     </div>
-    <div class="dim">Facts Ariadne remembered and you approved across conversations. Each fact was approved before it was saved.</div>
+    <div class="dim">Facts every new conversation starts with: ones you typed here, and ones Ariadne asked to remember and you approved. They are sent to the model, so keep passwords and private details out.</div>
+    <form id="memoryAdd" class="row" autocomplete="off">
+      <input id="memoryAddText" type="text" maxlength="400" spellcheck="true" placeholder="Type a fact to remember, e.g. I work at BRI; slides in English">
+      <button type="submit" id="memoryAddSave" class="primary">Save</button>
+      <span id="memoryAddCount" class="dim">0 / 400</span>
+    </form>
     <div id="memoryList" style="display:flex; flex-direction:column; gap:.5rem; margin-top:.3rem; max-height:22rem; overflow-y:auto;"></div>
     <div class="row" style="margin-top:.4rem;">
       <button type="button" id="closeMemory">Close</button>
+      <span id="memoryMsg" class="dim" role="status"></span>
       <span id="memoryErr" class="is_error"></span>
     </div>
   </div>
@@ -968,7 +983,10 @@ function mdBlocks(lines, into) {
       const pre = mdEl('pre'), c = mdEl('code');
       c.textContent = code.join('\n');
       pre.append(c);
-      into.append(pre);
+      const wrap = mdEl('div');
+      wrap.className = 'codewrap';
+      wrap.append(pre, copyButton(() => c.textContent, 'Copy this code'));
+      into.append(wrap);
       continue;
     }
 
@@ -1102,9 +1120,42 @@ function mdLink(label, url, into) {
 }
 
 // showAnswer puts a finished answer on the page, formatted.
+// copyButton copies what text() returns, as written: an answer's markdown
+// with its headings and tables, not the rendered text a selection would give.
+// Nothing leaves the page. The clipboard API needs a secure context, which
+// 127.0.0.1 is; the fallback is for a browser that withholds it anyway.
+function copyButton(text, title) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'copy';
+  b.textContent = 'Copy';
+  b.title = title;
+  b.onclick = async () => {
+    const t = text();
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(t);
+      ok = true;
+    } catch (_) {
+      const area = Object.assign(document.createElement('textarea'), { value: t });
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.append(area);
+      area.select();
+      try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+      area.remove();
+    }
+    b.textContent = ok ? 'Copied' : 'Copy failed';
+    b.classList.add('done');
+    setTimeout(() => { b.textContent = 'Copy'; b.classList.remove('done'); }, 1500);
+  };
+  return b;
+}
+
 function showAnswer(e, text, model, unopened) {
   e.classList.add('md');
   e.replaceChildren(renderMarkdown(text || ''));
+  e.append(copyButton(() => text || '', 'Copy this answer as markdown'));
   // URLs this turn cited, in the answer or in a file it wrote, that no fetch
   // in this conversation opened. Text, not links: a click would open a page
   // the model may have invented, and the point is that nobody has read it.
@@ -1144,6 +1195,7 @@ const HELP = `Commands (answered by this page, never sent to the model):
   /help               this list
   /new                start a new conversation
   /memory             show or hide remembered facts (MEMORY.md)
+  /remember <fact>    save a fact exactly as typed, without asking the model
   /settings           provider, key and model
   /model [id]         show the model for the next message, or switch to id
   /folder             the folder this conversation reads and writes
@@ -1180,6 +1232,10 @@ function command(text) {
       newConversation(); break;
     case 'memory':
       toggleMemory(); break;
+    case 'remember':
+      if (!arg) { openMemory(); $('memoryAddText').focus(); break; }
+      saveMemory(arg).then(say, err => say('Not saved: ' + err.message));
+      break;
     case 'settings':
       openSetup(); break;
     case 'model':
@@ -1518,7 +1574,7 @@ function renderMemory() {
     const empty = document.createElement('div');
     empty.className = 'dim';
     empty.style.padding = '.4rem 0';
-    empty.textContent = 'No remembered facts yet. When Ariadne asks to remember something and you approve it, it will appear here.';
+    empty.textContent = 'No remembered facts yet. Type one above and Save, or approve one when Ariadne asks to remember something.';
     list.append(empty);
     return;
   }
@@ -1533,7 +1589,8 @@ function renderMemory() {
     const meta = document.createElement('div');
     meta.className = 'note-meta';
     const stamp = item.at ? new Date(item.at).toLocaleString() : '';
-    meta.textContent = (item.run_id ? `from ${item.run_id}` : '') + (stamp ? ` · ${stamp}` : '');
+    const who = item.run_id === 'operator' ? 'typed by you' : (item.run_id ? `from ${item.run_id}` : '');
+    meta.textContent = who + (stamp ? ` · ${stamp}` : '');
     body.append(meta);
 
     const delBtn = document.createElement('button');
@@ -1577,6 +1634,7 @@ function openMemory() {
 function closeMemory() {
   $('memoryPanel').hidden = true;
   $('memoryErr').textContent = '';
+  $('memoryMsg').textContent = '';
   $('input').focus();
 }
 
@@ -1588,6 +1646,42 @@ function toggleMemory() {
 
 $('memoryBtn').onclick = toggleMemory;
 $('closeMemory').onclick = closeMemory;
+
+// saveMemory keeps the person's own words, without the model: the card
+// exists because the model proposes a fact and can reword it on the way.
+// Returns what to tell the person; throws with the server's reason.
+async function saveMemory(text) {
+  const resp = await api('/api/memory', { method: 'POST', body: JSON.stringify({ text }) });
+  const d = await resp.json().catch(() => ({ error: 'refused' }));
+  if (!resp.ok) throw new Error(d.error || 'could not save');
+  if (!$('memoryPanel').hidden) await loadMemory();
+  return d.added ? `Saved to memory (${d.count} / 50). New conversations start with it.` : 'Already in memory; nothing changed.';
+}
+
+function countMemoryText() {
+  const n = [...$('memoryAddText').value.trim()].length;
+  $('memoryAddCount').textContent = n + ' / 400';
+  $('memoryAddCount').classList.toggle('over', n >= 400);
+}
+$('memoryAddText').addEventListener('input', countMemoryText);
+$('memoryAdd').onsubmit = async e => {
+  e.preventDefault();
+  const text = $('memoryAddText').value.trim();
+  $('memoryMsg').textContent = '';
+  if (!text) { $('memoryErr').textContent = 'type a fact first'; return; }
+  $('memoryAddSave').disabled = true;
+  $('memoryErr').textContent = '';
+  try {
+    $('memoryMsg').textContent = await saveMemory(text);
+    $('memoryAddText').value = '';
+    countMemoryText();
+  } catch (err) {
+    $('memoryErr').textContent = err.message;
+  } finally {
+    $('memoryAddSave').disabled = false;
+    $('memoryAddText').focus();
+  }
+};
 
 // ---------------------------------------------------------------- setup
 //
