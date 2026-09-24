@@ -238,3 +238,73 @@ func TestWorkspaceRefusesARelativeFolderThatExists(t *testing.T) {
 		t.Errorf("an existing relative folder: %d %v", resp.StatusCode, out)
 	}
 }
+
+// The settings panel changes the default folder: checked like Folder…, saved
+// through SaveDefaultFolder, used by the next new conversation, and never by
+// one that already has a folder.
+func TestSetupFolderChangesTheDefaultForNewConversations(t *testing.T) {
+	s, ts := newTestServer(t, endResponse("ok"), endResponse("ok again"))
+	oldFolder, newFolder := t.TempDir(), t.TempDir()
+	s.DefaultWorkspace = oldFolder
+	var saved []string
+	s.SaveDefaultFolder = func(p string) (string, []string, error) {
+		saved = append(saved, p)
+		if p == "" {
+			return oldFolder, nil, nil
+		}
+		return p, nil, nil
+	}
+
+	postFolder := func(path string, token bool) int {
+		t.Helper()
+		body, _ := json.Marshal(workspaceRequest{Path: path})
+		req, _ := http.NewRequest("POST", ts.URL+"/api/setup/folder", strings.NewReader(string(body)))
+		if token {
+			req.Header.Set("X-Ariadne-CSRF", s.CSRFToken)
+		}
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// A conversation that started before the change.
+	first := post(t, s, ts, `{"message":"hi"}`, nil)
+	firstID, _ := events(t, bodyOf(t, first))[0].Data["run_id"].(string)
+
+	if code := postFolder(newFolder, false); code != http.StatusForbidden {
+		t.Errorf("without the token: %d, want 403", code)
+	}
+	if code := postFolder(filepath.Join(newFolder, "missing"), true); code != http.StatusBadRequest || len(saved) != 0 {
+		t.Errorf("a missing folder: %d, saved %v; want 400 and nothing saved", code, saved)
+	}
+	if code := postFolder(newFolder, true); code != http.StatusOK || s.DefaultFolder() != newFolder {
+		t.Fatalf("save: %d, default %q", code, s.DefaultFolder())
+	}
+
+	second := post(t, s, ts, `{"message":"hi again"}`, nil)
+	secondID, _ := events(t, bodyOf(t, second))[0].Data["run_id"].(string)
+	for id, want := range map[string]string{firstID: oldFolder, secondID: newFolder} {
+		st, err := s.Store.Load(id)
+		if err != nil || st.Workspace != want {
+			t.Errorf("%s works in %q (err %v), want %q", id, st.Workspace, err, want)
+		}
+	}
+
+	if code := postFolder("", true); code != http.StatusOK || s.DefaultFolder() != oldFolder {
+		t.Errorf("reset: %d, default %q", code, s.DefaultFolder())
+	}
+}
+
+// The start event names the conversation's folder, so the page shows the
+// folder it really uses after the default is changed in settings.
+func TestStartEventNamesTheConversationsFolder(t *testing.T) {
+	s, ts := newTestServer(t, endResponse("ok"))
+	s.DefaultWorkspace = t.TempDir()
+	evs := events(t, bodyOf(t, post(t, s, ts, `{"message":"hi"}`, nil)))
+	if evs[0].Name != "start" || evs[0].Data["workspace"] != s.DefaultWorkspace {
+		t.Fatalf("start event = %v, want the folder %q", evs[0], s.DefaultWorkspace)
+	}
+}

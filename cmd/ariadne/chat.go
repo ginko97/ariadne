@@ -172,12 +172,12 @@ func cmdChat(args []string) int {
 	budgetVal := *budget
 	if resuming {
 		budgetVal = resolveBudget(*budget, state)
-		// Memory turned on for a run that started without it — same
-		// reconciliation cmdResume does, and for the same reason: the system
-		// prompt in the checkpoint wins on resume, so the notes have to be
-		// added to it here or the tool would be offered with nothing behind it.
-		if mem && !state.Memory {
-			state.System += memoryPrompt(true)
+		// Notes reach the model per turn through the agent (Agent.Memory), not
+		// through the checkpoint's system prompt: take out any copy an earlier
+		// version stored there, and record that this conversation uses memory
+		// so the next resume keeps it on.
+		dropStoredMemory(state)
+		if mem {
 			state.Memory = true
 		}
 	}
@@ -348,6 +348,7 @@ const chatCommands = `commands:
   /model          show the current model
   /memory         list remembered facts, numbered
   /remember <fact> save a fact exactly as typed (needs -remember)
+  /edit <n> <fact> rewrite fact n, keeping its place
   /forget <n>     delete fact n
   /help           this list
   //text          send a line that really does start with a slash

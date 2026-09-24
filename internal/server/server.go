@@ -83,6 +83,12 @@ type Server struct {
 	// ask first, as the agent factory builds it. See handleAbout.
 	Tools []ToolInfo
 
+	// SaveDefaultFolder stores a new default folder for new conversations
+	// (config.env, in cmd/ariadne) and returns the one now in effect — the
+	// home directory's workspace when path is "" — with any notes to show.
+	// Nil when this process cannot save settings.
+	SaveDefaultFolder func(path string) (string, []string, error)
+
 	// DefaultWorkspace is the folder a new conversation gets when the page
 	// sends none — the server's -workspace, or the home directory's
 	// workspace. Only a default: a conversation's recorded folder always
@@ -131,6 +137,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/memory", s.handleMemoryList)
 	mux.HandleFunc("POST /api/memory", s.handleMemoryAdd)
+	mux.HandleFunc("PUT /api/memory", s.handleMemoryEdit)
 	mux.HandleFunc("DELETE /api/memory", s.handleMemoryDelete)
 	mux.HandleFunc("GET /api/runs/{id}", s.handleTranscript)
 	mux.HandleFunc("DELETE /api/runs/{id}", s.handleDelete)
@@ -144,6 +151,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/setup", s.handleSetupStatus)
 	mux.HandleFunc("POST /api/setup", s.handleSetup)
 	mux.HandleFunc("POST /api/setup/ollama", s.handleSetupOllama)
+	mux.HandleFunc("POST /api/setup/folder", s.handleSetupFolder)
 	mux.HandleFunc("GET /", s.handleIndex)
 	return guard(s.CSRFToken, mux)
 }

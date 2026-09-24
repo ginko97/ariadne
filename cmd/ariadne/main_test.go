@@ -269,28 +269,48 @@ func TestCheckNamesWithoutMemoryRejectsRemember(t *testing.T) {
 	}
 }
 
-func TestResumeReconcilesMemoryPrompt(t *testing.T) {
-	state := loop.NewState("run_test", "task")
-	state.System = systemPrompt
-
+// An agent that uses memory reads the notes when asked, so a note saved after
+// the agent was built is in its next turn; one that does not has no hook.
+func TestAgentsReadMemoryWhenAskedNotWhenBuilt(t *testing.T) {
 	origMemFile := memoryFile
 	t.Cleanup(func() { memoryFile = origMemFile })
+	memoryFile = filepath.Join(t.TempDir(), "MEMORY.md")
 
-	tmpMem := filepath.Join(t.TempDir(), "MEMORY.md")
-	memoryFile = tmpMem
-	if err := (memory.Store{Path: tmpMem}).Append(memory.Note{Text: "remember this fact", RunID: "run_0"}); err != nil {
+	opts := agentOpts{Key: "k", Model: "m", BaseURL: "https://example.test/v1", RunID: "run_test", MaxSteps: 5, Memory: true}
+	a := newAgentFor(opts)
+	if a.Memory == nil {
+		t.Fatal("an agent with memory on has no Memory hook")
+	}
+	if strings.Contains(a.System, "<memory>") {
+		t.Errorf("notes were baked into the system prompt:\n%s", a.System)
+	}
+	if got := a.Memory(); got != "" {
+		t.Errorf("no notes yet, Memory() = %q", got)
+	}
+	if err := (memory.Store{Path: memoryFile}).Append(memory.Note{Text: "I'm a Programmer", RunID: memory.ByOperator}); err != nil {
 		t.Fatal(err)
 	}
-
-	if !strings.Contains(state.System, "<memory>") {
-		if prompt := memoryPrompt(true); prompt != "" {
-			state.System += prompt
-		}
+	if got := a.Memory(); !strings.Contains(got, "I'm a Programmer") || !strings.HasPrefix(got, "<memory>") {
+		t.Errorf("a note saved after the agent was built is missing: %q", got)
 	}
 
-	if !strings.Contains(state.System, "remember this fact") {
-		t.Errorf("state.System did not receive memory prompt:\n%s", state.System)
+	opts.Memory = false
+	if newAgentFor(opts).Memory != nil {
+		t.Error("an agent with memory off still reads notes")
 	}
+}
+
+// A conversation saved before v0.6.10 carries its notes in the system prompt.
+// Resuming it takes that copy out, so only the current notes are given — a
+// note deleted since is not still being sent.
+func TestResumeDropsTheStoredCopyOfTheNotes(t *testing.T) {
+	st := loop.NewState("run_old", "task")
+	st.System = systemPrompt + "\n\n<memory>\n- a note deleted since\n</memory>\n\nThese notes were written by earlier runs."
+	dropStoredMemory(st)
+	if st.System != systemPrompt {
+		t.Errorf("system prompt after resume:\n%q\nwant the plain prompt", st.System)
+	}
+	dropStoredMemory(nil) // a chat before its first message has no state
 }
 
 func TestResumeInheritsMemory(t *testing.T) {

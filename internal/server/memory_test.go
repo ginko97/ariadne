@@ -202,3 +202,42 @@ func TestMemoryAddSavesTheOperatorsWords(t *testing.T) {
 		t.Errorf("blank: status %d, want 400", code)
 	}
 }
+
+// The page edits a fact in place, behind the token; an edit of a fact that
+// changed since the page drew it is refused and changes nothing.
+func TestMemoryEditRewritesInPlace(t *testing.T) {
+	s, ts := newTestServer(t)
+	s.MemoryStore = memory.Store{Path: filepath.Join(t.TempDir(), "MEMORY.md")}
+	for _, text := range []string{"I'm a Programmer", "Slides in English"} {
+		if err := s.MemoryStore.Append(memory.Note{Text: text, RunID: "run_x"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	edit := func(body memoryEditRequest, token bool) int {
+		t.Helper()
+		b, _ := json.Marshal(body)
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/memory", strings.NewReader(string(b)))
+		if token {
+			req.Header.Set("X-Ariadne-CSRF", s.CSRFToken)
+		}
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := edit(memoryEditRequest{Index: 0, Text: "I'm a Programmer", New: "I'm a Go programmer"}, false); code != http.StatusForbidden {
+		t.Errorf("without the token: %d, want 403", code)
+	}
+	if code := edit(memoryEditRequest{Index: 0, Text: "Slides in English", New: "x"}, true); code != http.StatusBadRequest {
+		t.Errorf("stale text: %d, want 400", code)
+	}
+	if code := edit(memoryEditRequest{Index: 0, Text: "I'm a Programmer", New: "I'm a Go programmer"}, true); code != http.StatusOK {
+		t.Fatalf("edit: %d", code)
+	}
+	notes, _ := s.MemoryStore.Load()
+	if len(notes) != 2 || notes[0].Text != "I'm a Go programmer" || notes[0].RunID != memory.ByOperator || notes[1].Text != "Slides in English" {
+		t.Errorf("after the edit: %+v", notes)
+	}
+}

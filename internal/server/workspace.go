@@ -47,8 +47,10 @@ type workspaceRequest struct {
 func (s *Server) handleWorkspace(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"default":  s.DefaultWorkspace,
+		"default":  s.DefaultFolder(),
 		"can_pick": s.PickFolder != nil,
+		// The settings panel offers to change it only where it can be saved.
+		"can_save": s.SaveDefaultFolder != nil,
 	})
 }
 
@@ -106,4 +108,46 @@ func (s *Server) handleWorkspacePick(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"path": p})
+}
+
+// DefaultFolder is the folder a new conversation gets now. Read under the
+// lock, because the settings panel can change it while requests run.
+func (s *Server) DefaultFolder() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.DefaultWorkspace
+}
+
+// handleSetupFolder changes the default folder for new conversations and
+// saves it, so plain `ariadne ui`, a double-click and the terminal all start
+// there. Checked like a folder typed into Folder…, and it grants nothing a
+// conversation could not already get from there: an existing conversation
+// keeps its own folder. POST and behind the token like the rest of setup.
+func (s *Server) handleSetupFolder(w http.ResponseWriter, r *http.Request) {
+	if s.SaveDefaultFolder == nil {
+		httpError(w, http.StatusNotImplemented, "this ariadne cannot save settings")
+		return
+	}
+	var req workspaceRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "malformed request body")
+		return
+	}
+	p := strings.TrimSpace(req.Path)
+	if p != "" {
+		var err error
+		if p, err = checkWorkspace(p); err != nil {
+			httpError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	now, notes, err := s.SaveDefaultFolder(p)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "could not save the folder: "+err.Error())
+		return
+	}
+	s.mu.Lock()
+	s.DefaultWorkspace = now
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{"default": now, "notes": notes})
 }

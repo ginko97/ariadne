@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ginko97/ariadne/internal/llm"
+	"github.com/ginko97/ariadne/internal/trace"
 )
 
 func systemOf(t *testing.T, req llm.Request) string {
@@ -62,5 +63,57 @@ func TestNoDateWithoutToday(t *testing.T) {
 	}
 	if got := systemOf(t, fake.Calls[0]); got != "You are Ariadne." {
 		t.Errorf("system prompt = %q, want it unchanged", got)
+	}
+}
+
+// Notes are read once per turn: a note saved between two messages is in the
+// second one's request, every step of one turn sees the same notes, nothing
+// is stored on the conversation, and the trace records what each turn got.
+func TestMemoryIsReadOncePerTurn(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "calc", `{}`, 10, 10),
+		endResponse("first", 10, 5),
+		endResponse("second", 10, 5),
+	}}
+	notes := "<memory>\n- one\n</memory>"
+	reads := 0
+	var events []trace.Event
+	a := &Agent{
+		Provider: fake, Model: "m", System: "You are Ariadne.", MaxSteps: 5,
+		RunTool: func(context.Context, llm.ToolCall) (llm.ToolResult, error) { return llm.ToolResult{Content: "2"}, nil },
+		Memory:  func() string { reads++; return notes },
+		Trace:   func(e trace.Event) { events = append(events, e) },
+	}
+	s := NewState("r", "q")
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	if reads != 1 {
+		t.Errorf("a two-step turn read memory %d times, want 1", reads)
+	}
+	for i := 0; i < 2; i++ {
+		if got := systemOf(t, fake.Calls[i]); got != "You are Ariadne.\n\n<memory>\n- one\n</memory>" {
+			t.Errorf("step %d system prompt = %q", i+1, got)
+		}
+	}
+
+	notes = "<memory>\n- one\n- two\n</memory>" // saved between messages
+	if _, err := a.ChatTurn(context.Background(), s, "and now?"); err != nil {
+		t.Fatal(err)
+	}
+	if got := systemOf(t, fake.Calls[2]); !strings.Contains(got, "- two") {
+		t.Errorf("a note saved between messages is missing from the next turn: %q", got)
+	}
+	if s.System != "You are Ariadne." {
+		t.Errorf("notes were stored on the conversation: %q", s.System)
+	}
+	var recorded []string
+	for _, e := range events {
+		if e.Kind == trace.KindMemory {
+			recorded = append(recorded, e.Content)
+		}
+	}
+	if len(recorded) != 2 || !strings.Contains(recorded[1], "- two") {
+		t.Errorf("memory trace events = %q, want one per turn with that turn's notes", recorded)
 	}
 }

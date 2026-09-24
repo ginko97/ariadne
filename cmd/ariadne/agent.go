@@ -231,7 +231,7 @@ func newAgentFor(o agentOpts) *loop.Agent {
 		Trace:    o.Trace.Emit,
 		Provider: provider,
 		Model:    o.Model,
-		System:   systemPrompt + memoryPrompt(o.Memory),
+		System:   systemPrompt,
 		BaseURL:  o.BaseURL,
 		Tools:    reg.Defs(),
 		Allow:    allow,
@@ -244,6 +244,7 @@ func newAgentFor(o agentOpts) *loop.Agent {
 		GrantKey: webFetchGrantKey,
 		Redact:   redactSecrets(os.Getenv),
 		Today:    time.Now,
+		Memory:   memoryFor(o.Memory),
 
 		RunTool:       reg.Call,
 		Checkpoint:    o.Store.Save,
@@ -443,4 +444,13 @@ func printDelta(w io.Writer) func(llm.Chunk) {
 			clear(announced)
 		}
 	}
+}
+
+// memoryFor is the agent's Memory hook: the notes when this agent uses memory,
+// nil when it does not.
+func memoryFor(on bool) func() string {
+	if !on {
+		return nil
+	}
+	return memoryNotes
 }

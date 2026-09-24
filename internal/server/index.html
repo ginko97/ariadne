@@ -20,7 +20,13 @@
   #memoryPanel h2 { margin:0; font-size:1.05em; }
   #memoryPanel .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
   #memoryPanel button { font:inherit; cursor:pointer; }
-  #memoryAdd input { flex:1; min-width:14rem; font:inherit; padding:.35rem .5rem; }
+  /* The box has a line of its own, Save and the counter under it: side by
+     side, a narrow window squeezed it to a few words a line, and a
+     300-character fact scrolled. About ten lines before it scrolls. */
+  #memoryAdd textarea, .note-edit { flex:1 1 100%; min-width:14rem; font:inherit; padding:.35rem .5rem;
+                                   resize:none; max-height:14rem; overflow-y:auto; }
+  .note-edit { width:100%; margin-top:.3rem; }
+  .note-buttons { display:flex; flex-direction:column; gap:.3rem; }
   #memoryAddCount { font-size:.8em; }
   #memoryAddCount.over { color:var(--err); }
   .note-card { border:1px solid var(--edge); border-radius:.35rem; padding:.5rem .7rem;
@@ -175,7 +181,7 @@
     <span id="folder" class="dim" title="The folder this conversation can read and write"></span>
     <span id="tools" class="dim"></span>
     <button type="button" id="folderBtn" title="Choose the folder for this new conversation">Folder…</button>
-    <button type="button" id="briefBtn" title="Start a conversation from a markdown brief in the workspace">Brief…</button>
+    <button type="button" id="briefBtn" title="Run a task file (.md) from this folder, in a new conversation">Tasks…</button>
   </div>
   <div id="folderPanel" hidden>
     <input id="folderInput" type="text" spellcheck="false" placeholder="Full path of a folder">
@@ -185,15 +191,15 @@
     <span id="folderErr" class="is_error"></span>
   </div>
   <div id="briefPanel" hidden>
-    <input id="briefInput" type="text" spellcheck="false" placeholder="Path to brief.md (in the folder)">
+    <input id="briefInput" type="text" spellcheck="false" placeholder="Path to a task file (.md) in the folder">
     <button type="button" id="useBrief">Show</button>
     <button type="button" id="cancelBrief">Cancel</button>
     <span id="briefErr" class="is_error"></span>
     <div id="briefList" hidden></div>
     <div id="briefPreview" hidden>
-      <div class="dim">This brief becomes your own instruction to the model. Read it before you start; only use files you wrote.</div>
+      <div class="dim">This task becomes your own instruction to the model. Read it before you run it; only use task files you wrote or have read.</div>
       <div id="briefText" class="brief md"></div>
-      <button type="button" id="startBrief" class="primary">Start this brief</button>
+      <button type="button" id="startBrief" class="primary">Run this task</button>
     </div>
   </div>
   <div id="memoryPanel" hidden>
@@ -203,7 +209,7 @@
     </div>
     <div class="dim">Facts every new conversation starts with: ones you typed here, and ones Ariadne asked to remember and you approved. They are sent to the model, so keep passwords and private details out.</div>
     <form id="memoryAdd" class="row" autocomplete="off">
-      <input id="memoryAddText" type="text" maxlength="400" spellcheck="true" placeholder="Type a fact to remember, e.g. I work at BRI; slides in English">
+      <textarea id="memoryAddText" rows="1" maxlength="400" spellcheck="true" placeholder="Type a fact to remember, e.g. I work at BRI; slides in English"></textarea>
       <button type="submit" id="memoryAddSave" class="primary">Save</button>
       <span id="memoryAddCount" class="dim">0 / 400</span>
     </form>
@@ -232,6 +238,19 @@
     </div>
     <div class="dim">The key is checked with one small request to that provider, saved in
       config.env on this computer, and never shown again, here or anywhere else.</div>
+    <div id="setupFolderBox" hidden>
+      <h2>Default folder for new conversations</h2>
+      <div class="row">
+        <input id="setupFolder" type="text" spellcheck="false" placeholder="Full path of a folder" style="flex:1; min-width:14rem;">
+        <button type="button" id="setupFolderBrowse" hidden>Browse…</button>
+        <button type="button" id="setupFolderSave">Save folder</button>
+        <button type="button" id="setupFolderReset" title="Go back to the workspace folder in ariadne's own folder">Reset</button>
+      </div>
+      <div class="dim">Every new conversation starts here, after a restart too. Folder… still picks
+        another for one conversation, and a conversation that has started keeps its own.</div>
+      <div id="setupFolderMsg" class="dim" role="status"></div>
+      <div id="setupFolderErr" class="is_error"></div>
+    </div>
     <div id="about" class="dim"></div>
   </form>
   <div id="warn" hidden></div>
@@ -254,6 +273,7 @@ let runID = null, busy = false;
 // conversation's folder is fixed when it starts, so the button to change it
 // only exists before the first message.
 let newWorkspace = null, defaultWorkspace = '', convWorkspace = '';
+let canPickFolder = false, canSaveFolder = false;
 const pendingApprovals = new Map();
 // The request of the turn that is running, so Stop can abort it. Aborting is
 // the whole mechanism: the server runs the turn on the request's context, and
@@ -849,6 +869,7 @@ async function send(text, opts = {}) {
 
         if (name === 'start') {
           runID = d.run_id;
+          if (d.workspace) convWorkspace = d.workspace;
           showFolder();
           loadRuns();
         } else if (name === 'brief') {
@@ -926,7 +947,7 @@ function renderBrief(d) {
   el.className = 'e brief';
   const h = document.createElement('div');
   h.className = 'brief-header dim';
-  h.textContent = '📋 Task brief (' + d.path + '):';
+  h.textContent = '📋 Task (' + d.path + '):';
   const body = document.createElement('div');
   body.className = 'brief-body md';
   body.append(renderMarkdown(d.content));
@@ -1204,7 +1225,8 @@ const HELP = `Commands (answered by this page, never sent to the model):
   /settings           provider, key and model
   /model [id]         show the model for the next message, or switch to id
   /folder             the folder this conversation reads and writes
-  /brief [path.md]    start a conversation from a markdown brief in the folder
+  /task [path.md]     run a task file from the folder, in a new conversation
+                      (/brief still works)
   /theme [system|light|dark]
   /stop               stop the turn that is running
   //text              send a message that starts with a slash
@@ -1252,10 +1274,9 @@ function command(text) {
         '. A conversation keeps its folder; /new, then /folder, to choose another.');
       else $('folderBtn').onclick();
       break;
-    case 'brief':
-      if (runID) say('Briefs are only used to start new conversations. /new, then /brief, to start one.');
-      else if (arg) { openBriefPanel(); $('briefInput').value = arg; showBrief(arg); }
-      else $('briefBtn').onclick();
+    case 'task': case 'brief':
+      if (arg) { openBriefPanel(); $('briefInput').value = arg; showBrief(arg); }
+      else if ($('briefPanel').hidden) $('briefBtn').onclick();
       break;
     case 'theme': {
       const pick = { system: 'auto', auto: 'auto', light: 'light', dark: 'dark' }[arg.toLowerCase()];
@@ -1277,11 +1298,13 @@ $('input').addEventListener('keydown', e => {
 // The box grows with what is in it, up to the CSS max-height, then scrolls. At
 // rows="1" a pasted multi-line instruction showed only its first line, and
 // the rest was sent unread.
-function fitInput() {
-  const el = $('input');
+// fitArea sizes a text box to what is in it, up to its CSS max-height, where
+// it starts to scroll: a long message or fact shows whole instead of one line.
+function fitArea(el) {
   el.style.height = 'auto';
   el.style.height = el.scrollHeight + 2 + 'px';
 }
+function fitInput() { fitArea($('input')); }
 $('input').addEventListener('input', fitInput);
 $('new').onclick = newConversation;
 $('stop').onclick = () => { if (turn) turn.abort(); };
@@ -1293,7 +1316,6 @@ function showFolder() {
   $('folder').textContent = f ? 'Folder: ' + f : '';
   $('folder').title = f ? f + ' — the folder this conversation can read and write' : '';
   $('folderBtn').hidden = !!runID;
-  $('briefBtn').hidden = !!runID;
 }
 
 function closeFolderPanel() {
@@ -1362,6 +1384,8 @@ async function loadWorkspace() {
   try {
     const d = await (await api('/api/workspace')).json();
     defaultWorkspace = d.default || '';
+    canPickFolder = !!d.can_pick;
+    canSaveFolder = !!d.can_save;
     $('browse').hidden = !d.can_pick;
     showFolder();
   } catch (e) { warn('Could not read the default folder: ' + e.message); }
@@ -1399,6 +1423,48 @@ $('folderInput').addEventListener('keydown', e => {
 
 // The dialog opens on this computer, from the ariadne process: a browser never
 // tells a page the real path of a folder.
+// The default folder is saved on its own, not with the provider: changing
+// where conversations start must not need a key typed again, and a provider
+// check that fails must not lose the folder.
+async function saveDefaultFolder(path) {
+  $('setupFolderMsg').textContent = '';
+  $('setupFolderErr').textContent = '';
+  try {
+    const resp = await api('/api/setup/folder', { method: 'POST', body: JSON.stringify({ path }) });
+    const d = await resp.json().catch(() => ({ error: 'refused' }));
+    if (!resp.ok) { $('setupFolderErr').textContent = d.error || 'could not save the folder'; return; }
+    defaultWorkspace = d.default || '';
+    $('setupFolder').value = defaultWorkspace;
+    showFolder();
+    $('setupFolderMsg').textContent = 'New conversations start in ' + defaultWorkspace + '.' +
+      ((d.notes || []).length ? ' ' + d.notes.join(' ') : '');
+  } catch (e) {
+    $('setupFolderErr').textContent = e.message;
+  }
+}
+$('setupFolderSave').onclick = () => {
+  const p = $('setupFolder').value.trim();
+  if (!p) { $('setupFolderErr').textContent = 'type a full path, or Reset'; return; }
+  saveDefaultFolder(p);
+};
+$('setupFolderReset').onclick = () => saveDefaultFolder('');
+// Enter here saves the folder; without this it would submit the provider form.
+$('setupFolder').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); $('setupFolderSave').click(); }
+});
+$('setupFolderBrowse').onclick = async () => {
+  $('setupFolderErr').textContent = '';
+  $('setupFolderBrowse').disabled = true;
+  try {
+    const resp = await api('/api/workspace/pick', { method: 'POST' });
+    const d = await resp.json().catch(() => ({ error: 'refused' }));
+    if (!resp.ok) { $('setupFolderErr').textContent = d.error; return; }
+    if (!d.cancelled) $('setupFolder').value = d.path;
+  } finally {
+    $('setupFolderBrowse').disabled = false;
+  }
+};
+
 $('browse').onclick = async () => {
   $('folderErr').textContent = '';
   $('browse').disabled = true;
@@ -1433,8 +1499,13 @@ function closeBriefPanel() {
   clearBriefPreview();
 }
 
+// taskFolder is where task files are listed and read from: the open
+// conversation's folder, or the one a new conversation would get. A task
+// always runs in a new conversation, in this same folder.
+function taskFolder() { return (runID ? convWorkspace : newWorkspace) || ''; }
+
 function openBriefPanel() {
-  if (busy || runID) return;
+  if (busy) return;
   closeFolderPanel();
   if (!$('memoryPanel').hidden) closeMemory();
   $('briefInput').value = '';
@@ -1456,24 +1527,25 @@ async function loadBriefList() {
   try {
     const resp = await api('/api/briefs', {
       method: 'POST',
-      body: JSON.stringify({ workspace: newWorkspace || '' })
+      body: JSON.stringify({ workspace: taskFolder() })
     });
     d = await resp.json().catch(() => ({ error: 'refused' }));
-    if (!resp.ok) { $('briefErr').textContent = d.error || 'could not list briefs'; return; }
+    if (!resp.ok) { $('briefErr').textContent = d.error || 'could not list task files'; return; }
   } catch (e) {
-    $('briefErr').textContent = 'could not list briefs: ' + e.message;
+    $('briefErr').textContent = 'could not list task files: ' + e.message;
     return;
   }
   if ($('briefPanel').hidden) return;
   const head = document.createElement('div');
   head.className = 'dim';
   if (!d.briefs.length) {
-    head.textContent = 'No .md files in ' + d.folder + '. Type a path, or choose another folder with Folder….';
+    head.textContent = 'No task files (.md) in ' + d.folder + '. Type a path, or choose another folder' +
+      (runID ? ' in a new conversation.' : ' with Folder….');
     list.append(head);
     list.hidden = false;
     return;
   }
-  head.textContent = (d.partial ? 'Newest ' + d.briefs.length + ' .md files in ' : '.md files in ') + d.folder +
+  head.textContent = (d.partial ? 'Newest ' + d.briefs.length + ' task files in ' : 'Task files in ') + d.folder +
     (d.partial ? ' (not all shown; type a path for others)' : '');
   list.append(head);
   for (const b of d.briefs) {
@@ -1497,14 +1569,14 @@ async function loadBriefList() {
 }
 
 $('briefBtn').onclick = () => {
-  if (busy || runID) return;
+  if (busy) return;
   if ($('briefPanel').hidden) openBriefPanel();
   else closeBriefPanel();
 };
 $('cancelBrief').onclick = closeBriefPanel;
 $('useBrief').onclick = () => {
   const p = $('briefInput').value.trim();
-  if (!p) { $('briefErr').textContent = 'type the path to a .md file'; return; }
+  if (!p) { $('briefErr').textContent = 'type the path to a task file (.md)'; return; }
   showBrief(p);
 };
 $('briefInput').addEventListener('keydown', e => {
@@ -1522,7 +1594,7 @@ async function showBrief(path) {
   if (busy) return;
   clearBriefPreview();
   $('briefErr').textContent = '';
-  const folder = newWorkspace || '';
+  const folder = taskFolder();
   try {
     const resp = await api('/api/brief', {
       method: 'POST',
@@ -1530,7 +1602,7 @@ async function showBrief(path) {
     });
     const d = await resp.json().catch(() => ({ error: 'refused' }));
     if (!resp.ok) {
-      $('briefErr').textContent = d.error || 'could not load brief';
+      $('briefErr').textContent = d.error || 'could not load the task file';
       return;
     }
     shownBrief = { path: d.path, sha256: d.sha256 };
@@ -1538,14 +1610,22 @@ async function showBrief(path) {
     $('briefPreview').hidden = false;
     $('startBrief').focus();
   } catch (e) {
-    $('briefErr').textContent = 'could not load brief: ' + e.message;
+    $('briefErr').textContent = 'could not load the task file: ' + e.message;
   }
 }
 
 $('startBrief').onclick = () => {
   if (busy || !shownBrief) return;
   const b = shownBrief;
+  const folder = taskFolder();
   closeBriefPanel();
+  // From inside a conversation: a new one, in the same folder. The open one
+  // stays as it is, in the list.
+  if (runID) {
+    newConversation();
+    newWorkspace = folder || null;
+    showFolder();
+  }
   send('', { brief: b.path, briefSHA: b.sha256 });
 };
 
@@ -1624,7 +1704,57 @@ function renderMemory() {
       }
     };
 
-    card.append(body, delBtn);
+    // Edit rewrites the fact in place, keeping its position. The server
+    // refuses if the fact changed since this list was drawn, rather than
+    // editing whichever note is at that index now.
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'del-note';
+    editBtn.textContent = 'Edit';
+    editBtn.title = 'Change the wording of this fact';
+    editBtn.onclick = () => {
+      $('memoryErr').textContent = '';
+      $('memoryMsg').textContent = '';
+      const box = Object.assign(document.createElement('textarea'), {
+        className: 'note-edit', rows: 1, maxLength: 400, value: item.text, spellcheck: true,
+      });
+      const save = Object.assign(document.createElement('button'), { type: 'button', className: 'del-note', textContent: 'Save' });
+      const cancel = Object.assign(document.createElement('button'), { type: 'button', className: 'del-note', textContent: 'Cancel' });
+      const doSave = async () => {
+        const next = box.value.trim();
+        if (!next) { $('memoryErr').textContent = 'a fact cannot be empty; Delete removes it'; return; }
+        save.disabled = true;
+        try {
+          const resp = await api('/api/memory', {
+            method: 'PUT',
+            body: JSON.stringify({ index: item.index, text: item.text, new_text: next }),
+          });
+          const d = await resp.json().catch(() => ({ error: 'refused' }));
+          if (!resp.ok) { $('memoryErr').textContent = d.error || 'Could not change the fact'; save.disabled = false; return; }
+          await loadMemory();
+          $('memoryMsg').textContent = 'Fact changed. Counts from your next message.';
+        } catch (err) {
+          $('memoryErr').textContent = err.message;
+          save.disabled = false;
+        }
+      };
+      save.onclick = doSave;
+      cancel.onclick = () => renderMemory();
+      box.addEventListener('input', () => fitArea(box));
+      box.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); doSave(); }
+        if (e.key === 'Escape') renderMemory();
+      });
+      body.replaceChildren(box);
+      buttons.replaceChildren(save, cancel);
+      fitArea(box);
+      box.focus();
+    };
+
+    const buttons = document.createElement('div');
+    buttons.className = 'note-buttons';
+    buttons.append(editBtn, delBtn);
+    card.append(body, buttons);
     list.append(card);
   }
 }
@@ -1660,7 +1790,7 @@ async function saveMemory(text) {
   const d = await resp.json().catch(() => ({ error: 'refused' }));
   if (!resp.ok) throw new Error(d.error || 'could not save');
   if (!$('memoryPanel').hidden) await loadMemory();
-  return d.added ? `Saved to memory (${d.count} / 50). New conversations start with it.` : 'Already in memory; nothing changed.';
+  return d.added ? `Saved to memory (${d.count} / 50). Counts from your next message.` : 'Already in memory; nothing changed.';
 }
 
 function countMemoryText() {
@@ -1668,7 +1798,10 @@ function countMemoryText() {
   $('memoryAddCount').textContent = n + ' / 400';
   $('memoryAddCount').classList.toggle('over', n >= 400);
 }
-$('memoryAddText').addEventListener('input', countMemoryText);
+$('memoryAddText').addEventListener('input', () => { countMemoryText(); fitArea($('memoryAddText')); });
+$('memoryAddText').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); $('memoryAdd').requestSubmit(); }
+});
 $('memoryAdd').onsubmit = async e => {
   e.preventDefault();
   const text = $('memoryAddText').value.trim();
@@ -1680,6 +1813,7 @@ $('memoryAdd').onsubmit = async e => {
     $('memoryMsg').textContent = await saveMemory(text);
     $('memoryAddText').value = '';
     countMemoryText();
+    fitArea($('memoryAddText'));
   } catch (err) {
     $('memoryErr').textContent = err.message;
   } finally {
@@ -1740,6 +1874,11 @@ function openSetup() {
     ? `Using ${setup.base_url} with ${setup.model}` + (setup.key_set ? ' · key saved' : '')
     : 'ariadne needs a model provider before it can answer.';
   $('setupCancel').hidden = !setup.configured;
+  $('setupFolderBox').hidden = !canSaveFolder;
+  $('setupFolderBrowse').hidden = !canPickFolder;
+  $('setupFolder').value = defaultWorkspace;
+  $('setupFolderMsg').textContent = '';
+  $('setupFolderErr').textContent = '';
   $('setup').hidden = false;
   showSetupFields();
   ($('setupKeyRow').hidden ? $('setupModel') : $('setupKey')).focus();

@@ -1,4 +1,6 @@
-package loop
+// Package fsx reads and replaces files that another part of ariadne may be
+// reading at the same moment: a conversation's checkpoint, and MEMORY.md.
+package fsx
 
 import (
 	"io"
@@ -7,12 +9,12 @@ import (
 	"unsafe"
 )
 
-// Replacing checkpoint.json while something reads it.
+// Replacing a file while something reads it.
 //
-// Save renames a temp file over checkpoint.json. On Windows that rename fails
-// with "Access is denied" while any other handle has the file open, and the
-// page reloads the conversation list — which reads every checkpoint — as a
-// turn starts. A model that answered within milliseconds found its
+// A checkpoint or MEMORY.md is saved by renaming a temp file over it. On
+// Windows that rename fails with "Access is denied" while any other handle has
+// the file open, and the page reads both while turns run: it reloads the
+// conversation list, which reads every checkpoint, as a turn starts. A model that answered within milliseconds found its
 // checkpoint open, and the turn died at "checkpoint failed at step 1"
 // (TestSaveSucceedsWhileTheCheckpointIsBeingRead, found in the v0.6.9
 // browser check). Two halves, both needed: readers open with
@@ -21,8 +23,8 @@ import (
 // delete alone is not enough: the old file keeps its name until the last
 // reader closes it, and an ordinary rename still finds the name taken.
 
-// readShared reads a checkpoint without standing in the way of the next save.
-func readShared(name string) ([]byte, error) {
+// ReadShared reads a file without standing in the way of the next Replace.
+func ReadShared(name string) ([]byte, error) {
 	p, err := syscall.UTF16PtrFromString(name)
 	if err != nil {
 		return nil, &os.PathError{Op: "open", Path: name, Err: err}
@@ -59,10 +61,10 @@ type fileRenameInfo struct {
 	FileName       [1]uint16
 }
 
-// replaceFile renames from over to, even while readers have it open.
+// Replace renames from over to, even while readers have it open.
 // Filesystems or Windows versions without FileRenameInfoEx (FAT, before
 // Windows 10 1607) get os.Rename, which is correct and only loses the race.
-func replaceFile(from, to string) error {
+func Replace(from, to string) error {
 	target, err := syscall.UTF16FromString(to)
 	if err != nil {
 		return os.Rename(from, to)

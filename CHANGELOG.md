@@ -5,6 +5,36 @@ carry the longer story for each release.
 
 ## Unreleased — v0.6.10
 
+- **A fact counts from your next message.** Remembered facts were read once,
+  when a conversation started, so a fact saved in the middle of one was
+  invisible to it ("What do you remember about me?" — "not much", a minute
+  after saving it). They are now read at every message you send: saving,
+  editing or deleting a fact applies to the next message, in the
+  conversation you are in. The trace records which facts each message was
+  given.
+- **A default folder, set in ⚙.** "Default folder for new conversations"
+  saves a folder in `config.env`, so plain `ariadne ui`, a double-click on
+  `ariadne.exe` and the terminal all start there. `-workspace` still wins
+  for one start, **Folder…** still picks another for one conversation, and
+  a conversation keeps the folder it started in. **Reset** goes back to
+  ariadne's own folder.
+- **Edit a remembered fact.** **Edit** beside each fact in 🧠 rewrites it in
+  place; `/edit <n> <text>` does the same in `ariadne chat`. An edited fact
+  is marked "typed by you". An edit is refused, not applied elsewhere, if
+  the fact changed since the list was shown.
+- **The 🧠 box shows the whole fact** as you type it, growing to about six
+  lines. Enter still saves.
+- **"Brief" is now "Task".** The button is **Tasks…**, a task runs with **Run
+  this task**, and `/task` works in the page (`/brief` still does). Nothing
+  on disk changes.
+- **Tasks… works from inside a conversation.** It lists the task files in
+  that conversation's folder, and running one starts a new conversation in
+  the same folder, leaving the one you were in as it was.
+- **Fixed on Windows: deleting or editing a fact could fail** with "Access is
+  denied" while the page was reading your facts, the same problem v0.6.9
+  fixed for saving conversations.
+- **Task files that hold only blank lines are no longer listed**, since
+  they cannot be run.
 - **A conversation with a long title can be deleted.** Its title pushed the
   × off the edge of the sidebar, under the scrollbar, so it could not be
   clicked. Titles now shorten with … and the × stays in reach.

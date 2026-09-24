@@ -143,6 +143,18 @@ type Agent struct {
 	// 2026-09-24.
 	Today func() time.Time
 
+	// Memory, when set, returns the remembered notes to put in the system
+	// prompt, already fenced. Read once per turn, when the turn starts, and
+	// never stored on State: every step of a turn sees the same notes, and a
+	// note saved or deleted between messages counts from the next one. It
+	// used to be read once per conversation into State.System, so a fact
+	// saved mid-conversation was invisible until a new one (2026-09-25:
+	// "What do you remember about me?" — "not much", one minute after saving
+	// it). What a turn was told is recorded as a memory trace event instead.
+	Memory func() string
+	// memory is what Memory returned for the turn in progress.
+	memory string
+
 	BaseURL string
 	Tools   []llm.ToolDef
 	RunTool ToolRunner
@@ -202,6 +214,12 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 	a.grants = nil
 	defer func() { a.grants = nil }()
 
+	a.memory = ""
+	if a.Memory != nil {
+		a.memory = a.Memory()
+	}
+	defer func() { a.memory = "" }()
+
 	// Where this call started. The step ceiling is measured from here rather
 	// than from zero, so resuming or taking another turn gets its own budget
 	// instead of inheriting a spent one.
@@ -246,6 +264,9 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		Kind: trace.KindRunStart, Model: s.Model, Step: s.Steps,
 		Messages: len(s.Messages), Text: s.turnPrompt(),
 	})
+	if a.memory != "" {
+		a.emit(trace.Event{Kind: trace.KindMemory, Step: s.Steps, Content: a.memory})
+	}
 
 	// Before the first model call, not after it. Until the model answers
 	// nothing else writes, so a fresh run existed only in memory for however
@@ -817,16 +838,19 @@ func (a *Agent) offeredTools(s *State) []llm.ToolDef {
 }
 
 // systemFor is the system prompt for this request: the conversation's own,
-// and today's date when the agent knows it.
+// this turn's remembered notes, and today's date when the agent knows it.
 func (a *Agent) systemFor(s *State) string {
-	if a.Today == nil {
-		return s.System
+	var parts []string
+	if s.System != "" {
+		parts = append(parts, s.System)
 	}
-	date := "Today's date is " + a.Today().Format("Monday 2 January 2006") + "."
-	if s.System == "" {
-		return date
+	if a.memory != "" {
+		parts = append(parts, a.memory)
 	}
-	return s.System + "\n\n" + date
+	if a.Today != nil {
+		parts = append(parts, "Today's date is "+a.Today().Format("Monday 2 January 2006")+".")
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // withSystem prepends the system prompt without storing it in the conversation.

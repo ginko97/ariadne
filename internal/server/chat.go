@@ -59,15 +59,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	req.Message = strings.TrimSpace(req.Message)
 	req.Brief = strings.TrimSpace(req.Brief)
 	if !req.Resume && !req.Retry && req.Message == "" && req.Brief == "" {
-		httpError(w, http.StatusBadRequest, "message or brief is required")
+		httpError(w, http.StatusBadRequest, "a message or a task file is required")
 		return
 	}
 	if req.Retry && (req.RunID == "" || req.Message != "" || req.Brief != "" || req.Resume) {
-		httpError(w, http.StatusBadRequest, "try again takes a conversation and nothing else: no message, brief or resume")
+		httpError(w, http.StatusBadRequest, "try again takes a conversation and nothing else: no message, task file or resume")
 		return
 	}
 	if req.Resume && req.Brief != "" {
-		httpError(w, http.StatusBadRequest, "cannot provide brief when resuming an interrupted turn")
+		httpError(w, http.StatusBadRequest, "cannot run a task file when resuming an interrupted turn")
 		return
 	}
 	if req.Resume && req.RunID == "" {
@@ -79,15 +79,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.RunID != "" && req.Brief != "" {
-		httpError(w, http.StatusBadRequest, "brief is only supported for new conversations")
+		httpError(w, http.StatusBadRequest, "a task file starts a new conversation; it cannot be added to one")
 		return
 	}
 	if req.Brief != "" && req.Message != "" {
-		httpError(w, http.StatusBadRequest, "cannot provide both brief and message")
+		httpError(w, http.StatusBadRequest, "cannot send both a task file and a message")
 		return
 	}
 	if req.Brief != "" && req.BriefSHA256 == "" {
-		httpError(w, http.StatusBadRequest, "a brief runs only after it has been shown: brief_sha256 is required")
+		httpError(w, http.StatusBadRequest, "a task file runs only after it has been shown: brief_sha256 is required")
 		return
 	}
 	req.Model = strings.TrimSpace(req.Model)
@@ -110,8 +110,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		workspace = ws
-	} else if fresh && s.DefaultWorkspace != "" {
-		workspace = s.DefaultWorkspace
+	} else if def := s.DefaultFolder(); fresh && def != "" {
+		workspace = def
 	}
 
 	var briefContent string
@@ -125,11 +125,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 		rel, content, err := readWorkspaceBrief(bws, req.Brief)
 		if err != nil {
-			httpError(w, http.StatusBadRequest, "brief: "+err.Error())
+			httpError(w, http.StatusBadRequest, "task file: "+err.Error())
 			return
 		}
 		if briefDigest(content) != req.BriefSHA256 {
-			httpError(w, http.StatusConflict, "brief: "+rel+" changed since it was shown; show it again before starting")
+			httpError(w, http.StatusConflict, "task file "+rel+" changed since it was shown; show it again before running it")
 			return
 		}
 		briefRelPath = rel
@@ -224,7 +224,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	out := &sseWriter{w: w, f: flusher}
-	out.event("start", map[string]any{"run_id": runID})
+	// The folder goes with it: the page cannot work it out once the default
+	// can change in settings while a conversation is open, and it shows the
+	// folder and lists task files from it.
+	out.event("start", map[string]any{"run_id": runID, "workspace": state.Workspace})
 	if briefRelPath != "" {
 		out.event("brief", map[string]any{"path": briefRelPath, "content": briefContent})
 	}

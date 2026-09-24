@@ -45,6 +45,7 @@ func TestListBriefsFindsMarkdownNewestFirst(t *testing.T) {
 	writeAt(t, filepath.Join(ws, "middle.md"), "mid", now.Add(-2*time.Hour))
 	writeAt(t, filepath.Join(ws, "notes.txt"), "not a brief", now)
 	writeAt(t, filepath.Join(ws, "empty.md"), "", now)
+	writeAt(t, filepath.Join(ws, "blank.md"), "  \n\t\n", now)
 	writeAt(t, filepath.Join(ws, ".git", "HEAD.md"), "hidden", now)
 
 	got, err := listBriefs(ws)

@@ -100,15 +100,20 @@ plainly, what protects you and what does not.
   read tool in `-trust`, a document in the workspace can get the model to read
   a secret file next to it and repeat it in its answer. Keep secrets out of
   the workspace.
-- **A brief is your own instruction.** A brief (`-task`, **Brief…**,
-  `/brief`) is sent as your message, not as untrusted text, so nothing marks
-  it and the model treats every line as yours. Use briefs you wrote. A
-  downloaded `.md` used as a brief has the authority a web page is denied.
-  The browser shows the whole brief before it starts and refuses to start if
-  the file changed since; the terminal prints it and starts at once.
-  Approval still applies to what the brief leads to. A conversation started
-  from a brief may take 25 steps a turn instead of 10, so it can make more
-  model calls, and spend more, before it stops on its own.
+- **A task file is your own instruction.** A task file (`-task`,
+  **Tasks…**, `/task`) is sent as your message, not as untrusted text, so
+  nothing marks it and the model treats every line as yours. Use task files
+  you wrote, or have read. A downloaded `.md` run as a task has the authority
+  a web page is denied, and so does one a model drafted after reading a
+  page. The browser shows the whole task file before it runs and refuses to
+  run it if the file changed since; the terminal prints it and starts at
+  once. Approval still applies to what the task leads to. A conversation
+  started from a task file may take 25 steps a turn instead of 10, so it can
+  make more model calls, and spend more, before it stops on its own.
+- **Remembered facts are sent with every message.** Each fact in **🧠** goes
+  to the model with every message of every conversation, so keep passwords
+  and private details out of them. A fact you type or edit is saved as
+  written, without a card; one the model proposes asks first.
 - **"Cited but never opened" is not fact-checking.** Under an answer, ariadne
   lists the URLs the answer, or a file written in that turn, cites that no
   fetch in the conversation opened. It checks URLs only: a source named by

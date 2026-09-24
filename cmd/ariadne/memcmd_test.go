@@ -84,3 +84,29 @@ func TestChatMemoryCommandsLeaveOtherLinesAlone(t *testing.T) {
 		}
 	}
 }
+
+// /edit n rewrites fact n and keeps its number; bad input changes nothing.
+func TestChatEditRewritesAFact(t *testing.T) {
+	store := memory.Store{Path: filepath.Join(t.TempDir(), "MEMORY.md")}
+	for _, text := range []string{"first", "I test v0.6.9"} {
+		if err := store.Append(memory.Note{Text: text, RunID: memory.ByOperator}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if handled, out := runMemoryCommand(t, store, false, "/edit 2 I test v0.6.10"); !handled || !strings.Contains(out, "fact 2 now reads: I test v0.6.10") {
+		t.Errorf("/edit 2: handled %v, %q", handled, out)
+	}
+	for line, want := range map[string]string{
+		"/edit 9 x":              "no fact 9",
+		"/edit two x":            "usage: /edit",
+		"/edit 1":                "usage: /edit",
+		"/edit 1 I TEST V0.6.10": "not changed:",
+	} {
+		if _, out := runMemoryCommand(t, store, false, line); !strings.Contains(out, want) {
+			t.Errorf("%s: %q, want %q", line, out, want)
+		}
+	}
+	if notes, _ := store.Load(); len(notes) != 2 || notes[0].Text != "first" || notes[1].Text != "I test v0.6.10" {
+		t.Errorf("notes: %+v", notes)
+	}
+}

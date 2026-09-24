@@ -24,7 +24,7 @@ var shellEnv = map[string]bool{}
 
 // settingNames are the variables a configuration can write.
 var settingNames = []string{
-	"ARIADNE_API_KEY", "ARIADNE_BASE_URL", "ARIADNE_MODEL",
+	"ARIADNE_API_KEY", "ARIADNE_BASE_URL", "ARIADNE_MODEL", "ARIADNE_WORKSPACE",
 	"OPENROUTER_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", "HF_TOKEN",
 }
 

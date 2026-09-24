@@ -19,6 +19,12 @@ type memoryAddRequest struct {
 	Text string `json:"text"`
 }
 
+type memoryEditRequest struct {
+	Index int    `json:"index"`
+	Text  string `json:"text"`     // what the note read when it was shown
+	New   string `json:"new_text"` // what it should read now
+}
+
 type memoryDeleteRequest struct {
 	Index int    `json:"index"`
 	Text  string `json:"text"`
@@ -90,6 +96,26 @@ func (s *Server) handleMemoryAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "added": len(after) > len(before), "count": len(after)})
+}
+
+// handleMemoryEdit changes a note in place, word for word, provided it still
+// reads what the page showed (memory.Store.Replace). Like a note typed in,
+// no card: the person wrote the new text. Behind the CSRF token.
+func (s *Server) handleMemoryEdit(w http.ResponseWriter, r *http.Request) {
+	if s.MemoryStore.Path == "" {
+		httpError(w, http.StatusNotFound, "memory store is not configured")
+		return
+	}
+	var req memoryEditRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "malformed request body")
+		return
+	}
+	if err := s.MemoryStore.Replace(req.Index, req.Text, req.New); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // handleMemoryDelete deletes a remembered note matching index and text.

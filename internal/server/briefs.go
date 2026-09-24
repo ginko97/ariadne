@@ -20,6 +20,9 @@ const (
 	// somebody's whole Documents; the list is a convenience and must come back
 	// in well under a second, not after reading every file on the disk.
 	maxBriefsVisited = 5000
+	// blankCheckBytes: files smaller than this are read to leave out ones
+	// holding nothing but whitespace.
+	blankCheckBytes = 4096
 )
 
 type briefsRequest struct {
@@ -96,8 +99,16 @@ func walkBriefs(fsys fs.FS) (briefsResponse, error) {
 		if err != nil {
 			return nil
 		}
-		if fi.Size() == 0 || fi.Size() > 2<<20 {
+		if fi.Size() == 0 || fi.Size() > maxBriefBytes {
 			return nil
+		}
+		// A file of only spaces and newlines would be listed and then
+		// refused as empty. Small files are read to find out; a blank one
+		// is never large, and reading 4 KB costs nothing.
+		if fi.Size() < blankCheckBytes {
+			if data, err := fs.ReadFile(fsys, p); err != nil || strings.TrimSpace(string(data)) == "" {
+				return nil
+			}
 		}
 		out.Briefs = append(out.Briefs, briefEntry{Path: p, Size: fi.Size(), Modified: fi.ModTime()})
 		return nil
@@ -127,7 +138,7 @@ func (s *Server) handleBriefs(w http.ResponseWriter, r *http.Request) {
 	}
 	ws := req.Workspace
 	if ws == "" {
-		ws = s.DefaultWorkspace
+		ws = s.DefaultFolder()
 	}
 	out, err := listBriefs(ws)
 	if err != nil {

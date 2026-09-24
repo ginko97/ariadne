@@ -99,7 +99,7 @@ dropped before an answer arrived.
 | **Files** | list, read, write and edit text in one folder per conversation; writes and edits show the lines that would change |
 | **Documents** | read `.docx`, `.xlsx`, `.pptx` and their LibreOffice counterparts; PDFs when [Poppler](https://poppler.freedesktop.org) is installed |
 | **The web** | read a page by URL, asking first; never your own machine or local network |
-| **Research briefs** | start a conversation from a markdown task file you wrote (`-task brief.md`, or **Brief…**); it gets 25 steps a turn instead of 10 |
+| **Task files** | run a markdown file of instructions you wrote, such as a weekly market report (`-task report.md`, or **Tasks…**); it gets 25 steps a turn instead of 10 |
 | **Memory** | notes that carry across conversations: ones you type into **🧠** or `/remember`, saved word for word, and ones the model proposes, each approved before it is saved |
 | **MCP tools** | any MCP server — filesystem, search, git — through `-mcp-config` |
 | **Programs** | `-exec` lets it run programs in the folder, asking before every one |
@@ -110,7 +110,7 @@ dropped before an answer arrived.
 - **It asks first.** Web pages, file writes and edits, saved notes, MCP tools and programs
   all wait for your yes, on a card that shows exactly what would happen. No answer is not
   a yes: an unanswered card is denied after five minutes. In the browser, a conversation
-  started from a brief pauses instead, and nothing runs until you resume it. The top bar
+  started from a task file pauses instead, and nothing runs until you resume it. The top bar
   shows which tools ask first, and flags in red any you exempted with `-trust`.
 - **It survives a crash.** A conversation is saved after every tool call. Kill the process
   mid-task and it resumes without repeating what already ran. If the connection drops
@@ -133,13 +133,13 @@ dropped before an answer arrived.
 
 | | |
 | --- | --- |
-| **New conversation**, **Folder…** | choose the folder a new conversation may read and write; it stays fixed after that. **Browse…** opens your system's folder dialog where one is installed (not in WSL without `zenity`) |
-| **Brief…** | lists the `.md` files in the folder, newest first; click one to read it in full, then **Start this brief**. It refuses to start if the file changed in between |
+| **New conversation**, **Folder…** | choose the folder a new conversation may read and write; it stays fixed after that. The default for every new conversation is set in **⚙**. **Browse…** opens your system's folder dialog where one is installed (not in WSL without `zenity`) |
+| **Tasks…** | lists the task files (`.md`) in the folder, newest first, from any conversation; click one to read it in full, then **Run this task**, which starts a new conversation in the same folder. It refuses to start if the file changed in between |
 | approval cards | several calls at once arrive as one card, and you can leave any out; a web card can allow one site until the turn ends |
 | **Needs you** | marks a conversation waiting on you |
 | **Stop** / **Resume turn** | end a turn at any point; finish an interrupted one without repeating what ran |
 | **Try again** | when an answer never arrived (a dropped connection, a provider error), ask again without adding a message |
-| **🧠** | the notes it remembers across conversations: type one and **Save**, or delete any. `/remember <fact>` saves one from the message box |
+| **🧠** | the notes it remembers across conversations: type one and **Save**, **Edit** or **Delete** any; a change counts from your next message. `/remember <fact>` saves one from the message box |
 | **Copy** | on every answer (its markdown, tables and all) and on every code block |
 | **Tools:** in the top bar | what conversations here can use and how many ask first; anything that normally asks but was exempted with `-trust` shows in red. Hover for the full list |
 | **⚙** · **◐** · **×** | provider, key and model, plus the version and every tool · light or dark · delete a conversation for good |
@@ -153,9 +153,9 @@ with `ariadne chat <run-id>`.
 ```bash
 ariadne chat                                   # talk
 ariadne chat <run-id>                          # pick a conversation back up
-ariadne chat -remember                         # with memory: /memory, /remember <fact>, /forget <n>
+ariadne chat -remember                         # with memory: /memory, /remember, /edit, /forget
 ariadne run "What is 15% of 240?"              # one task, answer on stdout
-ariadne run -task brief.md                     # the task from a file you wrote
+ariadne run -task report.md                    # the task from a file you wrote
 ariadne run -trust write_file "..."            # unattended: write without asking
 ariadne run -workspace ~/code/project "..."    # point the file tools at a folder
 ariadne chat -exec -workspace ~/code/project   # let it run programs; every call asks
@@ -211,7 +211,7 @@ The short version of [SECURITY.md](SECURITY.md):
 - **Marking fetched text as untrusted asks the model to behave; it does not make it.** A
   document can still talk the model into asking for something, which is why the cards
   exist.
-- **A brief is your own instruction.** It is not marked untrusted, so use briefs you wrote.
+- **A task file is your own instruction.** It is not marked untrusted, so use task files you wrote or have read.
 
 How the attacks that still work were found and measured:
 [ARCHITECTURE.md](ARCHITECTURE.md#wont-do-what-a-webpage-tells-it-to).

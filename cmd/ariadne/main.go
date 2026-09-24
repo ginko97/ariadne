@@ -133,6 +133,15 @@ func main() {
 		_ = dotenv.LoadFile(paths.Env)
 	}
 	runsDir, defaultWorkspace, memoryFile = paths.Runs, paths.Workspace, paths.Memory
+	homeWorkspace = paths.Workspace
+	// A default folder saved in the settings panel replaces the home
+	// directory's workspace for every command; -workspace still wins for one
+	// start.
+	if folder, warning := savedWorkspace(os.Getenv); folder != "" {
+		defaultWorkspace = folder
+	} else if warning != "" {
+		fmt.Fprintf(os.Stderr, "ariadne: %s\n", warning)
+	}
 	configEnvFile = paths.Env
 	homeDir = paths.Home
 	mcp.ClientVersion = versionString()
@@ -247,6 +256,8 @@ environment:
                     Other endpoints (Groq, Ollama, ...) need ARIADNE_API_KEY
   ARIADNE_HOME      where runs, workspace, MEMORY.md and config.env live
                     (default: your user config directory, e.g. %AppData%\ariadne)
+  ARIADNE_WORKSPACE default folder for new conversations (set in the page's
+                    settings; -workspace wins for one start)
 
 Keys come from the environment, then, for a development build run inside an
 ariadne source checkout, that checkout's .env, then config.env (written by

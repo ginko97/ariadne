@@ -44,31 +44,31 @@ func defaultModelFor(baseURL string) string {
 	}
 }
 
-// memoryPrompt renders the notes earlier runs left, fenced.
+// memoryNotes renders the remembered notes, fenced, for loop.Agent.Memory,
+// which reads them once per turn. It used to be appended to State.System once
+// per conversation; see Agent.Memory for why that changed, and StripPrompt for
+// the conversations that still carry a copy.
 //
-// Appended to the system prompt rather than injected as a message, so
-// State.System records exactly what this run was told and a checkpoint says
-// which notes it saw. Read once at the start: memory that changed under a
-// running agent would mean two steps of the same run disagreeing about what is
-// remembered.
-//
-// A failure here is a warning, not a fatal error. A run that cannot read its
-// notes is a run with no notes, which is the state every first run is in, and
+// A failure here is a warning, not a fatal error. A turn that cannot read its
+// notes is a turn with no notes, which is the state every first run is in, and
 // refusing to work because a scratch file is unreadable would be the wrong
 // trade.
-func memoryPrompt(on bool) string {
-	if !on {
-		return ""
-	}
+func memoryNotes() string {
 	block, err := (memory.Store{Path: memoryFile}).Prompt()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ariadne: memory unreadable, continuing without it: %v\n", err)
 		return ""
 	}
-	if block == "" {
-		return ""
+	return strings.TrimSpace(block)
+}
+
+// dropStoredMemory takes out of a resumed conversation the copy of the notes
+// an earlier version stored in its system prompt, so it is given only the
+// current ones.
+func dropStoredMemory(st *loop.State) {
+	if st != nil {
+		st.System = memory.StripPrompt(st.System)
 	}
-	return "\n\n" + block
 }
 
 func contains(list []string, v string) bool {

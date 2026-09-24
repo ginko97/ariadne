@@ -67,6 +67,10 @@ const (
 	// IsError, because a front end that sent a key nobody was shown is itself
 	// worth finding.
 	KindHostGrant = "host_grant"
+	// KindMemory is the remembered notes a turn was given, in Content. Notes
+	// are read once per turn and never stored on the checkpoint, so this is
+	// the record of what the model was told it remembered.
+	KindMemory = "memory"
 )
 
 // Event is one thing that happened. Fields are shared across kinds and omitted

@@ -244,7 +244,7 @@ Four controls went in afterwards, each measured against the same fixture:
 | `-allow calc,fetch` | refuses unlisted tools at the loop; a grant can never be widened on resume | nothing |
 | `write_file`, `edit_file` | ask per call unless `-trust`ed, showing what the file would become; deny when there is no terminal and when there is no approver | a human being there |
 | `web_fetch` | asks before fetching, with the whole URL on the card, unless `-trust web_fetch`; in the browser a card can allow one origin until the turn ends, after which fetches to it do not ask; a redirect to another site is not followed but handed back to the model, so reading it is a new fetch that asks, while a redirect within the site (or http upgraded to https on the same host) is followed; refuses private, loopback and link-local addresses on every connection, redirects included; sends no cookies or keys | nothing, for the address rule; a human being there, for the rest |
-| briefs (`-task`, **Brief…**) | a brief is sent as your own message, not fenced as untrusted; the browser shows all of it before **Start this brief** and refuses to start if the file changed since | you reading it, and having written it |
+| task files (`-task`, **Tasks…**; `brief` in the code) | a task file is sent as your own message, not fenced as untrusted; the browser shows all of it before **Run this task** and refuses to run it if the file changed since | you reading it, and having written it |
 | MCP default gate, `-exec` | every MCP tool asks unless `-trust`ed; `exec` always asks, gets an environment allow-list, and ariadne's own API keys are redacted from every tool result. `exec` is **not** confined: an approved program can open any file you can, `.env` included, and only ariadne's own provider keys are redacted | a human being there |
 
 ```mermaid
@@ -254,7 +254,7 @@ flowchart TD
     A -- yes --> G{"needs approval?"}
     G -- "yes: -approve, MCP tools, web_fetch, edit_file and write_file unless -trust, exec always" --> P["card in the terminal or browser"]
     P -- "deny, or no answer in 5 minutes" --> D
-    P -- "tab closed, Stop, or no answer in 5 minutes in a brief conversation" --> WAIT["nothing runs; the call waits and is asked again on Resume"]
+    P -- "tab closed, Stop, or no answer in 5 minutes in a task conversation" --> WAIT["nothing runs; the call waits and is asked again on Resume"]
     P -- approve --> T{"which tool"}
     G -- no --> T
     T -- "fetch, write_file, edit_file" --> R["os.Root: cannot leave the workspace"]

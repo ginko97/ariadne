@@ -12,6 +12,9 @@ import (
 	"strings"
 )
 
+// maxBriefBytes is the largest task file that is read, listed or run.
+const maxBriefBytes = 2 << 20
+
 type briefRequest struct {
 	Path      string `json:"path"`
 	Workspace string `json:"workspace,omitempty"`
@@ -36,10 +39,10 @@ func briefDigest(content string) string {
 func readWorkspaceBrief(workspace, path string) (relPath, content string, err error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return "", "", errors.New("brief path is required")
+		return "", "", errors.New("a task file path is required")
 	}
 	if strings.ToLower(filepath.Ext(path)) != ".md" {
-		return "", "", errors.New("brief must be a markdown (.md) file")
+		return "", "", errors.New("a task file must be a markdown (.md) file")
 	}
 
 	ws, err := checkWorkspace(workspace)
@@ -51,7 +54,7 @@ func readWorkspaceBrief(workspace, path string) (relPath, content string, err er
 	if filepath.IsAbs(path) {
 		r, err := filepath.Rel(ws, path)
 		if err != nil || strings.HasPrefix(r, "..") || filepath.IsAbs(r) {
-			return "", "", errors.New("brief file must be inside the workspace folder")
+			return "", "", errors.New("the task file must be inside the conversation's folder")
 		}
 		rel = r
 	} else {
@@ -59,7 +62,7 @@ func readWorkspaceBrief(workspace, path string) (relPath, content string, err er
 	}
 	rel = filepath.Clean(rel)
 	if strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		return "", "", errors.New("brief file must be inside the workspace folder")
+		return "", "", errors.New("the task file must be inside the conversation's folder")
 	}
 
 	root, err := os.OpenRoot(ws)
@@ -76,10 +79,10 @@ func readWorkspaceBrief(workspace, path string) (relPath, content string, err er
 
 	fi, err := f.Stat()
 	if err != nil || fi.IsDir() {
-		return "", "", errors.New("brief must be a regular file")
+		return "", "", errors.New("a task file must be a regular file")
 	}
-	if fi.Size() > 2<<20 {
-		return "", "", errors.New("brief file is too large (max 2MB)")
+	if fi.Size() > maxBriefBytes {
+		return "", "", errors.New("the task file is too large (max 2MB)")
 	}
 
 	data, err := io.ReadAll(f)
@@ -87,7 +90,7 @@ func readWorkspaceBrief(workspace, path string) (relPath, content string, err er
 		return "", "", err
 	}
 	if strings.TrimSpace(string(data)) == "" {
-		return "", "", errors.New("brief file is empty")
+		return "", "", errors.New("the task file is empty")
 	}
 
 	return filepath.ToSlash(rel), string(data), nil
@@ -102,7 +105,7 @@ func (s *Server) handleBrief(w http.ResponseWriter, r *http.Request) {
 
 	ws := req.Workspace
 	if ws == "" {
-		ws = s.DefaultWorkspace
+		ws = s.DefaultFolder()
 	}
 	if ws == "" {
 		if cwd, err := os.Getwd(); err == nil {

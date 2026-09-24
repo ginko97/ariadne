@@ -40,6 +40,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/ginko97/ariadne/internal/fsx"
 )
 
 var (
@@ -176,7 +178,9 @@ You may edit or delete anything here. ariadne appends; you curate.
 // Load reads the notes. A missing file is empty, not an error — the first run
 // has nothing to remember yet.
 func (s Store) Load() ([]Note, error) {
-	data, err := os.ReadFile(s.Path)
+	// Shared, so a delete or an edit can replace the file while the page is
+	// reading it (fsx).
+	data, err := fsx.ReadShared(s.Path)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -283,6 +287,20 @@ func (s Store) Prompt() (string, error) {
 	return b.String(), nil
 }
 
+// promptStart is where Prompt's block begins when it was appended to a system
+// prompt, as every conversation before v0.6.10 stored it.
+const promptStart = "\n\n<memory>\n"
+
+// StripPrompt removes a notes block that an earlier version stored at the end
+// of a conversation's system prompt. Notes are now added per turn; a stored
+// copy would be a second, stale set — including notes deleted since.
+func StripPrompt(system string) string {
+	if i := strings.Index(system, promptStart); i >= 0 {
+		return system[:i]
+	}
+	return system
+}
+
 // Delete removes the note at index, provided its text matches expectedText.
 //
 // Both index and text are required: a note has no persistent id, and checking
@@ -320,7 +338,57 @@ func (s Store) Delete(index int, expectedText string) error {
 	remaining := make([]Note, 0, len(existing)-1)
 	remaining = append(remaining, existing[:index]...)
 	remaining = append(remaining, existing[index+1:]...)
+	return s.rewrite(remaining)
+}
 
+// Replace changes the note at index to newText, provided the note there still
+// reads expectedText — the same check Delete makes, so an edit started from a
+// list that has since changed is refused instead of landing on another note.
+// The note keeps its place. It becomes the operator's (RunID ByOperator) and
+// is stamped now: whoever proposed it, the words are the person's from here.
+// The limits are Append's, and a note that would read like another one is
+// refused rather than kept twice.
+func (s Store) Replace(index int, expectedText, newText string) error {
+	unlock := lockPath(s.Path)
+	defer unlock()
+
+	expected := strings.TrimSpace(expectedText)
+	text := strings.Join(strings.Fields(newText), " ")
+	switch {
+	case index < 0:
+		return fmt.Errorf("memory: invalid index %d", index)
+	case expected == "":
+		return fmt.Errorf("memory: expected note text cannot be empty")
+	case text == "":
+		return fmt.Errorf("memory: a note cannot be empty")
+	}
+	if n := utf8.RuneCountInString(text); n > MaxNote {
+		return fmt.Errorf("memory: note is %d characters, limit is %d", n, MaxNote)
+	}
+
+	existing, err := s.Load()
+	if err != nil {
+		return err
+	}
+	if index >= len(existing) {
+		return fmt.Errorf("memory: note index %d out of bounds (have %d notes)", index, len(existing))
+	}
+	if existing[index].Text != expected {
+		return fmt.Errorf("memory: that note has changed since it was shown; reload and edit it again")
+	}
+	for i, e := range existing {
+		if i != index && strings.EqualFold(e.Text, text) {
+			return fmt.Errorf("memory: another note already says that (note %d)", i+1)
+		}
+	}
+	existing[index] = Note{Text: text, RunID: ByOperator, At: time.Now().UTC()}
+	return s.rewrite(existing)
+}
+
+// rewrite replaces the whole file with notes, header first: temp file, sync,
+// replace, sync the directory, as a checkpoint is saved.
+func (s Store) rewrite(notes []Note) error {
+	remaining := notes
 	dir := filepath.Dir(s.Path)
 	if dir == "" {
 		dir = "."
@@ -357,7 +425,7 @@ func (s Store) Delete(index int, expectedText string) error {
 		return fmt.Errorf("memory: close: %w", err)
 	}
 
-	if err := os.Rename(tmp, s.Path); err != nil {
+	if err := fsx.Replace(tmp, s.Path); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("memory: rename: %w", err)
 	}

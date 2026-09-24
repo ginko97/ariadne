@@ -483,3 +483,88 @@ func TestConcurrentAppendAndDelete(t *testing.T) {
 		t.Error("all concurrent notes were lost")
 	}
 }
+
+// Replace rewrites one note in place: position kept, the words the person's
+// now, and nothing else in the file touched.
+func TestReplaceKeepsThePlaceAndMakesItTheOperators(t *testing.T) {
+	s := store(t)
+	for _, n := range []Note{{Text: "first", RunID: "run_a"}, {Text: "I test v0.6.9", RunID: "run_b"}, {Text: "third", RunID: "run_c"}} {
+		if err := s.Append(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Replace(1, "I test v0.6.9", "I test   v0.6.10\nnow"); err != nil {
+		t.Fatal(err)
+	}
+	notes, _ := s.Load()
+	if len(notes) != 3 || notes[0].Text != "first" || notes[2].Text != "third" {
+		t.Fatalf("other notes moved or changed: %+v", notes)
+	}
+	if notes[1].Text != "I test v0.6.10 now" || notes[1].RunID != ByOperator {
+		t.Errorf("edited note = %+v, want the new words, one line, marked %q", notes[1], ByOperator)
+	}
+}
+
+// An edit started from a list that has since changed is refused, never
+// applied to whatever note now sits at that index; and the limits hold.
+func TestReplaceRefusesWhatItShouldNotDo(t *testing.T) {
+	s := store(t)
+	for _, text := range []string{"alpha", "beta"} {
+		if err := s.Append(Note{Text: text, RunID: "run_a"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, err := range map[string]error{
+		"stale text":      s.Replace(0, "beta", "gamma"),
+		"out of range":    s.Replace(5, "alpha", "gamma"),
+		"blank":           s.Replace(0, "alpha", "  \n "),
+		"too long":        s.Replace(0, "alpha", strings.Repeat("x", MaxNote+1)),
+		"same as another": s.Replace(0, "alpha", "BETA"),
+	} {
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if notes, _ := s.Load(); notes[0].Text != "alpha" || notes[1].Text != "beta" {
+		t.Errorf("a refused edit changed the file: %+v", notes)
+	}
+}
+
+// Rewriting MEMORY.md (a delete or an edit) must not fail because the page is
+// reading it at that moment: on Windows the rename is refused while another
+// handle is open, the race v0.6.9 fixed for checkpoints (see fsx).
+func TestRewriteSucceedsWhileMemoryIsBeingRead(t *testing.T) {
+	s := store(t)
+	if err := s.Append(Note{Text: "v0", RunID: ByOperator}); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_, _ = s.Load()
+				}
+			}
+		}()
+	}
+	defer func() { close(stop); wg.Wait() }()
+
+	prev := "v0"
+	for i := 1; i <= 100; i++ {
+		next := fmt.Sprintf("v%d", i)
+		if err := s.Replace(0, prev, next); err != nil {
+			t.Fatalf("edit %d failed while MEMORY.md was being read: %v", i, err)
+		}
+		prev = next
+	}
+	if notes, _ := s.Load(); len(notes) != 1 || notes[0].Text != "v100" {
+		t.Fatalf("after the edits: %+v", notes)
+	}
+}

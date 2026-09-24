@@ -84,7 +84,7 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
 
 	ws := state.Workspace
 	if ws == "" {
-		ws = s.DefaultWorkspace
+		ws = s.DefaultFolder()
 	}
 
 	out := transcriptResponse{

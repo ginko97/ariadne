@@ -13,7 +13,8 @@ import (
 // reports whether line was one of them. The terminal's counterpart of the
 // page's memory panel, on the same store.
 //
-// /remember saves the person's own words without the model. It refuses in a
+// /remember saves the person's own words without the model, and /edit
+// rewrites a fact in place, keeping its number. It refuses in a
 // chat started without -remember: the fact would be written to MEMORY.md and
 // then reach no conversation that does not also turn memory on, which reads
 // as "saved" and behaves as "ignored". /memory and /forget work either way,
@@ -72,7 +73,30 @@ func memoryCommand(w io.Writer, store memory.Store, memoryOn bool, line string) 
 			fmt.Fprintln(w, "already in memory; nothing changed")
 			return true
 		}
-		fmt.Fprintf(w, "saved to memory (%d / %d); new conversations start with it\n", len(after), memory.MaxNotes)
+		fmt.Fprintf(w, "saved to memory (%d / %d); counts from the next message\n", len(after), memory.MaxNotes)
+		return true
+
+	case "/edit":
+		num, text, _ := strings.Cut(arg, " ")
+		n, err := strconv.Atoi(num)
+		if err != nil || strings.TrimSpace(text) == "" {
+			fmt.Fprintln(w, "usage: /edit <n> <new text>   rewrites fact n from /memory")
+			return true
+		}
+		notes, err := store.Load()
+		if err != nil {
+			fmt.Fprintf(w, "! %v\n", err)
+			return true
+		}
+		if n < 1 || n > len(notes) {
+			fmt.Fprintf(w, "no fact %d; /memory lists %d\n", n, len(notes))
+			return true
+		}
+		if err := store.Replace(n-1, notes[n-1].Text, text); err != nil {
+			fmt.Fprintf(w, "not changed: %v\n", err)
+			return true
+		}
+		fmt.Fprintf(w, "fact %d now reads: %s\n", n, strings.Join(strings.Fields(text), " "))
 		return true
 
 	case "/forget":

@@ -236,13 +236,12 @@ func cmdResume(args []string) int {
 		fmt.Fprintf(os.Stderr, "ariadne resume: %v\n", err)
 		return exitUsage
 	}
-	// Memory turned on for a run that started without it. The checkpoint's
-	// system prompt wins on resume, so the notes have to be added to it here or
-	// the tool would be present with nothing behind it. Recorded, so the next
-	// resume knows it is already there rather than matching on a fence marker
-	// that could be reworded.
-	if mem && !state.Memory {
-		state.System += memoryPrompt(true)
+	// Notes reach the model per turn through the agent (Agent.Memory), not
+	// through the checkpoint's system prompt: take out any copy an earlier
+	// version stored there, and record that this conversation uses memory
+	// so the next resume keeps it on.
+	dropStoredMemory(state)
+	if mem {
 		state.Memory = true
 	}
 	agent := newAgentFor(agentOpts{

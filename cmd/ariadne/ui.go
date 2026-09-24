@@ -102,8 +102,12 @@ func cmdUI(args []string) int {
 	// The options every agent here is built from. One function for the agents
 	// that run turns and for the probe the page's tool list is read from, so
 	// the list cannot describe a different agent from the one that runs.
+	// Declared before optsFor so it can read the server's current default
+	// folder, which the settings panel can change while this runs.
+	var srv *server.Server
 	optsFor := func(runID string, state *loop.State, onDelta func(llm.Chunk), tw *trace.Writer) agentOpts {
-		workspaceDir := conversationWorkspace(serverWorkspace, state)
+		workspaceDir := conversationWorkspace(srv.DefaultFolder(), state)
+		dropStoredMemory(state)
 
 		budgetVal := *budget
 		if state != nil {
@@ -151,7 +155,7 @@ func cmdUI(args []string) int {
 		return agent, func() { closeTrace(tw) }
 	}
 
-	srv := server.New(store, newAgent, newRunID)
+	srv = server.New(store, newAgent, newRunID)
 	srv.MemoryStore = memory.Store{Path: memoryFile}
 	srv.Version = versionString()
 	srv.Home = homeDir
@@ -166,6 +170,7 @@ func cmdUI(args []string) int {
 	// answer is one model and a reason, not a longer list of wrong ones.
 	srv.Models = llm.NewModelCache(*model)
 	srv.DefaultWorkspace = serverWorkspace
+	srv.SaveDefaultFolder = saveDefaultFolder
 	srv.PickFolder = folderPicker(runtime.GOOS, exec.LookPath)
 	unsupported, local := modelListFor(*baseURL)
 	srv.Models.Reconfigure(*model, unsupported, local)
