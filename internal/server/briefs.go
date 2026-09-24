@@ -140,6 +140,11 @@ func (s *Server) handleBriefs(w http.ResponseWriter, r *http.Request) {
 	if ws == "" {
 		ws = s.DefaultFolder()
 	}
+	if ws == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			ws = cwd
+		}
+	}
 	out, err := listBriefs(ws)
 	if err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())

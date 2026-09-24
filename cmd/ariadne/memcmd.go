@@ -9,16 +9,16 @@ import (
 	"github.com/ginko97/ariadne/internal/memory"
 )
 
-// memoryCommand answers /memory, /remember and /forget in ariadne chat, and
+// memoryCommand answers /memory, /remember, /edit and /forget in ariadne chat, and
 // reports whether line was one of them. The terminal's counterpart of the
 // page's memory panel, on the same store.
 //
-// /remember saves the person's own words without the model, and /edit
-// rewrites a fact in place, keeping its number. It refuses in a
+// /remember saves the person's own words without the model. It refuses in a
 // chat started without -remember: the fact would be written to MEMORY.md and
 // then reach no conversation that does not also turn memory on, which reads
-// as "saved" and behaves as "ignored". /memory and /forget work either way,
-// since looking after the file does not depend on this chat using it.
+// as "saved" and behaves as "ignored". /memory, /edit (rewriting a fact in
+// place, keeping its number) and /forget work either way, since looking after
+// the file does not depend on this chat using it.
 func memoryCommand(w io.Writer, store memory.Store, memoryOn bool, line string) bool {
 	name, arg, _ := strings.Cut(line, " ")
 	arg = strings.TrimSpace(arg)

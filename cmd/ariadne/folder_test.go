@@ -70,3 +70,30 @@ func TestSaveDefaultFolderWritesAndClearsConfig(t *testing.T) {
 		t.Errorf("reset left the folder in config.env:\n%s", data)
 	}
 }
+
+// A folder set in the shell outranks config.env: saving writes config.env,
+// but the return value is the folder in effect (the shell's), with a note.
+func TestSaveDefaultFolderHonoursShellOverride(t *testing.T) {
+	cfg := useConfigFile(t)
+	shellDir := t.TempDir()
+	t.Setenv(workspaceEnv, shellDir)
+	saved := shellEnv
+	shellEnv = map[string]bool{workspaceEnv: true}
+	t.Cleanup(func() { shellEnv = saved })
+
+	newDir := t.TempDir()
+	got, notes, err := saveDefaultFolder(newDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != shellDir {
+		t.Errorf("got %q, want shell folder %q", got, shellDir)
+	}
+	if len(notes) == 0 || !strings.Contains(notes[0], "set in your shell") {
+		t.Errorf("notes = %v, want shell warning", notes)
+	}
+	data, _ := os.ReadFile(cfg)
+	if !strings.Contains(string(data), workspaceEnv+"="+newDir) {
+		t.Errorf("config.env not updated: %s", data)
+	}
+}

@@ -141,6 +141,13 @@ func TestHandleBriefsEndpoint(t *testing.T) {
 	if resp, _ := call(string(missing), true); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("missing folder: status %d, want 400", resp.StatusCode)
 	}
+
+	s.DefaultWorkspace = ""
+	t.Chdir(ws)
+	resp, got = call(`{}`, true)
+	if resp.StatusCode != http.StatusOK || got.Folder != ws || !reflect.DeepEqual(briefPaths(got), []string{"brief.md"}) {
+		t.Errorf("empty default folder falling back to cwd: status %d, %+v", resp.StatusCode, got)
+	}
 }
 
 // A link to a .md file is not listed, wherever it points: the read would

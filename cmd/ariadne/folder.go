@@ -44,11 +44,12 @@ func saveDefaultFolder(folder string) (string, []string, error) {
 		return "", nil, err
 	}
 	notes := applySettings(vals)
-	if folder == "" {
-		folder = homeWorkspace
+	effective, _ := savedWorkspace(os.Getenv)
+	if effective == "" {
+		effective = homeWorkspace
 	}
-	if abs, err := filepath.Abs(folder); err == nil {
-		folder = abs
+	if abs, err := filepath.Abs(effective); err == nil {
+		effective = abs
 	}
-	return folder, notes, nil
+	return effective, notes, nil
 }
