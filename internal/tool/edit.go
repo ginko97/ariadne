@@ -181,7 +181,12 @@ func resolveEdit(content, oldText, newText string) editMatch {
 	if n == 0 {
 		if trimmed := strings.TrimRight(oldText, "\r\n"); trimmed != oldText && trimmed != "" {
 			if m := strings.Count(content, trimmed); m > 0 {
-				oldText, newText, n = trimmed, strings.TrimRight(newText, "\r\n"), m
+				suffix := oldText[len(trimmed):]
+				newTrimmed := newText
+				if strings.HasSuffix(newText, suffix) {
+					newTrimmed = newText[:len(newText)-len(suffix)]
+				}
+				oldText, newText, n = trimmed, newTrimmed, m
 			}
 		}
 	}
