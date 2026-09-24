@@ -3,6 +3,12 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## Unreleased — v0.6.10
+
+- **A conversation with a long title can be deleted.** Its title pushed the
+  × off the edge of the sidebar, under the scrollbar, so it could not be
+  clicked. Titles now shorten with … and the × stays in reach.
+
 ## v0.6.9 — 2026-09-24 — today's date, memory you type, and local models
 
 - **ariadne tells the model today's date.** Nothing did before, so a model

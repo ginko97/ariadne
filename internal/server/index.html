@@ -52,6 +52,11 @@
                font-size:1.1em; line-height:1; }
   #runs .row:hover .del, #runs .del:focus { visibility:visible; }
   #runs .del:hover { color:var(--err); }
+  /* A flex item will not shrink below its content, and a title is one line
+     that never wraps, so a long one widened its button and pushed the ×
+     under the scrollbar, where it could not be clicked. min-width:0 lets the
+     button shrink and the title's ellipsis do its job. */
+  #runs .row > button:not(.del) { flex:1 1 auto; min-width:0; }
   #runs .confirm { display:flex; flex-direction:column; gap:.4rem; padding:.6rem .9rem;
                    border-bottom:1px solid var(--edge); border-left:3px solid var(--err);
                    font-size:.85em; }
