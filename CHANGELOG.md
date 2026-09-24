@@ -3,7 +3,7 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
-## Unreleased — v0.6.8, from a week of daily use
+## v0.6.8 — 2026-09-24 — cited but never opened, and a week of daily use
 
 - **Cited but never opened.** After an answer, ariadne checks every URL the
   answer, or a file written in that turn, cites against the pages the
