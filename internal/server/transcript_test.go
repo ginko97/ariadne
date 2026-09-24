@@ -88,8 +88,11 @@ func TestTranscriptSeparatesPromptsAnswersAndTools(t *testing.T) {
 	}
 }
 
-// A brief conversation records the brief path on its transcript, so reopening
-// it in the browser renders the task brief card rather than an ordinary chat bubble.
+// A brief conversation's transcript names its brief. The field has been sent
+// since v0.6.4; nothing tested it until the page started depending on it to
+// show a reopened brief conversation's first message as the brief card
+// (0d73eee). This guards the field, not that fix: the page's rendering is
+// checked in the browser, because no test here runs the page's script.
 func TestTranscriptIncludesBriefWhenStartedFromBrief(t *testing.T) {
 	s, ts := newTestServer(t)
 

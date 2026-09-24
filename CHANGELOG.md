@@ -15,7 +15,17 @@ carry the longer story for each release.
   report that timed out all three times it was fetched.
 - **Brief… lists the briefs.** The panel shows the `.md` files in the
   conversation's folder, subfolders included, newest first; click one to
-  read it. Typing a path still works.
+  read it. Typing a path still works. Empty files and files over 2 MB are
+  left out, since neither can be started.
+- **`-task` takes only a `.md` file**, in `ariadne run` and `ariadne chat`,
+  as **Brief…** already did. A brief in a `.txt` file, which used to work,
+  is now refused: rename it. A folder, a file over 2 MB, or one with only
+  blank lines is refused before anything is sent, with a message saying
+  which.
+- **An empty brief is refused in the browser too**, instead of reaching the
+  provider as an empty message and failing there.
+- **Reopening a conversation started from a brief shows the brief** as the
+  brief card it started with, not as a plain message.
 - **A brief gets 25 steps a turn**, up from 10, unless `-max-steps` is
   given. A research brief used exactly the 10 a turn allowed. Every gated
   call still asks.

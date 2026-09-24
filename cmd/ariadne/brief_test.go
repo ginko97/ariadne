@@ -10,21 +10,51 @@ import (
 	"github.com/ginko97/ariadne/internal/loop"
 )
 
+// deadEndpoint and offline keep every test here off the network even when the
+// check it tests is broken. A regression then gets as far as a model call, and
+// that call goes to a closed port with a dummy key and fails, instead of
+// sending a task file to whichever provider a key in the shell belongs to.
+// A dummy key rather than none: with no key the command stops early with
+// exitUsage, which is what several of these tests expect, so a broken check
+// would pass.
+var deadEndpoint = []string{"-base-url", "http://127.0.0.1:1/v1", "-model", "m", "-http-timeout", "2s"}
+
+func offline(t *testing.T) {
+	t.Helper()
+	t.Setenv("ARIADNE_API_KEY", "test-key-1234567890")
+	oldRuns := runsDir
+	runsDir = t.TempDir()
+	empty, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldIn := os.Stdin
+	os.Stdin = empty
+	t.Cleanup(func() {
+		runsDir, os.Stdin = oldRuns, oldIn
+		empty.Close()
+	})
+}
+
+func offlineArgs(a ...string) []string { return append(append([]string{}, deadEndpoint...), a...) }
+
 func TestCmdRunTaskFlagRejectsBothFileAndPositional(t *testing.T) {
+	offline(t)
 	tmpDir := t.TempDir()
 	briefFile := filepath.Join(tmpDir, "brief.md")
 	if err := os.WriteFile(briefFile, []byte("my brief task"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	code := cmdRun([]string{"-task", briefFile, "extra positional argument"})
+	code := cmdRun(offlineArgs("-task", briefFile, "extra positional argument"))
 	if code != exitUsage {
 		t.Errorf("cmdRun with both -task and positional args got exit code %d, want exitUsage (%d)", code, exitUsage)
 	}
 }
 
 func TestCmdRunTaskFlagMissingFile(t *testing.T) {
-	code := cmdRun([]string{"-task", "non_existent_file.md"})
+	offline(t)
+	code := cmdRun(offlineArgs("-task", "non_existent_file.md"))
 	if code != exitFail {
 		t.Errorf("cmdRun with non-existent -task got exit code %d, want exitFail (%d)", code, exitFail)
 	}
@@ -47,45 +77,49 @@ func runWithStderr(fn func() int) (int, string) {
 }
 
 func TestCmdRunTaskFlagEmptyFile(t *testing.T) {
+	offline(t)
 	tmpDir := t.TempDir()
 	emptyFile := filepath.Join(tmpDir, "empty.md")
 	if err := os.WriteFile(emptyFile, []byte("   \n\t  "), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	code, errText := runWithStderr(func() int { return cmdRun([]string{"-task", emptyFile}) })
+	code, errText := runWithStderr(func() int { return cmdRun(offlineArgs("-task", emptyFile)) })
 	if code != exitUsage || !strings.Contains(errText, "is empty") {
 		t.Errorf("got code %d, stderr %q; want exitUsage and 'is empty'", code, errText)
 	}
 }
 
 func TestCmdRunTaskFlagNonMarkdownFile(t *testing.T) {
+	offline(t)
 	tmpDir := t.TempDir()
 	txtFile := filepath.Join(tmpDir, "task.txt")
 	if err := os.WriteFile(txtFile, []byte("plain text"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	code, errText := runWithStderr(func() int { return cmdRun([]string{"-task", txtFile}) })
+	code, errText := runWithStderr(func() int { return cmdRun(offlineArgs("-task", txtFile)) })
 	if code != exitUsage || !strings.Contains(errText, "task file must be a markdown (.md) file") {
 		t.Errorf("got code %d, stderr %q; want exitUsage and 'task file must be a markdown (.md) file'", code, errText)
 	}
 }
 
 func TestCmdRunTaskFlagDirectory(t *testing.T) {
+	offline(t)
 	tmpDir := t.TempDir()
 	dir := filepath.Join(tmpDir, "folder.md")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	code, errText := runWithStderr(func() int { return cmdRun([]string{"-task", dir}) })
+	code, errText := runWithStderr(func() int { return cmdRun(offlineArgs("-task", dir)) })
 	if code != exitUsage || !strings.Contains(errText, "is a directory") {
 		t.Errorf("got code %d, stderr %q; want exitUsage and 'is a directory'", code, errText)
 	}
 }
 
 func TestCmdRunTaskFlagFileTooLarge(t *testing.T) {
+	offline(t)
 	tmpDir := t.TempDir()
 	largeFile := filepath.Join(tmpDir, "large.md")
 	f, err := os.Create(largeFile)
@@ -98,33 +132,35 @@ func TestCmdRunTaskFlagFileTooLarge(t *testing.T) {
 	}
 	f.Close()
 
-	code, errText := runWithStderr(func() int { return cmdRun([]string{"-task", largeFile}) })
+	code, errText := runWithStderr(func() int { return cmdRun(offlineArgs("-task", largeFile)) })
 	if code != exitUsage || !strings.Contains(errText, "is too large (max 2MB)") {
 		t.Errorf("got code %d, stderr %q; want exitUsage and 'is too large (max 2MB)'", code, errText)
 	}
 }
 
 func TestCmdChatTaskFlagNonMarkdownFile(t *testing.T) {
+	offline(t)
 	tmpDir := t.TempDir()
 	txtFile := filepath.Join(tmpDir, "task.txt")
 	if err := os.WriteFile(txtFile, []byte("plain text"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	code, errText := runWithStderr(func() int { return cmdChat([]string{"-task", txtFile}) })
+	code, errText := runWithStderr(func() int { return cmdChat(offlineArgs("-task", txtFile)) })
 	if code != exitUsage || !strings.Contains(errText, "task file must be a markdown (.md) file") {
 		t.Errorf("got code %d, stderr %q; want exitUsage and 'task file must be a markdown (.md) file'", code, errText)
 	}
 }
 
 func TestCmdChatTaskFlagRejectsWhenResuming(t *testing.T) {
+	offline(t)
 	tmpDir := t.TempDir()
 	briefFile := filepath.Join(tmpDir, "brief.md")
 	if err := os.WriteFile(briefFile, []byte("my brief task"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	code := cmdChat([]string{"-task", briefFile, "run_already_existing"})
+	code := cmdChat(offlineArgs("-task", briefFile, "run_already_existing"))
 	if code != exitUsage {
 		t.Errorf("cmdChat with -task while resuming got exit code %d, want exitUsage (%d)", code, exitUsage)
 	}
