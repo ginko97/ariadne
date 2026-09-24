@@ -3,7 +3,7 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
-## Unreleased — v0.6.9
+## v0.6.9 — 2026-09-24 — today's date, memory you type, and local models
 
 - **ariadne tells the model today's date.** Nothing did before, so a model
   took the year its training ended as the present: one proposed remembering
