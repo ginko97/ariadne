@@ -3,7 +3,7 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
-## Unreleased — v0.6.10
+## v0.6.10 — 2026-09-25 — memory from the next message, a default folder, and Tasks
 
 - **A fact counts from your next message.** Remembered facts were read once,
   when a conversation started, so a fact saved in the middle of one was
