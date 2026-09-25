@@ -3,6 +3,21 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## Unreleased — v0.6.11
+
+- **Edit a task file in the page.** Under a task's text in **Tasks…**,
+  **Edit** turns it into a box you can change. **Save** writes it back, and
+  refuses, rather than overwriting, if the file changed since you opened it
+  (in Notepad, say). **Run this version** runs what is in the box: the saved
+  file if nothing changed, otherwise your edited text once, without saving
+  it, marked "not saved" on the task card.
+- **New task.** **New task…** in the Tasks panel opens an empty editor.
+  Describe the job in a sentence and **Draft with the model** writes a first
+  version: the model has no tools while it drafts, so it reads nothing, and
+  the draft is recorded as a conversation of its own. Read it, change it,
+  name it and **Save**; nothing is written before that, and an existing file
+  is never replaced.
+
 ## v0.6.10 — 2026-09-25 — memory from the next message, a default folder, and Tasks
 
 - **A fact counts from your next message.** Remembered facts were read once,

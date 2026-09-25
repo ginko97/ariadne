@@ -34,9 +34,11 @@ func briefDigest(content string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// readWorkspaceBrief validates that path is a markdown file within workspace,
-// opens it safely via os.OpenRoot, and returns its normalized relative path and content.
-func readWorkspaceBrief(workspace, path string) (relPath, content string, err error) {
+// briefPath checks that path names a markdown file inside workspace, and
+// returns the folder and the path relative to it. Only the shape of the path:
+// whether the file exists, and whether a link leads out, is for os.Root to
+// say when the file is opened.
+func briefPath(workspace, path string) (ws, rel string, err error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return "", "", errors.New("a task file path is required")
@@ -44,25 +46,30 @@ func readWorkspaceBrief(workspace, path string) (relPath, content string, err er
 	if strings.ToLower(filepath.Ext(path)) != ".md" {
 		return "", "", errors.New("a task file must be a markdown (.md) file")
 	}
-
-	ws, err := checkWorkspace(workspace)
-	if err != nil {
+	if ws, err = checkWorkspace(workspace); err != nil {
 		return "", "", err
 	}
-
-	var rel string
+	rel = path
 	if filepath.IsAbs(path) {
 		r, err := filepath.Rel(ws, path)
 		if err != nil || strings.HasPrefix(r, "..") || filepath.IsAbs(r) {
 			return "", "", errors.New("the task file must be inside the conversation's folder")
 		}
 		rel = r
-	} else {
-		rel = path
 	}
 	rel = filepath.Clean(rel)
 	if strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
 		return "", "", errors.New("the task file must be inside the conversation's folder")
+	}
+	return ws, rel, nil
+}
+
+// readWorkspaceBrief validates that path is a markdown file within workspace,
+// opens it safely via os.OpenRoot, and returns its normalized relative path and content.
+func readWorkspaceBrief(workspace, path string) (relPath, content string, err error) {
+	ws, rel, err := briefPath(workspace, path)
+	if err != nil {
+		return "", "", err
 	}
 
 	root, err := os.OpenRoot(ws)

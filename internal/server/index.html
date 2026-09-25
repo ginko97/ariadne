@@ -99,6 +99,12 @@
   #briefList .when { color:var(--dim); font-size:.85em; white-space:nowrap; }
   #briefText { max-height:40vh; overflow-y:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
   #briefPreview button { align-self:flex-start; }
+  #briefEditor { flex-basis:100%; display:flex; flex-direction:column; gap:.4rem; }
+  #briefEditor[hidden], #draftBox[hidden] { display:none; }
+  #briefEditor textarea { font:inherit; padding:.45rem .55rem; resize:vertical; width:100%; }
+  #briefEdit { min-height:12rem; max-height:60vh; font-family:ui-monospace,Consolas,monospace; font-size:.92em; }
+  #draftBox { display:flex; flex-direction:column; gap:.35rem; }
+  #briefEditor .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
   .brief-header { font-size:.85em; margin-bottom:.3rem; font-weight:600; }
   .prompt { align-self:flex-end; background:#8882; padding:.5rem .75rem; border-radius:.6rem; }
   .tool_call, .tool_result { color:var(--dim); font-family:ui-monospace,SFMono-Regular,monospace;
@@ -194,12 +200,35 @@
     <input id="briefInput" type="text" spellcheck="false" placeholder="Path to a task file (.md) in the folder">
     <button type="button" id="useBrief">Show</button>
     <button type="button" id="cancelBrief">Cancel</button>
+    <button type="button" id="newTaskBtn" title="Write a new task file, or have the model draft one">New task…</button>
     <span id="briefErr" class="is_error"></span>
     <div id="briefList" hidden></div>
     <div id="briefPreview" hidden>
       <div class="dim">This task becomes your own instruction to the model. Read it before you run it; only use task files you wrote or have read.</div>
       <div id="briefText" class="brief md"></div>
-      <button type="button" id="startBrief" class="primary">Run this task</button>
+      <div class="row">
+        <button type="button" id="startBrief" class="primary">Run this task</button>
+        <button type="button" id="editBrief" title="Change this task file here">Edit</button>
+      </div>
+    </div>
+    <div id="briefEditor" hidden>
+      <div id="draftBox" hidden>
+        <textarea id="draftDesc" rows="2" placeholder="Describe the task in a sentence or two, e.g. Every Friday: IHSG weekly report from IDX and two news sites, with a table and sources"></textarea>
+        <div class="row">
+          <button type="button" id="draftBtn">Draft with the model</button>
+          <span class="dim">The model gets no tools while it drafts, so it reads nothing. Read the draft before you save it.</span>
+        </div>
+      </div>
+      <div class="row">
+        <input id="briefName" type="text" spellcheck="false" placeholder="File name, e.g. weekly-ihsg.md" style="flex:1; min-width:14rem;">
+      </div>
+      <textarea id="briefEdit" spellcheck="true"></textarea>
+      <div class="row">
+        <button type="button" id="saveBrief" class="primary">Save</button>
+        <button type="button" id="runEdited">Run this version</button>
+        <button type="button" id="cancelEdit">Cancel</button>
+        <span id="editMsg" class="dim" role="status"></span>
+      </div>
     </div>
   </div>
   <div id="memoryPanel" hidden>
@@ -824,6 +853,7 @@ async function send(text, opts = {}) {
         workspace: runID ? undefined : (newWorkspace || undefined),
         brief: opts.brief || undefined,
         brief_sha256: opts.briefSHA || undefined,
+        brief_text: opts.briefText || undefined,
       }),
     });
   } catch (e) {
@@ -1489,7 +1519,9 @@ let shownBrief = null;
 
 function clearBriefPreview() {
   shownBrief = null;
+  editing = null;
   $('briefPreview').hidden = true;
+  $('briefEditor').hidden = true;
   $('briefText').replaceChildren();
 }
 
@@ -1542,7 +1574,7 @@ async function loadBriefList() {
     head.textContent = 'No task files (.md) in ' + d.folder + '. Type a path, or choose another folder' +
       (runID ? ' in a new conversation.' : ' with Folder….');
     list.append(head);
-    list.hidden = false;
+    list.hidden = !!editing;
     return;
   }
   head.textContent = (d.partial ? 'Newest ' + d.briefs.length + ' task files in ' : 'Task files in ') + d.folder +
@@ -1565,7 +1597,7 @@ async function loadBriefList() {
     };
     list.append(btn);
   }
-  list.hidden = false;
+  list.hidden = !!editing;
 }
 
 $('briefBtn').onclick = () => {
@@ -1605,7 +1637,7 @@ async function showBrief(path) {
       $('briefErr').textContent = d.error || 'could not load the task file';
       return;
     }
-    shownBrief = { path: d.path, sha256: d.sha256 };
+    shownBrief = { path: d.path, sha256: d.sha256, content: d.content };
     $('briefText').replaceChildren(renderMarkdown(d.content));
     $('briefPreview').hidden = false;
     $('startBrief').focus();
@@ -1614,9 +1646,10 @@ async function showBrief(path) {
   }
 }
 
-$('startBrief').onclick = () => {
-  if (busy || !shownBrief) return;
-  const b = shownBrief;
+// runTask starts a task in a new conversation in the task's folder: the saved
+// file (by its digest), or the text in the editor when it was not saved.
+function runTask(opts) {
+  if (busy) return;
   const folder = taskFolder();
   closeBriefPanel();
   // From inside a conversation: a new one, in the same folder. The open one
@@ -1626,7 +1659,115 @@ $('startBrief').onclick = () => {
     newWorkspace = folder || null;
     showFolder();
   }
-  send('', { brief: b.path, briefSHA: b.sha256 });
+  send('', opts);
+}
+
+$('startBrief').onclick = () => {
+  if (!shownBrief) return;
+  runTask({ brief: shownBrief.path, briefSHA: shownBrief.sha256 });
+};
+
+// ---- editing a task file, or writing a new one
+//
+// editing is { path, sha, original, create }: the file the edit started from
+// and its digest, so Save can refuse to overwrite a version it never showed.
+// A new task has no path or digest until it is saved.
+let editing = null;
+
+function openEditor(e, draft) {
+  editing = e;
+  $('briefPreview').hidden = true;
+  $('briefList').hidden = true;
+  $('briefEditor').hidden = false;
+  $('draftBox').hidden = !draft;
+  $('briefName').hidden = !e.create;
+  $('briefName').value = e.create ? '' : e.path;
+  $('briefEdit').value = e.original;
+  $('editMsg').textContent = '';
+  $('briefErr').textContent = '';
+  (draft ? $('draftDesc') : $('briefEdit')).focus();
+}
+
+function taskName() {
+  let n = $('briefName').value.trim();
+  if (n && !/\.md$/i.test(n)) n += '.md';
+  return n;
+}
+
+$('editBrief').onclick = () => {
+  if (!shownBrief) return;
+  openEditor({ path: shownBrief.path, sha: shownBrief.sha256, original: shownBrief.content, create: false }, false);
+};
+$('newTaskBtn').onclick = () => {
+  if (busy) return;
+  if ($('briefPanel').hidden) openBriefPanel();
+  openEditor({ path: '', sha: '', original: '', create: true }, true);
+};
+$('cancelEdit').onclick = () => {
+  const was = editing;
+  editing = null;
+  $('briefEditor').hidden = true;
+  if (was && !was.create && shownBrief) $('briefPreview').hidden = false;
+  else loadBriefList();
+};
+
+$('draftBtn').onclick = async () => {
+  const description = $('draftDesc').value.trim();
+  if (!description) { $('editMsg').textContent = 'describe the task first'; return; }
+  $('draftBtn').disabled = true;
+  $('editMsg').textContent = 'The model is drafting…';
+  try {
+    const resp = await api('/api/tasks/draft', { method: 'POST', body: JSON.stringify({ description, workspace: taskFolder() }) });
+    const d = await resp.json().catch(() => ({ error: 'refused' }));
+    if (!resp.ok) { $('editMsg').textContent = d.error || 'could not draft'; return; }
+    $('briefEdit').value = d.content;
+    $('editMsg').textContent = 'Draft ready. Read it, change what you need, name it and Save.';
+    loadRuns();
+    $('briefName').focus();
+  } catch (e) {
+    $('editMsg').textContent = e.message;
+  } finally {
+    $('draftBtn').disabled = false;
+  }
+};
+
+$('saveBrief').onclick = async () => {
+  if (!editing) return;
+  const content = $('briefEdit').value;
+  const path = editing.create ? taskName() : editing.path;
+  if (!path) { $('editMsg').textContent = 'give the task file a name'; return; }
+  $('saveBrief').disabled = true;
+  try {
+    const body = { path, content, workspace: taskFolder() };
+    if (editing.create) body.create = true; else body.sha256 = editing.sha;
+    const resp = await api('/api/brief/save', { method: 'POST', body: JSON.stringify(body) });
+    const d = await resp.json().catch(() => ({ error: 'refused' }));
+    if (!resp.ok) { $('editMsg').textContent = d.error || 'could not save'; return; }
+    editing = { path: d.path, sha: d.sha256, original: content, create: false };
+    shownBrief = { path: d.path, sha256: d.sha256, content };
+    $('briefName').hidden = true;
+    $('draftBox').hidden = true;
+    $('briefInput').value = d.path;
+    $('editMsg').textContent = 'Saved ' + d.path + '.';
+  } catch (e) {
+    $('editMsg').textContent = e.message;
+  } finally {
+    $('saveBrief').disabled = false;
+  }
+};
+
+// Run this version: the saved file when nothing changed since it was saved,
+// otherwise exactly the text in the box, once, without saving it.
+$('runEdited').onclick = () => {
+  if (!editing) return;
+  const text = $('briefEdit').value;
+  if (!text.trim()) { $('editMsg').textContent = 'the task is empty'; return; }
+  if (!editing.create && text === editing.original) {
+    runTask({ brief: editing.path, briefSHA: editing.sha });
+    return;
+  }
+  const name = editing.create ? (taskName() || 'new-task.md') : editing.path;
+  runTask({ brief: name, briefText: text });
 };
 
 // ---------------------------------------------------------------- memory

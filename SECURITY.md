@@ -110,6 +110,11 @@ plainly, what protects you and what does not.
   once. Approval still applies to what the task leads to. A conversation
   started from a task file may take 25 steps a turn instead of 10, so it can
   make more model calls, and spend more, before it stops on its own.
+  **New task…** has the model draft a task file with no tools at all, so it
+  reads nothing while it writes; nothing is saved until you have read the
+  draft and pressed Save. Editing or saving a task file in the page asks no
+  question, because you are the one writing it, and refuses to overwrite a
+  file that changed since you opened it.
 - **Remembered facts are sent with every message.** Each fact in **🧠** goes
   to the model with every message of every conversation, so keep passwords
   and private details out of them. A fact you type or edit is saved as

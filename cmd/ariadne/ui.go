@@ -175,6 +175,21 @@ func cmdUI(args []string) int {
 		flagFolder = serverWorkspace
 	}
 	srv.SaveDefaultFolder = folderSaver(flagFolder)
+	// New task: the model drafts a task file in a conversation of its own,
+	// recorded like any other, with no tools (draftTask).
+	srv.DraftTask = func(ctx context.Context, folder, description string) (string, string, error) {
+		runID := newRunID()
+		tw, err := trace.NewFileWriter(runsDir, runID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: trace unavailable for %s: %v\n", runID, err)
+			tw = nil
+		}
+		if tw != nil {
+			defer closeTrace(tw)
+		}
+		text, err := draftTask(ctx, optsFor(runID, nil, nil, tw), folder, description)
+		return runID, text, err
+	}
 	srv.PickFolder = folderPicker(runtime.GOOS, exec.LookPath)
 	unsupported, local := modelListFor(*baseURL)
 	srv.Models.Reconfigure(*model, unsupported, local)

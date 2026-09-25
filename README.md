@@ -134,7 +134,7 @@ dropped before an answer arrived.
 | | |
 | --- | --- |
 | **New conversation**, **Folder…** | choose the folder a new conversation may read and write; it stays fixed after that. The default for every new conversation is set in **⚙**. **Browse…** opens your system's folder dialog where one is installed (not in WSL without `zenity`) |
-| **Tasks…** | lists the task files (`.md`) in the folder, newest first, from any conversation; click one to read it in full, then **Run this task**, which starts a new conversation in the same folder. It refuses to start if the file changed in between |
+| **Tasks…** | lists the task files (`.md`) in the folder, newest first, from any conversation; click one to read it in full, then **Run this task**, which starts a new conversation in the same folder. **Edit** changes it in the page; **New task…** writes one, or has the model draft it from a sentence for you to read and save. It refuses to start if the file changed in between |
 | approval cards | several calls at once arrive as one card, and you can leave any out; a web card can allow one site until the turn ends |
 | **Needs you** | marks a conversation waiting on you |
 | **Stop** / **Resume turn** | end a turn at any point; finish an interrupted one without repeating what ran |

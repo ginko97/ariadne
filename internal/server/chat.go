@@ -38,6 +38,11 @@ type chatRequest struct {
 	// read now: Start is consent to the text on the screen, not to whatever
 	// the file holds by the time the request arrives.
 	BriefSHA256 string `json:"brief_sha256,omitempty"`
+	// BriefText runs this text as the task instead of the file at Brief —
+	// "Run this version" on an edit that was not saved, or a new task not
+	// yet saved. Brief is then only its name. No digest: what runs is exactly
+	// what the page sent, which is what the person has in front of them.
+	BriefText string `json:"brief_text,omitempty"`
 }
 
 // handleChat runs one turn and streams it.
@@ -86,7 +91,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "cannot send both a task file and a message")
 		return
 	}
-	if req.Brief != "" && req.BriefSHA256 == "" {
+	if req.BriefText != "" && req.Brief == "" {
+		httpError(w, http.StatusBadRequest, "brief_text needs the task file's name in brief")
+		return
+	}
+	if req.Brief != "" && req.BriefSHA256 == "" && req.BriefText == "" {
 		httpError(w, http.StatusBadRequest, "a task file runs only after it has been shown: brief_sha256 is required")
 		return
 	}
@@ -123,17 +132,31 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 				bws = cwd
 			}
 		}
-		rel, content, err := readWorkspaceBrief(bws, req.Brief)
-		if err != nil {
-			httpError(w, http.StatusBadRequest, "task file: "+err.Error())
-			return
+		if req.BriefText != "" {
+			_, rel, err := briefPath(bws, req.Brief)
+			if err == nil {
+				err = checkBriefContent(req.BriefText)
+			}
+			if err != nil {
+				httpError(w, http.StatusBadRequest, "task file: "+err.Error())
+				return
+			}
+			briefRelPath = filepath.ToSlash(rel) + ", not saved"
+			briefContent = req.BriefText
+		} else {
+			rel, content, err := readWorkspaceBrief(bws, req.Brief)
+			if err != nil {
+				httpError(w, http.StatusBadRequest, "task file: "+err.Error())
+				return
+			}
+			if briefDigest(content) != req.BriefSHA256 {
+				httpError(w, http.StatusConflict, "task file "+rel+" changed since it was shown; show it again before running it")
+				return
+			}
+			briefRelPath = rel
+			briefContent = content
 		}
-		if briefDigest(content) != req.BriefSHA256 {
-			httpError(w, http.StatusConflict, "task file "+rel+" changed since it was shown; show it again before running it")
-			return
-		}
-		briefRelPath = rel
-		briefContent = content
+		content := briefContent
 		req.Message = content
 		if workspace == "" {
 			workspace = bws

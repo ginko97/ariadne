@@ -83,6 +83,9 @@ type Server struct {
 	// ask first, as the agent factory builds it. See handleAbout.
 	Tools []ToolInfo
 
+	// DraftTask asks the model for a new task file. Nil disables New task.
+	DraftTask DraftFunc
+
 	// SaveDefaultFolder stores a new default folder for new conversations
 	// (config.env, in cmd/ariadne) and returns the one now in effect — the
 	// home directory's workspace when path is "" — with any notes to show.
@@ -148,6 +151,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/workspace/pick", s.handleWorkspacePick)
 	mux.HandleFunc("POST /api/brief", s.handleBrief)
 	mux.HandleFunc("POST /api/briefs", s.handleBriefs)
+	mux.HandleFunc("POST /api/brief/save", s.handleBriefSave)
+	mux.HandleFunc("POST /api/tasks/draft", s.handleTaskDraft)
 	mux.HandleFunc("GET /api/setup", s.handleSetupStatus)
 	mux.HandleFunc("POST /api/setup", s.handleSetup)
 	mux.HandleFunc("POST /api/setup/ollama", s.handleSetupOllama)
