@@ -3,7 +3,7 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
-## Unreleased — v0.6.11
+## v0.6.11 — 2026-09-27 — write and change task files in the page
 
 - **Edit a task file in the page.** Under a task's text in **Tasks…**,
   **Edit** turns it into a box you can change. **Save** writes it back, and
