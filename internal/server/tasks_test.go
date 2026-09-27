@@ -131,6 +131,16 @@ func TestTaskEndpoints(t *testing.T) {
 	if entries, _ := os.ReadDir(ws); len(entries) != 1 {
 		t.Errorf("a draft wrote a file: %v", entries)
 	}
+
+	// Empty workspace and empty default folder falls back to cwd
+	s.DefaultWorkspace = ""
+	t.Chdir(ws)
+	if code, out := postTask(t, s, ts.Client(), ts.URL+"/api/brief/save", briefSaveRequest{Path: "a.md", Content: "# C\n", SHA256: briefDigest("# B\n")}); code != http.StatusOK || out["sha256"] != briefDigest("# C\n") {
+		t.Errorf("save falling back to cwd: %d %v", code, out)
+	}
+	if code, _ := postTask(t, s, ts.Client(), ts.URL+"/api/tasks/draft", draftRequest{Description: "weekly IHSG"}); code != http.StatusOK || asked != ws+"|weekly IHSG" {
+		t.Errorf("draft falling back to cwd: %d, asked %q", code, asked)
+	}
 }
 
 // "Run this version" runs the text in the editor, named after the file and

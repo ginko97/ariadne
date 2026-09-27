@@ -1749,6 +1749,8 @@ $('saveBrief').onclick = async () => {
     $('draftBox').hidden = true;
     $('briefInput').value = d.path;
     $('editMsg').textContent = 'Saved ' + d.path + '.';
+    $('briefText').replaceChildren(renderMarkdown(content));
+    loadBriefList();
   } catch (e) {
     $('editMsg').textContent = e.message;
   } finally {

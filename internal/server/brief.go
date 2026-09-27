@@ -58,7 +58,8 @@ func briefPath(workspace, path string) (ws, rel string, err error) {
 		rel = r
 	}
 	rel = filepath.Clean(rel)
-	if strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+	slash := filepath.ToSlash(rel)
+	if strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) || strings.HasPrefix(slash, "/") || filepath.VolumeName(rel) != "" || strings.Contains(rel, ":") {
 		return "", "", errors.New("the task file must be inside the conversation's folder")
 	}
 	return ws, rel, nil

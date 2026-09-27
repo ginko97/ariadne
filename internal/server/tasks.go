@@ -131,6 +131,11 @@ func (s *Server) handleBriefSave(w http.ResponseWriter, r *http.Request) {
 	if ws == "" {
 		ws = s.DefaultFolder()
 	}
+	if ws == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			ws = cwd
+		}
+	}
 	rel, sha, err := saveWorkspaceBrief(ws, req.Path, req.Content, req.SHA256, req.Create)
 	switch {
 	case errors.Is(err, errBriefChanged), errors.Is(err, errBriefExists):
@@ -178,6 +183,11 @@ func (s *Server) handleTaskDraft(w http.ResponseWriter, r *http.Request) {
 	ws := req.Workspace
 	if ws == "" {
 		ws = s.DefaultFolder()
+	}
+	if ws == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			ws = cwd
+		}
 	}
 	if _, err := checkWorkspace(ws); err != nil {
 		httpError(w, http.StatusBadRequest, "folder: "+err.Error())

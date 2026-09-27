@@ -87,6 +87,10 @@ func TestReadWorkspaceBrief_Rejections(t *testing.T) {
 		{"nonexistent file", "nonexistent.md"},
 		{"empty file", "empty.md"},
 		{"whitespace file", "whitespace.md"},
+		{"slash prefix", "/outside.md"},
+		{"backslash prefix", "\\outside.md"},
+		{"drive relative", "C:outside.md"},
+		{"colon stream", "task:stream.md"},
 	}
 
 	for _, tc := range cases {

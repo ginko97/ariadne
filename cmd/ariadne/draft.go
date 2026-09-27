@@ -36,6 +36,7 @@ const noToolsWhileDrafting = "(none while drafting a task)"
 // With nothing offered, there is nothing it could have read.
 func draftTask(ctx context.Context, opts agentOpts, folder, description string) (string, error) {
 	opts.Workspace = folder
+	opts.Memory = false
 	a := newAgentFor(opts)
 	a.System = draftSystemPrompt
 	// The whole allow-list: the loop offers only allowed tools, so the
@@ -45,7 +46,7 @@ func draftTask(ctx context.Context, opts agentOpts, folder, description string) 
 
 	state := loop.NewState(opts.RunID, "Draft a task file: "+description)
 	state.Workspace = folder
-	state.Memory = opts.Memory
+	state.Memory = false
 	answer, err := a.Run(ctx, state)
 	if err != nil {
 		return "", err
@@ -54,13 +55,22 @@ func draftTask(ctx context.Context, opts agentOpts, folder, description string) 
 }
 
 // unfence removes one code fence a model may put around the whole file
-// ("```markdown ... ```"), which would otherwise be saved into it.
+// ("```markdown ... ```" or "````markdown ... ````"), which would otherwise
+// be saved into it.
 func unfence(s string) string {
 	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "```") || !strings.HasSuffix(s, "```") || len(s) < 6 {
+	fenceLen := 0
+	for fenceLen < len(s) && s[fenceLen] == '`' {
+		fenceLen++
+	}
+	if fenceLen < 3 {
 		return s + "\n"
 	}
-	body := strings.TrimSuffix(s, "```")
+	fence := strings.Repeat("`", fenceLen)
+	if !strings.HasSuffix(s, fence) || len(s) < fenceLen*2 {
+		return s + "\n"
+	}
+	body := strings.TrimSuffix(s, fence)
 	if i := strings.Index(body, "\n"); i >= 0 {
 		body = body[i+1:]
 	} else {

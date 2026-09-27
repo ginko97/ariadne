@@ -66,10 +66,13 @@ func TestDraftTaskOffersNoTools(t *testing.T) {
 
 func TestUnfenceTakesOffOneOuterFence(t *testing.T) {
 	for in, want := range map[string]string{
-		"```markdown\n# T\n\nbody\n```": "# T\n\nbody\n",
-		"```\n# T\n```":                 "# T\n",
-		"# T\n\n```bash\nls\n```":       "# T\n\n```bash\nls\n```\n",
-		"  # T  ":                       "# T\n",
+		"```markdown\n# T\n\nbody\n```":             "# T\n\nbody\n",
+		"```\n# T\n```":                             "# T\n",
+		"# T\n\n```bash\nls\n```":                   "# T\n\n```bash\nls\n```\n",
+		"  # T  ":                                   "# T\n",
+		"````markdown\n# T\n```bash\nls\n```\n````": "# T\n```bash\nls\n```\n",
+		"````\n# T\n````":                           "# T\n",
+		"````markdown\n# T\nSee `code`\n````":       "# T\nSee `code`\n",
 	} {
 		if got := unfence(in); got != want {
 			t.Errorf("unfence(%q) = %q, want %q", in, got, want)
