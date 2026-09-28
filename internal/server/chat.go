@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/ginko97/ariadne/internal/cite"
 	"github.com/ginko97/ariadne/internal/llm"
@@ -267,6 +269,34 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	agent.ApproveBatch = s.batchApprover(runID, out, state.Workspace, isBrief)
 	agent.Approve = s.approver(runID, out, state.Workspace, isBrief)
 
+	origRunTool := agent.RunTool
+	if origRunTool != nil {
+		agent.RunTool = func(ctx context.Context, call llm.ToolCall) (llm.ToolResult, error) {
+			out.event("tool_start", map[string]any{
+				"id":   call.ID,
+				"name": call.Name,
+				"args": compactJSON(call.Args),
+			})
+			res, err := origRunTool(ctx, call)
+			if err != nil {
+				out.event("tool_result", map[string]any{
+					"id":       call.ID,
+					"name":     call.Name,
+					"text":     err.Error(),
+					"is_error": true,
+				})
+				return res, err
+			}
+			out.event("tool_result", map[string]any{
+				"id":       call.ID,
+				"name":     call.Name,
+				"text":     res.Content,
+				"is_error": res.IsError,
+			})
+			return res, nil
+		}
+	}
+
 	if req.Model != "" {
 		agent.Model = req.Model
 	} else if !fresh && state.Model != "" {
@@ -357,12 +387,15 @@ func deltaEvents(out *sseWriter) func(llm.Chunk) {
 // synchronous inside the loop and stopping the turn is the context's job, not
 // the printer's.
 type sseWriter struct {
+	mu  sync.Mutex
 	w   http.ResponseWriter
 	f   http.Flusher
 	err error
 }
 
 func (e *sseWriter) event(name string, v any) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.err != nil {
 		return
 	}

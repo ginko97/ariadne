@@ -88,6 +88,7 @@ func (s *lineSource) next(ctx context.Context, timeout time.Duration) (string, e
 var (
 	stdinOnce sync.Once
 	stdinSrc  *lineSource
+	testStdin *lineSource
 )
 
 // stdinSource is the process's one reader of os.Stdin.
@@ -98,6 +99,9 @@ var (
 // made its own — harmless while a command built one agent, and a lost
 // keystroke the day one built two.
 func stdinSource() *lineSource {
+	if testStdin != nil {
+		return testStdin
+	}
 	stdinOnce.Do(func() { stdinSrc = newLineSource(os.Stdin) })
 	return stdinSrc
 }

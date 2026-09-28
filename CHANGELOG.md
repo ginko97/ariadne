@@ -3,6 +3,24 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## v0.6.12 — 2026-09-28 — /retry in chat, collapsible tool calls, and delete task files
+
+- **/retry in the terminal REPL.** When a turn in `ariadne chat` is interrupted
+  or fails to get an answer, `/retry` asks the model again from where it stopped.
+  It repeats no completed tool calls, matches the web UI's "Try again", and refuses
+  cleanly when the conversation is not awaiting an answer.
+- **Collapsible tool calls in the browser.** Tool executions in the chat view
+  collapse into clean `<details>` blocks upon completion (`✓ tool(args) · size`),
+  preventing large outputs from flooding the transcript while keeping the full
+  output expandable on click. Errored tool calls stay open with red error styling.
+- **Live tool arguments streamed.** While a tool is being invoked, the web interface
+  now streams and displays what is being called with its arguments (`→ tool(args)`),
+  providing visibility into actions in flight.
+- **Delete task files in the page.** Task files can now be deleted directly from
+  the Tasks panel. Each task in the list has a delete button (`×`), and the preview
+  modal offers a **Delete** button, both requiring inline confirmation before
+  removing the file.
+
 ## v0.6.11 — 2026-09-27 — write and change task files in the page
 
 - **Edit a task file in the page.** Under a task's text in **Tasks…**,

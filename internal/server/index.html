@@ -93,8 +93,12 @@
   #briefPreview[hidden] { display:none; }
   #briefList { flex-basis:100%; display:flex; flex-direction:column; gap:.15rem; max-height:14rem; overflow-y:auto; }
   #briefList[hidden] { display:none; }
+  #briefList .row { display:flex; align-items:center; gap:.25rem; }
+  #briefList .row > button:first-child { flex:1 1 auto; min-width:0; }
+  #briefList .del { font-size:1.1em; padding:0 .4rem; line-height:1; background:none; border:none; color:var(--dim); cursor:pointer; }
+  #briefList .del:hover { color:var(--err); }
   #briefList button { text-align:left; background:none; border:1px solid transparent; border-radius:4px;
-                      padding:.2rem .4rem; color:inherit; display:flex; justify-content:space-between; gap:1rem; }
+                      padding:.2rem .4rem; color:inherit; display:flex; justify-content:space-between; gap:1rem; cursor:pointer; }
   #briefList button:hover, #briefList button.on { border-color:var(--edge); }
   #briefList .when { color:var(--dim); font-size:.85em; white-space:nowrap; }
   #briefText { max-height:40vh; overflow-y:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
@@ -107,8 +111,24 @@
   #briefEditor .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
   .brief-header { font-size:.85em; margin-bottom:.3rem; font-weight:600; }
   .prompt { align-self:flex-end; background:#8882; padding:.5rem .75rem; border-radius:.6rem; }
-  .tool_call, .tool_result { color:var(--dim); font-family:ui-monospace,SFMono-Regular,monospace;
-                             font-size:.82em; border-left:2px solid var(--edge); padding-left:.6rem; }
+  .tool_call, .tool_result, details.tool_call_block {
+    color:var(--dim); font-family:ui-monospace,SFMono-Regular,monospace;
+    font-size:.82em; border-left:2px solid var(--edge); padding-left:.6rem;
+  }
+  details.tool_call_block { margin:.2rem 0; }
+  details.tool_call_block summary {
+    cursor:pointer; user-select:none; outline:none;
+  }
+  details.tool_call_block summary:hover { color:var(--fg); }
+  details.tool_call_block .tool_output {
+    margin:.3rem 0 .2rem 0; padding:.4rem .6rem; background:#8881;
+    border-radius:.3rem; white-space:pre-wrap; overflow-wrap:anywhere;
+    max-height:22rem; overflow-y:auto; font-family:inherit; font-size:inherit;
+    color:var(--fg);
+  }
+  details.tool_call_block.is_error { border-left-color:var(--err); color:var(--err); }
+  details.tool_call_block.is_error summary { color:var(--err); }
+  details.tool_call_block.is_error .tool_output { background:#f001; color:var(--err); }
   .notice { color:var(--dim); font-size:.85em; border-left:2px dashed var(--edge); padding-left:.6rem; }
   .is_error { color:var(--err); border-left-color:var(--err); }
   .approval { border:1px solid var(--edge); border-left:3px solid #d90; border-radius:.4rem;
@@ -209,6 +229,12 @@
       <div class="row">
         <button type="button" id="startBrief" class="primary">Run this task</button>
         <button type="button" id="editBrief" title="Change this task file here">Edit</button>
+        <button type="button" id="deleteBrief" title="Delete this task file from disk">Delete</button>
+      </div>
+      <div id="briefDeleteConfirm" class="confirm row" hidden style="border-left:3px solid var(--err); padding:.4rem .6rem; gap:.6rem; align-items:center;">
+        <span class="dim" id="briefDeletePrompt">Delete this task file? This cannot be undone.</span>
+        <button type="button" id="confirmDeleteBrief" class="yes" style="color:var(--err);">Delete</button>
+        <button type="button" id="cancelDeleteBrief">Cancel</button>
       </div>
     </div>
     <div id="briefEditor" hidden>
@@ -356,6 +382,51 @@ function entry(kind, text, cls) {
   log.append(el);
   log.scrollTop = log.scrollHeight;
   return el;
+}
+
+function toolBlock(callID, name, args) {
+  const el = document.createElement('details');
+  el.className = 'e tool_call_block';
+  el.open = true;
+  if (callID) el.dataset.callId = callID;
+
+  const summary = document.createElement('summary');
+  summary.textContent = args ? `→ ${name}(${args})` : `→ ${name}`;
+
+  const pre = document.createElement('pre');
+  pre.className = 'tool_output dim';
+  pre.textContent = 'calling…';
+
+  el.append(summary, pre);
+  log.append(el);
+  log.scrollTop = log.scrollHeight;
+  return el;
+}
+
+function updateToolResult(el, text, isError, name, args) {
+  if (!el) return;
+  const summary = el.querySelector('summary');
+  const pre = el.querySelector('.tool_output') || el.querySelector('pre');
+  const label = args ? `${name}(${args})` : name;
+  const size = text ? (text.length > 1024 ? Math.round(text.length / 1024) + ' KB' : text.length + ' B') : '0 B';
+
+  if (isError) {
+    el.classList.add('is_error');
+    el.open = true;
+    if (summary) summary.textContent = `✗ ${label}`;
+    if (pre) {
+      pre.className = 'tool_output is_error';
+      pre.textContent = text || 'failed';
+    }
+  } else {
+    el.open = false;
+    if (summary) summary.textContent = `✓ ${label} · ${size}`;
+    if (pre) {
+      pre.className = 'tool_output';
+      pre.textContent = text || '';
+    }
+  }
+  log.scrollTop = log.scrollHeight;
 }
 
 // Selecting a model the list does not contain silently clears the picker:
@@ -536,8 +607,26 @@ function render(entries, briefPath) {
     const e = entries[i];
     if (i === 0 && briefPath && e.kind === 'prompt') {
       renderBrief({ path: briefPath, content: e.text });
-    } else if (e.kind === 'tool_call') entry('tool_call', `→ ${e.tool}(${e.args || ''})`);
-    else if (e.kind === 'tool_result') entry('tool_result', `← ${e.text}`, e.is_error ? 'is_error' : '');
+    } else if (e.kind === 'tool_call') {
+      const next = (i + 1 < entries.length && entries[i + 1].kind === 'tool_result') ? entries[i + 1] : null;
+      if (next) {
+        const el = document.createElement('details');
+        el.className = 'e tool_call_block' + (next.is_error ? ' is_error' : '');
+        el.open = !!next.is_error;
+        const summary = document.createElement('summary');
+        const size = next.text ? (next.text.length > 1024 ? Math.round(next.text.length / 1024) + ' KB' : next.text.length + ' B') : '0 B';
+        const label = `${e.tool}(${e.args || ''})`;
+        summary.textContent = next.is_error ? `✗ ${label}` : `✓ ${label} · ${size}`;
+        const pre = document.createElement('pre');
+        pre.className = 'tool_output' + (next.is_error ? ' is_error' : '');
+        pre.textContent = next.text || '';
+        el.append(summary, pre);
+        log.append(el);
+        i++;
+      } else {
+        entry('tool_call', `→ ${e.tool}(${e.args || ''})`);
+      }
+    } else if (e.kind === 'tool_result') entry('tool_result', `← ${e.text}`, e.is_error ? 'is_error' : '');
     else if (e.kind === 'answer') showAnswer(entry('answer', ''), e.text, e.model, e.unopened);
     else entry(e.kind, e.text);
   }
@@ -834,6 +923,8 @@ async function send(text, opts = {}) {
   }
 
   let answer = null, resp, stopped = false, failed = '';
+  const liveTools = new Map();
+  let pendingTool = null;
   turn = new AbortController();
   try {
     resp = await api('/api/chat', {
@@ -905,14 +996,39 @@ async function send(text, opts = {}) {
         } else if (name === 'brief') {
           renderBrief(d);
         } else if (name === 'tool') {
-          entry('tool_call', '→ ' + d.name);
+          pendingTool = toolBlock('', d.name, '');
           working('calling ' + d.name);
           answer = null;
+        } else if (name === 'tool_start') {
+          working('calling ' + d.name);
+          answer = null;
+          if (pendingTool) {
+            pendingTool.dataset.callId = d.id;
+            const s = pendingTool.querySelector('summary');
+            if (s) s.textContent = d.args ? `→ ${d.name}(${d.args})` : `→ ${d.name}`;
+            liveTools.set(d.id, { el: pendingTool, name: d.name, args: d.args });
+            pendingTool = null;
+          } else {
+            const el = toolBlock(d.id, d.name, d.args);
+            liveTools.set(d.id, { el, name: d.name, args: d.args });
+          }
+        } else if (name === 'tool_result') {
+          const item = liveTools.get(d.id) || (pendingTool ? { el: pendingTool, name: d.name, args: '' } : null);
+          if (item) {
+            updateToolResult(item.el, d.text, d.is_error, item.name || d.name, item.args);
+            liveTools.delete(d.id);
+            if (pendingTool === item.el) pendingTool = null;
+          } else {
+            entry('tool_result', `← ${d.text}`, d.is_error ? 'is_error' : '');
+          }
         } else if (name === 'token') {
+          pendingTool = null;
           if (!answer) { answer = entry('answer', ''); working('writing the answer'); }
           answer.textContent += d.text;
           log.scrollTop = log.scrollHeight;
         } else if (name === 'done') {
+          pendingTool = null;
+          liveTools.clear();
           // The streamed text and the final answer are the same words; replace
           // rather than append, so a provider that does not stream still shows one.
           if (!answer) answer = entry('answer', '');
@@ -1523,6 +1639,7 @@ function clearBriefPreview() {
   $('briefPreview').hidden = true;
   $('briefEditor').hidden = true;
   $('briefText').replaceChildren();
+  if ($('briefDeleteConfirm')) $('briefDeleteConfirm').hidden = true;
 }
 
 function closeBriefPanel() {
@@ -1581,6 +1698,8 @@ async function loadBriefList() {
     (d.partial ? ' (not all shown; type a path for others)' : '');
   list.append(head);
   for (const b of d.briefs) {
+    const row = document.createElement('div');
+    row.className = 'row';
     const btn = document.createElement('button');
     btn.type = 'button';
     const name = document.createElement('span');
@@ -1595,9 +1714,64 @@ async function loadBriefList() {
       $('briefInput').value = b.path;
       showBrief(b.path);
     };
-    list.append(btn);
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'del';
+    del.textContent = '\u00d7';
+    del.title = 'Delete this task file';
+    del.setAttribute('aria-label', 'Delete ' + b.path);
+    del.onclick = (e) => {
+      e.stopPropagation();
+      askRemoveBrief(row, b.path);
+    };
+
+    row.append(btn, del);
+    list.append(row);
   }
   list.hidden = !!editing;
+}
+
+function askRemoveBrief(row, path) {
+  const ask = document.createElement('div');
+  ask.className = 'confirm row';
+  ask.style.borderLeft = '3px solid var(--err)';
+  ask.style.padding = '.3rem .6rem';
+  ask.style.gap = '.5rem';
+  ask.style.alignItems = 'center';
+
+  const what = document.createElement('span');
+  what.className = 'dim';
+  what.textContent = `Delete ${path}? This cannot be undone.`;
+
+  const yes = document.createElement('button');
+  yes.type = 'button';
+  yes.className = 'yes';
+  yes.style.color = 'var(--err)';
+  yes.textContent = 'Delete';
+  yes.onclick = async () => {
+    yes.disabled = no.disabled = true;
+    try {
+      const resp = await api('/api/brief', {
+        method: 'DELETE',
+        body: JSON.stringify({ path, workspace: taskFolder() })
+      });
+      const d = await resp.json().catch(() => ({ error: 'refused' }));
+      if (!resp.ok) { $('briefErr').textContent = d.error || 'could not delete task file'; return; }
+      if (shownBrief && shownBrief.path === path) clearBriefPreview();
+      loadBriefList();
+    } catch (e) {
+      $('briefErr').textContent = 'could not delete task file: ' + e.message;
+    }
+  };
+
+  const no = document.createElement('button');
+  no.type = 'button';
+  no.textContent = 'Cancel';
+  no.onclick = () => loadBriefList();
+
+  ask.append(what, yes, no);
+  row.replaceWith(ask);
 }
 
 $('briefBtn').onclick = () => {
@@ -1665,6 +1839,35 @@ function runTask(opts) {
 $('startBrief').onclick = () => {
   if (!shownBrief) return;
   runTask({ brief: shownBrief.path, briefSHA: shownBrief.sha256 });
+};
+
+$('deleteBrief').onclick = () => {
+  if (!shownBrief) return;
+  $('briefDeletePrompt').textContent = `Delete ${shownBrief.path}? This cannot be undone.`;
+  $('briefDeleteConfirm').hidden = false;
+};
+$('cancelDeleteBrief').onclick = () => {
+  $('briefDeleteConfirm').hidden = true;
+};
+$('confirmDeleteBrief').onclick = async () => {
+  if (!shownBrief) return;
+  const path = shownBrief.path;
+  $('confirmDeleteBrief').disabled = $('cancelDeleteBrief').disabled = true;
+  try {
+    const resp = await api('/api/brief', {
+      method: 'DELETE',
+      body: JSON.stringify({ path, workspace: taskFolder() })
+    });
+    const d = await resp.json().catch(() => ({ error: 'refused' }));
+    if (!resp.ok) { $('briefErr').textContent = d.error || 'could not delete task file'; return; }
+    clearBriefPreview();
+    loadBriefList();
+  } catch (e) {
+    $('briefErr').textContent = 'could not delete task file: ' + e.message;
+  } finally {
+    $('confirmDeleteBrief').disabled = $('cancelDeleteBrief').disabled = false;
+    $('briefDeleteConfirm').hidden = true;
+  }
 };
 
 // ---- editing a task file, or writing a new one

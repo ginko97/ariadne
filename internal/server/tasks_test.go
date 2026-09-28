@@ -176,3 +176,86 @@ func TestChatRunsAnUnsavedTaskText(t *testing.T) {
 		}
 	}
 }
+
+func deleteTask(t *testing.T, s *Server, client *http.Client, url string, body any) (int, map[string]any) {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest("DELETE", url, strings.NewReader(string(b)))
+	req.Header.Set("X-Ariadne-CSRF", s.CSRFToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	out := map[string]any{}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+func TestDeleteBriefRemovesTaskFile(t *testing.T) {
+	ws := t.TempDir()
+	writeAt(t, filepath.Join(ws, "sub", "task.md"), "# Task\n", time.Now())
+
+	rel, err := deleteWorkspaceBrief(ws, "sub/task.md")
+	if err != nil || rel != "sub/task.md" {
+		t.Fatalf("delete: %q %v", rel, err)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "sub", "task.md")); !os.IsNotExist(err) {
+		t.Errorf("file still exists after delete: %v", err)
+	}
+
+	// Deleting again should fail with not exist
+	if _, err := deleteWorkspaceBrief(ws, "sub/task.md"); err == nil {
+		t.Error("deleting non-existent file should fail")
+	}
+
+	// Deleting outside workspace or non-.md must fail
+	for name, path := range map[string]string{
+		"outside": "../outside.md",
+		"not md":  "task.txt",
+		"blank":   "   ",
+	} {
+		if _, err := deleteWorkspaceBrief(ws, path); err == nil {
+			t.Errorf("%s: expected error for %q", name, path)
+		}
+	}
+}
+
+func TestDeleteBriefEndpoint(t *testing.T) {
+	s, ts := newTestServer(t)
+	ws := t.TempDir()
+	s.DefaultWorkspace = ws
+	writeAt(t, filepath.Join(ws, "remove-me.md"), "# Remove\n", time.Now())
+
+	// Without CSRF token: must return 403 Forbidden
+	req, _ := http.NewRequest("DELETE", ts.URL+"/api/brief", strings.NewReader(`{"path":"remove-me.md"}`))
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("DELETE without token: %d, want 403", resp.StatusCode)
+	}
+
+	// With CSRF token: deletes successfully
+	code, out := deleteTask(t, s, ts.Client(), ts.URL+"/api/brief", briefDeleteRequest{Path: "remove-me.md"})
+	if code != http.StatusOK || out["ok"] != true || out["path"] != "remove-me.md" {
+		t.Errorf("deleteTask got code %d out %v", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "remove-me.md")); !os.IsNotExist(err) {
+		t.Errorf("file still exists on disk after DELETE /api/brief")
+	}
+
+	// Deleting a non-existent file returns 404
+	code, _ = deleteTask(t, s, ts.Client(), ts.URL+"/api/brief", briefDeleteRequest{Path: "remove-me.md"})
+	if code != http.StatusNotFound {
+		t.Errorf("deleting missing file returned %d, want 404", code)
+	}
+
+	// Deleting invalid path returns 400
+	code, _ = deleteTask(t, s, ts.Client(), ts.URL+"/api/brief", briefDeleteRequest{Path: "../escape.md"})
+	if code != http.StatusBadRequest {
+		t.Errorf("deleting invalid path returned %d, want 400", code)
+	}
+}

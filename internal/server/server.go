@@ -150,6 +150,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/workspace/check", s.handleWorkspaceCheck)
 	mux.HandleFunc("POST /api/workspace/pick", s.handleWorkspacePick)
 	mux.HandleFunc("POST /api/brief", s.handleBrief)
+	mux.HandleFunc("DELETE /api/brief", s.handleBriefDelete)
 	mux.HandleFunc("POST /api/briefs", s.handleBriefs)
 	mux.HandleFunc("POST /api/brief/save", s.handleBriefSave)
 	mux.HandleFunc("POST /api/tasks/draft", s.handleTaskDraft)

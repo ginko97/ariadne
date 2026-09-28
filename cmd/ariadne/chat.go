@@ -295,6 +295,23 @@ func cmdChat(args []string) int {
 			continue
 		}
 
+		if line == "/retry" {
+			if state == nil || !state.AwaitsAnswer() {
+				fmt.Fprintln(os.Stderr, "! nothing to try again: this conversation is not waiting for an answer")
+				continue
+			}
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+			answer, err := agent.Retry(ctx, state)
+			stop()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "! %v\n", err)
+				continue
+			}
+			printAnswer(answer, *stream)
+			noteUnopened(os.Stderr, state)
+			continue
+		}
+
 		if memoryCommand(os.Stderr, memory.Store{Path: memoryFile}, mem, line) {
 			continue
 		}
@@ -346,6 +363,7 @@ const chatCommands = `commands:
   /models all     list every one of them
   /model <id>     switch model starting next turn
   /model          show the current model
+  /retry          ask again if the last turn was interrupted or failed
   /memory         list remembered facts, numbered
   /remember <fact> save a fact exactly as typed (needs -remember)
   /edit <n> <fact> rewrite fact n, keeping its place

@@ -148,6 +148,64 @@ func (s *Server) handleBriefSave(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, briefResponse{Path: rel, Content: req.Content, SHA256: sha})
 }
 
+// deleteWorkspaceBrief removes the task file at path within workspace.
+// Path confinement is enforced through briefPath and os.OpenRoot.
+func deleteWorkspaceBrief(workspace, path string) (rel string, err error) {
+	ws, rel, err := briefPath(workspace, path)
+	if err != nil {
+		return "", err
+	}
+	root, err := os.OpenRoot(ws)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+
+	fi, err := root.Stat(rel)
+	if err != nil {
+		return "", err
+	}
+	if !fi.Mode().IsRegular() {
+		return "", errors.New("a task file must be a regular file")
+	}
+	if err := root.Remove(rel); err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+type briefDeleteRequest struct {
+	Path      string `json:"path"`
+	Workspace string `json:"workspace,omitempty"`
+}
+
+func (s *Server) handleBriefDelete(w http.ResponseWriter, r *http.Request) {
+	var req briefDeleteRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "malformed request body")
+		return
+	}
+	ws := req.Workspace
+	if ws == "" {
+		ws = s.DefaultFolder()
+	}
+	if ws == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			ws = cwd
+		}
+	}
+	rel, err := deleteWorkspaceBrief(ws, req.Path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			httpError(w, http.StatusNotFound, "task file not found")
+			return
+		}
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "path": rel})
+}
+
 // maxDraftRequest bounds the description a draft is asked for.
 const maxDraftRequest = 4000
 

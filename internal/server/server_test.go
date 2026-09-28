@@ -322,6 +322,26 @@ func TestChatResumesAnUnfinishedBatch(t *testing.T) {
 		t.Fatalf("body does not contain resumed answer:\n%s", body)
 	}
 
+	evs := events(t, body)
+	var hasStart, hasResult bool
+	for _, e := range evs {
+		if e.Name == "tool_start" {
+			hasStart = true
+			if e.Data["name"] != "calc" || e.Data["args"] != `{"expr":"1+1"}` {
+				t.Errorf("tool_start event = %+v, want name calc args {\"expr\":\"1+1\"}", e.Data)
+			}
+		}
+		if e.Name == "tool_result" {
+			hasResult = true
+			if e.Data["name"] != "calc" || e.Data["text"] != "2" || e.Data["is_error"] != false {
+				t.Errorf("tool_result event = %+v, want name calc text 2 is_error false", e.Data)
+			}
+		}
+	}
+	if !hasStart || !hasResult {
+		t.Errorf("missing tool_start (%v) or tool_result (%v) event in:\n%s", hasStart, hasResult, body)
+	}
+
 	loaded, err := s.Store.Load("run_to_resume")
 	if err != nil {
 		t.Fatal(err)
