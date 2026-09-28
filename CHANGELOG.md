@@ -3,6 +3,23 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## Unreleased
+
+- **Fix: a tool's output in the page is redacted again.** Since v0.6.12 the
+  live tool block showed a tool's output before ariadne removed its own
+  provider keys from it, so an approved `exec` that printed the key showed it
+  on screen (the saved conversation was redacted). The block now shows the
+  output exactly as the conversation keeps it: redacted, inside the untrusted
+  fence where the tool's output is untrusted, and with the timeout notice when
+  a tool is abandoned at `-tool-timeout` instead of a block left waiting.
+- **Fix: a tool abandoned at `-tool-timeout` could write to a finished
+  response** when it completed after the turn ended, a data race in the
+  server. Nothing is written once the turn is over.
+- **Task file names.** On Linux and macOS a task file may have a `:` in its
+  name (`q3: notes.md`), and on every platform a name may start with `..`
+  (`..notes.md`). Both were refused as "not inside the conversation's
+  folder".
+
 ## v0.6.12 — 2026-09-28 — /retry in chat, collapsible tool calls, and delete task files
 
 - **/retry in the terminal REPL.** When a turn in `ariadne chat` is interrupted

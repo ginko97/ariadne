@@ -14,6 +14,7 @@ import (
 	"github.com/ginko97/ariadne/internal/cite"
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
+	"github.com/ginko97/ariadne/internal/trace"
 )
 
 type chatRequest struct {
@@ -249,6 +250,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	out := &sseWriter{w: w, f: flusher}
+	// A tool abandoned at -tool-timeout runs on after the turn, and anything
+	// it would write must not reach a ResponseWriter net/http has taken back.
+	defer out.close()
 	// The folder goes with it: the page cannot work it out once the default
 	// can change in settings while a conversation is open, and it shows the
 	// folder and lists task files from it.
@@ -277,23 +281,25 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 				"name": call.Name,
 				"args": compactJSON(call.Args),
 			})
-			res, err := origRunTool(ctx, call)
-			if err != nil {
-				out.event("tool_result", map[string]any{
-					"id":       call.ID,
-					"name":     call.Name,
-					"text":     err.Error(),
-					"is_error": true,
-				})
-				return res, err
-			}
+			return origRunTool(ctx, call)
+		}
+	}
+	// The result goes out from the trace event, not from RunTool: the loop
+	// redacts ariadne's own keys after RunTool returns, and the event carries
+	// the text as the checkpoint keeps it — redacted, fenced if untrusted, and
+	// the timeout notice for a tool that was abandoned.
+	origTrace := agent.Trace
+	agent.Trace = func(e trace.Event) {
+		if origTrace != nil {
+			origTrace(e)
+		}
+		if e.Kind == trace.KindToolResult {
 			out.event("tool_result", map[string]any{
-				"id":       call.ID,
-				"name":     call.Name,
-				"text":     res.Content,
-				"is_error": res.IsError,
+				"id":       e.CallID,
+				"name":     e.Tool,
+				"text":     e.Content,
+				"is_error": e.IsError,
 			})
-			return res, nil
 		}
 	}
 
@@ -386,17 +392,27 @@ func deltaEvents(out *sseWriter) func(llm.Chunk) {
 // returned, because nothing upstream can act on it: the delta callback is
 // synchronous inside the loop and stopping the turn is the context's job, not
 // the printer's.
+//
+// Once closed, when the handler returns, events are dropped: the
+// ResponseWriter is no longer ours to write to.
 type sseWriter struct {
-	mu  sync.Mutex
-	w   http.ResponseWriter
-	f   http.Flusher
-	err error
+	mu     sync.Mutex
+	w      http.ResponseWriter
+	f      http.Flusher
+	err    error
+	closed bool
+}
+
+func (e *sseWriter) close() {
+	e.mu.Lock()
+	e.closed = true
+	e.mu.Unlock()
 }
 
 func (e *sseWriter) event(name string, v any) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.err != nil {
+	if e.closed || e.err != nil {
 		return
 	}
 	b, err := json.Marshal(v)

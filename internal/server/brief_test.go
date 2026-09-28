@@ -103,6 +103,30 @@ func TestReadWorkspaceBrief_Rejections(t *testing.T) {
 	}
 }
 
+// briefPath on its own, with no file behind any name: through
+// readWorkspaceBrief, os.Root or a missing file refuses these paths too, so a
+// test there passes whether briefPath checks them or not.
+func TestBriefPathKeepsTheNameInsideTheFolder(t *testing.T) {
+	ws := t.TempDir()
+	refused := []string{"../outside.md", "a/../../outside.md", "/outside.md"}
+	allowed := []string{"task.md", "sub/task.md", "..notes.md"}
+	if runtime.GOOS == "windows" {
+		refused = append(refused, `\outside.md`, "C:outside.md", "task:stream.md")
+	} else {
+		allowed = append(allowed, "q3: notes.md")
+	}
+	for _, p := range refused {
+		if _, rel, err := briefPath(ws, p); err == nil {
+			t.Errorf("briefPath(%q) = %q, want it refused", p, rel)
+		}
+	}
+	for _, p := range allowed {
+		if _, _, err := briefPath(ws, p); err != nil {
+			t.Errorf("briefPath(%q): %v, want it allowed", p, err)
+		}
+	}
+}
+
 func TestHandleBriefEndpoint(t *testing.T) {
 	s, ts := newTestServer(t)
 	ws := t.TempDir()

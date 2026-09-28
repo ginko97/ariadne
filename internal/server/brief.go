@@ -57,9 +57,12 @@ func briefPath(workspace, path string) (ws, rel string, err error) {
 		}
 		rel = r
 	}
+	// IsLocal is the rule per platform: on Windows it also refuses a rooted
+	// "\x", a drive-relative "C:x" and an "x:stream" (all names os.Root would
+	// refuse too, but not with this message); elsewhere a colon is just a
+	// character, and "q3: notes.md" is a name.
 	rel = filepath.Clean(rel)
-	slash := filepath.ToSlash(rel)
-	if strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) || strings.HasPrefix(slash, "/") || filepath.VolumeName(rel) != "" || strings.Contains(rel, ":") {
+	if !filepath.IsLocal(rel) {
 		return "", "", errors.New("the task file must be inside the conversation's folder")
 	}
 	return ws, rel, nil
