@@ -3,7 +3,7 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
-## Unreleased
+## v0.6.13 — 2026-09-29 — redacted tool output in the page, and a server race fixed
 
 - **Fix: a tool's output in the page is redacted again.** Since v0.6.12 the
   live tool block showed a tool's output before ariadne removed its own
