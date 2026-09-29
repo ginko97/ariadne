@@ -30,3 +30,6 @@ workspace/
 MEMORY.md
 /echoserver.exe
 /mcp.json
+
+# Editor settings are per person; line endings are enforced by .gitattributes.
+.vscode/
