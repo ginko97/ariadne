@@ -373,7 +373,7 @@ func TestCompleteReportsRetriesToTheCaller(t *testing.T) {
 // retried: three more round trips delay a failure the caller can already act
 // on, and a 400 is not going to become a 200.
 func TestCompleteDoesNotRetryClientErrors(t *testing.T) {
-	for _, code := range []int{400, 401, 403, 404, 422, 500} {
+	for _, code := range []int{400, 401, 403, 404, 422} {
 		body := []byte(`{"error":{"message":"nope"}}`)
 		rt := &RecordedTransport{
 			Responses: [][]byte{body, body, body, body},
@@ -525,3 +525,228 @@ func (rt *readFailTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 type errReader struct{}
 
 func (errReader) Read([]byte) (int, error) { return 0, errors.New("connection reset mid-body") }
+
+// 500, 502, 504 and 529 join 429 and 503 as retryable server errors.
+func TestCompleteRetriesOnServerErrors(t *testing.T) {
+	ok := []byte(`{"choices":[{"message":{"content":"recovered"},"finish_reason":"stop"}]}`)
+	for _, code := range []int{500, 502, 503, 504, 529} {
+		rt := &RecordedTransport{
+			Responses: [][]byte{[]byte(`{"error":"temp error"}`), ok},
+			Statuses:  []int{code, 200},
+		}
+		slept := 0
+		var retriedCodes []int
+		o := NewOpenAI("key",
+			WithHTTPClient(&http.Client{Transport: rt}),
+			WithBaseURL("https://example.test/v1"),
+			WithSleep(func(context.Context, time.Duration) error { slept++; return nil }),
+			WithOnRetry(func(attempt, status int, _ time.Duration) { retriedCodes = append(retriedCodes, status) }),
+		)
+
+		resp, err := o.Complete(context.Background(), Request{Model: "m"})
+		if err != nil {
+			t.Fatalf("%d: unexpected error: %v", code, err)
+		}
+		if resp.Text() != "recovered" {
+			t.Errorf("%d: text = %q, want 'recovered'", code, resp.Text())
+		}
+		if len(rt.Requests) != 2 {
+			t.Errorf("%d: made %d requests, want 2", code, len(rt.Requests))
+		}
+		if slept != 1 {
+			t.Errorf("%d: slept %d times, want 1", code, slept)
+		}
+		if len(retriedCodes) != 1 || retriedCodes[0] != code {
+			t.Errorf("%d: retriedCodes = %v, want [%d]", code, retriedCodes, code)
+		}
+	}
+}
+
+// A stream is retried automatically before its first byte across transient server
+// errors (429, 500, 502, 503, 504, 529).
+func TestStreamRetriesBeforeFirstByte(t *testing.T) {
+	streamOK := sse(`{"choices":[{"index":0,"delta":{"content":"recovered stream"}}]}`)
+	for _, code := range []int{429, 500, 502, 503, 504, 529} {
+		rt := &RecordedTransport{
+			Responses: [][]byte{[]byte(`{"error":"temp fail"}`), streamOK},
+			Statuses:  []int{code, 200},
+		}
+		slept := 0
+		var retryStatuses []int
+		o := NewOpenAI("key",
+			WithHTTPClient(&http.Client{Transport: rt}),
+			WithBaseURL("https://example.test/v1"),
+			WithSleep(func(context.Context, time.Duration) error { slept++; return nil }),
+			WithOnRetry(func(attempt, status int, _ time.Duration) { retryStatuses = append(retryStatuses, status) }),
+		)
+
+		seq, err := o.Stream(context.Background(), Request{Model: "m"})
+		if err != nil {
+			t.Fatalf("%d: Stream returned unexpected error: %v", code, err)
+		}
+		chunks := collect(t, seq)
+		var text string
+		for _, c := range chunks {
+			text += c.Text
+		}
+		if text != "recovered stream" {
+			t.Errorf("%d: streamed text = %q, want 'recovered stream'", code, text)
+		}
+		if len(rt.Requests) != 2 {
+			t.Errorf("%d: made %d requests, want 2", code, len(rt.Requests))
+		}
+		if slept != 1 {
+			t.Errorf("%d: slept %d times, want 1", code, slept)
+		}
+		if len(retryStatuses) != 1 || retryStatuses[0] != code {
+			t.Errorf("%d: retryStatuses = %v, want [%d]", code, retryStatuses, code)
+		}
+		if rt.Requests[0].Header.Get("Accept") != "text/event-stream" {
+			t.Errorf("%d: first request missing Accept: text/event-stream", code)
+		}
+		if rt.Requests[1].Header.Get("Accept") != "text/event-stream" {
+			t.Errorf("%d: second request missing Accept: text/event-stream", code)
+		}
+	}
+}
+
+// Stream also retries transport failures before headers are accepted.
+func TestStreamRetriesTransportFailureBeforeFirstByte(t *testing.T) {
+	streamOK := sse(`{"choices":[{"index":0,"delta":{"content":"net recovered"}}]}`)
+	ft := &failingTransport{failures: 2, body: streamOK}
+
+	var retries []int
+	o := NewOpenAI("key",
+		WithHTTPClient(&http.Client{Transport: ft}),
+		WithBaseURL("https://example.test/v1"),
+		WithSleep(func(context.Context, time.Duration) error { return nil }),
+		WithOnRetry(func(attempt, status int, _ time.Duration) { retries = append(retries, status) }),
+	)
+
+	seq, err := o.Stream(context.Background(), Request{Model: "m"})
+	if err != nil {
+		t.Fatalf("Stream returned unexpected error: %v", err)
+	}
+	chunks := collect(t, seq)
+	var text string
+	for _, c := range chunks {
+		text += c.Text
+	}
+	if text != "net recovered" {
+		t.Errorf("text = %q, want 'net recovered'", text)
+	}
+	if ft.attempts != 3 {
+		t.Errorf("attempts = %d, want 3", ft.attempts)
+	}
+	if len(retries) != 2 || retries[0] != 0 {
+		t.Errorf("OnRetry saw %v, want two entries with status 0", retries)
+	}
+}
+
+// Client errors (400, 401, 403, 404, 422) must not be retried by Stream.
+func TestStreamDoesNotRetryClientErrors(t *testing.T) {
+	for _, code := range []int{400, 401, 403, 404, 422} {
+		body := []byte(`{"error":{"message":"client error"}}`)
+		rt := &RecordedTransport{
+			Responses: [][]byte{body, body},
+			Statuses:  []int{code, code},
+		}
+		slept := 0
+		o := NewOpenAI("key",
+			WithHTTPClient(&http.Client{Transport: rt}),
+			WithBaseURL("https://example.test/v1"),
+			WithSleep(func(context.Context, time.Duration) error { slept++; return nil }),
+		)
+
+		seq, err := o.Stream(context.Background(), Request{Model: "m"})
+		if err == nil {
+			t.Errorf("%d: expected error", code)
+		}
+		if seq != nil {
+			t.Errorf("%d: expected nil seq", code)
+		}
+		if len(rt.Requests) != 1 {
+			t.Errorf("%d: made %d requests, want 1", code, len(rt.Requests))
+		}
+		if slept != 0 {
+			t.Errorf("%d: slept %d times on client error", code, slept)
+		}
+	}
+}
+
+// A 400 or 413 error with "context_length_exceeded" or "maximum context length"
+// wraps ErrContextLength.
+func TestContextLengthExceededDetectedAsErrContextLength(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		body    string
+		wantErr bool
+	}{
+		{
+			name:    "400 with context_length_exceeded code",
+			status:  400,
+			body:    `{"error":{"message":"Context length exceeded","code":"context_length_exceeded"}}`,
+			wantErr: true,
+		},
+		{
+			name:    "400 with maximum context length message",
+			status:  400,
+			body:    `{"error":{"message":"This model's maximum context length is 8192 tokens."}}`,
+			wantErr: true,
+		},
+		{
+			name:    "413 with maximum context length message",
+			status:  413,
+			body:    `{"error":{"message":"maximum context length exceeded"}}`,
+			wantErr: true,
+		},
+		{
+			name:    "regular 400 bad request",
+			status:  400,
+			body:    `{"error":{"message":"invalid model parameter"}}`,
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := &RecordedTransport{
+				Responses: [][]byte{[]byte(tc.body)},
+				Statuses:  []int{tc.status},
+			}
+			o := NewOpenAI("key",
+				WithHTTPClient(&http.Client{Transport: rt}),
+				WithBaseURL("https://example.test/v1"),
+			)
+
+			// Complete
+			_, err := o.Complete(context.Background(), Request{Model: "m"})
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			isErr := errors.Is(err, ErrContextLength)
+			if isErr != tc.wantErr {
+				t.Errorf("Complete: errors.Is(err, ErrContextLength) = %v, want %v (err: %v)", isErr, tc.wantErr, err)
+			}
+
+			// Stream
+			rt2 := &RecordedTransport{
+				Responses: [][]byte{[]byte(tc.body)},
+				Statuses:  []int{tc.status},
+			}
+			o2 := NewOpenAI("key",
+				WithHTTPClient(&http.Client{Transport: rt2}),
+				WithBaseURL("https://example.test/v1"),
+			)
+			_, streamErr := o2.Stream(context.Background(), Request{Model: "m"})
+			if streamErr == nil {
+				t.Fatal("expected stream error")
+			}
+			streamIsErr := errors.Is(streamErr, ErrContextLength)
+			if streamIsErr != tc.wantErr {
+				t.Errorf("Stream: errors.Is(streamErr, ErrContextLength) = %v, want %v (err: %v)", streamIsErr, tc.wantErr, streamErr)
+			}
+		})
+	}
+}

@@ -228,6 +228,29 @@ func (m *ModelCache) Configured() string {
 	return m.Fallback
 }
 
+// BudgetFor returns the recommended context budget in tokens for model:
+// 75% of the model's ContextLength if known from the catalogue,
+// 3000 for Ollama (whose default num_ctx is 4096 and cuts longer prompts silently),
+// or 0 (leave it off) if unknown or unlisted.
+func (m *ModelCache) BudgetFor(model string) int {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.Local != nil {
+		return 3000
+	}
+
+	for _, row := range m.rows {
+		if row.ID == model && row.ContextLength > 0 {
+			return int(float64(row.ContextLength) * 0.75)
+		}
+	}
+	return 0
+}
+
 // fallbackRows is the configured model alone: the one model known to work,
 // because every turn in this process already uses it.
 func (m *ModelCache) fallbackRows() []ModelRow {

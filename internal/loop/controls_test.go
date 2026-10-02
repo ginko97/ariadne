@@ -713,3 +713,212 @@ func TestToolDenialsPersistAcrossCheckpoint(t *testing.T) {
 		t.Errorf("offeredTools after resume = %+v, want only [calc]", offered)
 	}
 }
+
+// A tool called with the same arguments a third time in one turn is refused
+// through deny, without asking the operator and without counting toward
+// the approval denial limit.
+func TestRepeatedToolCallRefusedOnThirdAttempt(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "calc", `{"expr":"1+1"}`, 10, 10),
+		toolUseResponse("c2", "calc", `{"expr":"1+1"}`, 10, 10),
+		toolUseResponse("c3", "calc", `{"expr":"1+1"}`, 10, 10),
+		endResponse("The answer is 2.", 10, 10),
+	}}
+
+	var executed int
+	a := &Agent{
+		Provider: fake,
+		Model:    "test",
+		MaxSteps: 10,
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			executed++
+			return llm.ToolResult{Content: "2"}, nil
+		},
+	}
+
+	s := NewState("run_repeat", "calculate")
+	answer, err := a.Run(context.Background(), s)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if answer != "The answer is 2." {
+		t.Errorf("answer = %q, want 'The answer is 2.'", answer)
+	}
+
+	if executed != 2 {
+		t.Errorf("tool executed %d times, want exactly 2 (third attempt refused)", executed)
+	}
+
+	if len(s.Messages) < 7 {
+		t.Fatalf("len(s.Messages) = %d, want at least 7", len(s.Messages))
+	}
+
+	res1 := s.Messages[2].Blocks[0]
+	if res1.IsError || res1.Content != "2" {
+		t.Errorf("call 1 result = %+v, want content '2' and is_error false", res1)
+	}
+
+	res2 := s.Messages[4].Blocks[0]
+	if res2.IsError || res2.Content != "2" {
+		t.Errorf("call 2 result = %+v, want content '2' and is_error false", res2)
+	}
+
+	res3 := s.Messages[6].Blocks[0]
+	if !res3.IsError {
+		t.Errorf("call 3 is_error = false, want true")
+	}
+	wantMsg := "you already called calc with these arguments twice this turn and have its result; use it, or change the arguments"
+	if res3.Content != wantMsg {
+		t.Errorf("call 3 content = %q, want %q", res3.Content, wantMsg)
+	}
+
+	// It must NOT count toward operator approval denials.
+	if s.denialCount("calc") != 0 {
+		t.Errorf("denialCount(calc) = %d, want 0", s.denialCount("calc"))
+	}
+}
+
+// A repeated tool call must be intercepted before approval is requested,
+// so the operator is never prompted for an already-repeated call.
+func TestRepeatedToolCallCheckedBeforeApproval(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "write_file", `{"path":"log.txt"}`, 10, 10),
+		toolUseResponse("c2", "write_file", `{"path":"log.txt"}`, 10, 10),
+		toolUseResponse("c3", "write_file", `{"path":"log.txt"}`, 10, 10),
+		endResponse("done", 10, 10),
+	}}
+
+	var approvals int
+	a := &Agent{
+		Provider: fake,
+		Model:    "test",
+		MaxSteps: 10,
+		Approve: func(_ context.Context, _ llm.ToolCall) (bool, error) {
+			approvals++
+			return true, nil
+		},
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			return llm.ToolResult{Content: "ok"}, nil
+		},
+	}
+
+	s := NewState("run_repeat_gate", "write log")
+	s.RequireApproval = []string{"write_file"}
+
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if approvals != 2 {
+		t.Errorf("approver called %d times, want 2 (third attempt must be refused before approval)", approvals)
+	}
+}
+
+// In multi-turn conversations, the repeat counter resets per turn so
+// the same call can be made again in subsequent turns.
+func TestRepeatedToolCallCounterResetsPerTurn(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		// Turn 1
+		toolUseResponse("c1", "calc", `{"expr":"1"}`, 10, 10),
+		toolUseResponse("c2", "calc", `{"expr":"1"}`, 10, 10),
+		endResponse("turn 1 answer", 10, 10),
+		// Turn 2
+		toolUseResponse("c3", "calc", `{"expr":"1"}`, 10, 10),
+		endResponse("turn 2 answer", 10, 10),
+	}}
+
+	var executed int
+	a := &Agent{
+		Provider: fake,
+		Model:    "test",
+		MaxSteps: 10,
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			executed++
+			return llm.ToolResult{Content: "1"}, nil
+		},
+	}
+
+	s := NewState("run_repeat_multiturn", "task 1")
+	ans1, err := a.Run(context.Background(), s)
+	if err != nil {
+		t.Fatalf("turn 1: %v", err)
+	}
+	if ans1 != "turn 1 answer" {
+		t.Errorf("ans1 = %q", ans1)
+	}
+	if executed != 2 {
+		t.Errorf("executed after turn 1 = %d, want 2", executed)
+	}
+
+	ans2, err := a.ChatTurn(context.Background(), s, "task 2")
+	if err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	if ans2 != "turn 2 answer" {
+		t.Errorf("ans2 = %q", ans2)
+	}
+	if executed != 3 {
+		t.Errorf("executed after turn 2 = %d, want 3 (counter reset on new turn)", executed)
+	}
+}
+
+// Compact JSON argument normalization ensures differences in whitespace
+// still count as the same arguments.
+func TestRepeatedToolCallNormalizesWhitespace(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "fetch", `{"url": "https://example.com"}`, 10, 10),
+		toolUseResponse("c2", "fetch", `{"url":"https://example.com"}`, 10, 10),
+		toolUseResponse("c3", "fetch", `{"url":  "https://example.com" }`, 10, 10),
+		endResponse("done", 10, 10),
+	}}
+
+	var executed int
+	a := &Agent{
+		Provider: fake,
+		Model:    "test",
+		MaxSteps: 10,
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			executed++
+			return llm.ToolResult{Content: "html"}, nil
+		},
+	}
+
+	s := NewState("run_repeat_whitespace", "fetch")
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if executed != 2 {
+		t.Errorf("executed = %d, want 2 (third whitespace variant refused as repeat)", executed)
+	}
+}
+
+// Calling the same tool with different arguments is permitted and not refused.
+func TestRepeatedToolCallAllowsDifferentArguments(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		toolUseResponse("c1", "fetch", `{"url":"https://a.com"}`, 10, 10),
+		toolUseResponse("c2", "fetch", `{"url":"https://b.com"}`, 10, 10),
+		toolUseResponse("c3", "fetch", `{"url":"https://c.com"}`, 10, 10),
+		endResponse("done", 10, 10),
+	}}
+
+	var executed int
+	a := &Agent{
+		Provider: fake,
+		Model:    "test",
+		MaxSteps: 10,
+		RunTool: func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
+			executed++
+			return llm.ToolResult{Content: "html"}, nil
+		},
+	}
+
+	s := NewState("run_repeat_different_args", "fetch all")
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if executed != 3 {
+		t.Errorf("executed = %d, want 3 (different arguments allowed)", executed)
+	}
+}

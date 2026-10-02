@@ -133,6 +133,7 @@ func (u oaUsage) usage() Usage {
 type oaError struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
+	Code    string `json:"code,omitempty"`
 }
 
 // ErrNoChoices is returned when a well-formed response carries no choices.
@@ -222,6 +223,10 @@ func fromWire(body []byte) (Response, error) {
 
 	// First, because gateways return this envelope with HTTP 200.
 	if raw.Error != nil {
+		lower := strings.ToLower(raw.Error.Message + " " + raw.Error.Code)
+		if strings.Contains(lower, "context_length_exceeded") || strings.Contains(lower, "maximum context length") {
+			return Response{}, fmt.Errorf("openai: %s: %w", raw.Error.Message, ErrContextLength)
+		}
 		// Type is optional and frequently absent — a gateway relaying an
 		// upstream refusal often sends only a message. Including it
 		// unconditionally produced "openai: : This model only supports single

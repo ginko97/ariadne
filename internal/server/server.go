@@ -59,6 +59,10 @@ type Server struct {
 	// failing it, so a server can run without ever reaching the network.
 	Models *llm.ModelCache
 
+	// ExplicitBudget, if > 0, is the fixed context budget from CLI flag
+	// (-context-budget). When 0, the budget dynamically follows the model.
+	ExplicitBudget int
+
 	// CSRFToken gates every mutating request. Loopback binding is not
 	// protection on its own: any page the browser has open can POST to
 	// localhost, and the worst case here is not noise, it is a page spending

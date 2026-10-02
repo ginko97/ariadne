@@ -186,8 +186,9 @@ func cmdChat(args []string) int {
 	// process, so a prompt that times out cannot leave a goroutine behind to
 	// swallow the next message typed here.
 	stdinReader := stdinSource()
-	// Built on first use: a chat that never asks for the list never fetches it.
-	var models *llm.ModelCache
+	models := llm.NewModelCache(startModel)
+	unsupported, local := modelListFor(endpoint)
+	models.Reconfigure(startModel, unsupported, local)
 
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: startModel, BaseURL: endpoint, RunID: runID,
@@ -198,6 +199,7 @@ func cmdChat(args []string) int {
 		Workspace: workspaceDir,
 		MCPTools:  mcpTools,
 		Store:     store, Trace: tw,
+		Models: models,
 	})
 
 	if resuming {
@@ -246,14 +248,10 @@ func cmdChat(args []string) int {
 		// naming the provider rather than the typo.
 		if rest, ok := strings.CutPrefix(line, "/models"); ok &&
 			(rest == "" || strings.HasPrefix(rest, " ")) {
-			if models == nil {
-				models = llm.NewModelCache(*model)
-				unsupported, local := modelListFor(endpoint)
-				models.Reconfigure(*model, unsupported, local)
-			}
 			listModels(models, strings.TrimSpace(rest))
 			continue
 		}
+
 		if line == "/help" || line == "/?" {
 			fmt.Fprint(os.Stderr, chatCommands)
 			continue

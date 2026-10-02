@@ -152,8 +152,9 @@ type agentOpts struct {
 	// because a resumed run has to be given the same one it started with.
 	Workspace string
 
-	Store *loop.Store
-	Trace *trace.Writer
+	Store  *loop.Store
+	Trace  *trace.Writer
+	Models *llm.ModelCache
 }
 
 func newAgentFor(o agentOpts) *loop.Agent {
@@ -250,7 +251,14 @@ func newAgentFor(o agentOpts) *loop.Agent {
 		Checkpoint:    o.Store.Save,
 		MaxSteps:      o.MaxSteps,
 		ContextBudget: o.Budget,
-		ToolTimeout:   o.ToolTimeout,
+		BudgetResolver: func(model string) int {
+			if o.Models != nil {
+				return o.Models.BudgetFor(model)
+			}
+			return 0
+		},
+		ToolTimeout: o.ToolTimeout,
+
 		// MaxCost stays 0 (unlimited) until Price is a per-model table —
 		// a ceiling with no prices behind it would be theatre.
 	}

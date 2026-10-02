@@ -272,6 +272,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	isBrief := state.Brief != ""
 	agent.ApproveBatch = s.batchApprover(runID, out, state.Workspace, isBrief)
 	agent.Approve = s.approver(runID, out, state.Workspace, isBrief)
+	if agent.BudgetResolver == nil && s.Models != nil {
+		agent.BudgetResolver = s.Models.BudgetFor
+	}
+	if s.ExplicitBudget > 0 {
+		agent.ContextBudget = s.ExplicitBudget
+	}
 
 	origRunTool := agent.RunTool
 	if origRunTool != nil {

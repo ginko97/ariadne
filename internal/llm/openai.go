@@ -161,20 +161,32 @@ func (o *OpenAI) sleep(ctx context.Context, d time.Duration) error {
 
 func isRetryableStatus(code int) bool {
 	return code == http.StatusTooManyRequests ||
+		code == http.StatusInternalServerError ||
+		code == http.StatusBadGateway ||
 		code == http.StatusServiceUnavailable ||
+		code == http.StatusGatewayTimeout ||
 		code == 529 // Site Overloaded (Anthropic / Cloudflare)
 }
 
-func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
-	wire, err := toWire(req)
-	if err != nil {
-		return Response{}, err
+func isContextLengthError(code int, body []byte) bool {
+	if code != http.StatusBadRequest && code != http.StatusRequestEntityTooLarge {
+		return false
 	}
-	payload, err := json.Marshal(wire)
-	if err != nil {
-		return Response{}, fmt.Errorf("openai: encode request: %w", err)
-	}
+	lower := strings.ToLower(string(body))
+	return strings.Contains(lower, "context_length_exceeded") ||
+		strings.Contains(lower, "maximum context length")
+}
 
+// send posts payload to /chat/completions, retrying transport failures and
+// retryable server errors (429, 500, 502, 503, 504, 529) before headers are
+// accepted.
+//
+// Shared by Complete and Stream: both need the same backoff, Retry-After,
+// ceilings, OnRetry reporting and transport retries. For Stream, retries apply
+// only before the first response byte; once 200 OK headers arrive and streaming
+// begins, mid-stream disconnects are handled by ErrStreamCut and the caller's
+// recovery mechanism.
+func (o *OpenAI) send(ctx context.Context, payload []byte, isStream bool) (*http.Response, error) {
 	base := strings.TrimRight(o.BaseURL, "/")
 	if base == "" {
 		base = defaultBaseURL
@@ -194,13 +206,13 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
 
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return Response{}, err
+			return nil, err
 		}
 
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
 			base+"/chat/completions", bytes.NewReader(payload))
 		if err != nil {
-			return Response{}, fmt.Errorf("openai: build request: %w", err)
+			return nil, fmt.Errorf("openai: build request: %w", err)
 		}
 
 		// Extra first, ours second — so nothing in Extra can clobber auth.
@@ -211,11 +223,14 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Authorization", "Bearer "+o.APIKey)
+		if isStream {
+			httpReq.Header.Set("Accept", "text/event-stream")
+		}
 
 		resp, err := client.Do(httpReq)
 		if err != nil {
 			if ctx.Err() != nil {
-				return Response{}, ctx.Err()
+				return nil, ctx.Err()
 			}
 			// A connection that never completed is the most common transient
 			// failure there is — a TLS handshake timeout, a reset, a DNS blip —
@@ -230,13 +245,6 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
 			// generation that may have happened on the other side of a dropped
 			// connection, which is money rather than correctness — and the
 			// alternative is a dead run.
-			//
-			// Deliberately not extended to the body-read failure below. That one
-			// means the response *was* produced, and dogfooding showed it
-			// recurring rather than passing: a prompt too large for the timeout
-			// fails the same way every time, so retrying just spends the wait
-			// three times before failing anyway. The fix there was a bigger
-			// timeout, not more attempts.
 			if attempt < maxRetries {
 				wait := backoff(attempt, nil, nil)
 				if spentBackoff+wait.delay <= maxTotalBackoff {
@@ -244,72 +252,94 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
 						o.OnRetry(attempt, 0, wait.delay)
 					}
 					if sleepErr := o.sleep(ctx, wait.delay); sleepErr != nil {
-						return Response{}, sleepErr
+						return nil, sleepErr
 					}
 					spentBackoff += wait.delay
 					continue
 				}
 			}
-			return Response{}, fmt.Errorf("openai: request failed: %w", err)
+			return nil, fmt.Errorf("openai: request failed: %w", err)
 		}
 
-		// ReadAll consumes to EOF, which is the drain: the connection goes back
-		// to the pool reusable without a separate io.Copy.
-		//
-		// Bounded, one byte past the cap so "exactly at the limit" and "over it"
-		// are distinguishable. Unbounded, a misbehaving gateway or a proxy
-		// returning something that is not a completion could hold the whole of
-		// it in memory; the timeout bounds how long, not how much.
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
-		resp.Body.Close()
+		if isRetryableStatus(resp.StatusCode) {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+			resp.Body.Close()
 
-		if readErr != nil {
-			return Response{}, fmt.Errorf("openai: read response: %w", readErr)
-		}
-		if len(body) > maxResponseBytes {
-			// Not retried: the same request gets the same oversized answer, and a
-			// truncated body fed to fromWire would fail as "malformed JSON", naming
-			// the symptom instead of the cause.
-			return Response{}, fmt.Errorf("openai: %s: response exceeds %d MB; refusing to read the rest",
-				resp.Status, maxResponseBytes>>20)
-		}
+			if attempt < maxRetries {
+				wait := backoff(attempt, resp, body)
 
-		if isRetryableStatus(resp.StatusCode) && attempt < maxRetries {
-			wait := backoff(attempt, resp, body)
+				// An instruction we cannot follow is not a reason to guess. Retrying
+				// early into a window the server named is a guaranteed second 429,
+				// so say what it asked for and stop — an error in a second beats the
+				// same error after a minute and a half.
+				if wait.explicit && wait.delay > maxBackoffDelay {
+					return nil, fmt.Errorf(
+						"openai: %s: server asked to wait %s, beyond the %s this client will hold a request: %s",
+						resp.Status, wait.delay.Round(time.Second), maxBackoffDelay,
+						truncate(body, maxErrBodyLength))
+				}
+				if spentBackoff+wait.delay > maxTotalBackoff {
+					return nil, fmt.Errorf(
+						"openai: %s: gave up after %s of backoff over %d attempts (ceiling %s): %s",
+						resp.Status, spentBackoff.Round(time.Second), attempt+1, maxTotalBackoff,
+						truncate(body, maxErrBodyLength))
+				}
 
-			// An instruction we cannot follow is not a reason to guess. Retrying
-			// early into a window the server named is a guaranteed second 429,
-			// so say what it asked for and stop — an error in a second beats the
-			// same error after a minute and a half.
-			if wait.explicit && wait.delay > maxBackoffDelay {
-				return Response{}, fmt.Errorf(
-					"openai: %s: server asked to wait %s, beyond the %s this client will hold a request: %s",
-					resp.Status, wait.delay.Round(time.Second), maxBackoffDelay,
-					truncate(body, maxErrBodyLength))
-			}
-			if spentBackoff+wait.delay > maxTotalBackoff {
-				return Response{}, fmt.Errorf(
-					"openai: %s: gave up after %s of backoff over %d attempts (ceiling %s): %s",
-					resp.Status, spentBackoff.Round(time.Second), attempt+1, maxTotalBackoff,
-					truncate(body, maxErrBodyLength))
+				if o.OnRetry != nil {
+					o.OnRetry(attempt, resp.StatusCode, wait.delay)
+				}
+				if sleepErr := o.sleep(ctx, wait.delay); sleepErr != nil {
+					return nil, sleepErr
+				}
+				spentBackoff += wait.delay
+				continue
 			}
 
-			if o.OnRetry != nil {
-				o.OnRetry(attempt, resp.StatusCode, wait.delay)
-			}
-			if sleepErr := o.sleep(ctx, wait.delay); sleepErr != nil {
-				return Response{}, sleepErr
-			}
-			spentBackoff += wait.delay
-			continue
+			return nil, fmt.Errorf("openai: %s: %s", resp.Status, truncate(body, maxErrBodyLength))
 		}
 
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			return Response{}, fmt.Errorf("openai: %s: %s", resp.Status, truncate(body, maxErrBodyLength))
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+			resp.Body.Close()
+			if isContextLengthError(resp.StatusCode, body) {
+				return nil, fmt.Errorf("openai: %s: %s: %w", resp.Status, truncate(body, maxErrBodyLength), ErrContextLength)
+			}
+			return nil, fmt.Errorf("openai: %s: %s", resp.Status, truncate(body, maxErrBodyLength))
 		}
 
-		return fromWire(body)
+		return resp, nil
 	}
+}
+
+func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
+	wire, err := toWire(req)
+	if err != nil {
+		return Response{}, err
+	}
+	payload, err := json.Marshal(wire)
+	if err != nil {
+		return Response{}, fmt.Errorf("openai: encode request: %w", err)
+	}
+
+	resp, err := o.send(ctx, payload, false)
+	if err != nil {
+		return Response{}, err
+	}
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if readErr != nil {
+		return Response{}, fmt.Errorf("openai: read response: %w", readErr)
+	}
+	if len(body) > maxResponseBytes {
+		// Not retried: the same request gets the same oversized answer, and a
+		// truncated body fed to fromWire would fail as "malformed JSON", naming
+		// the symptom instead of the cause.
+		return Response{}, fmt.Errorf("openai: %s: response exceeds %d MB; refusing to read the rest",
+			resp.Status, maxResponseBytes>>20)
+	}
+
+	return fromWire(body)
 }
 
 // retryWait is how long to wait, and whether the server said so or we guessed.

@@ -178,6 +178,20 @@ func compact(s *State, inputTokens, budget int) int {
 	// Proportional: if the prompt is twice the budget, roughly half of it has
 	// to go, and compactTarget takes it below the line rather than onto it.
 	want := int(float64(have) * compactTarget * float64(budget) / float64(inputTokens))
+	return compactTo(s, want)
+}
+
+// compactTo drops the oldest complete turns until the conversation is at or
+// below want character size, keeping at least the task and the most recent exchange.
+func compactTo(s *State, want int) int {
+	if len(s.Messages) < 2 {
+		return 0
+	}
+
+	have := totalSize(s.Messages)
+	if have == 0 {
+		return 0
+	}
 
 	all := units(s.Messages)
 	// Keep the most recent exchange whatever the budget says. A conversation

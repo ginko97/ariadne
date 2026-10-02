@@ -719,3 +719,82 @@ func TestIsLoopbackHost(t *testing.T) {
 		}
 	}
 }
+
+func TestChatContextBudgetFollowsModel(t *testing.T) {
+	tsModels := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":[
+			{"id":"test-model","name":"Test","context_length":100000,"pricing":{"prompt":"0","completion":"0"},"supported_parameters":["tools"]},
+			{"id":"large-model","name":"Large","context_length":200000,"pricing":{"prompt":"0","completion":"0"},"supported_parameters":["tools"]}
+		]}`))
+	}))
+	defer tsModels.Close()
+
+	models := llm.NewModelCache("test-model")
+	models.URL = tsModels.URL
+	models.Get(context.Background()) // populate cache
+
+	s, ts := newTestServer(t,
+		endResponse("turn 1"),
+		endResponse("turn 2"),
+		endResponse("turn 3"),
+	)
+	s.Models = models
+
+	// Turn 1: fresh conversation on test-model -> 75% of 100k = 75000.
+	evs1 := events(t, bodyOf(t, post(t, s, ts, `{"message":"hello"}`, nil)))
+	runID := evs1[len(evs1)-1].Data["run_id"].(string)
+
+	st1, err := s.Store.Load(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st1.ContextBudget != 75_000 {
+		t.Errorf("turn 1 ContextBudget = %d, want 75000", st1.ContextBudget)
+	}
+
+	// Turn 2: switch model to large-model -> 75% of 200k = 150000.
+	_ = events(t, bodyOf(t, post(t, s, ts, `{"run_id":"`+runID+`","message":"switch","model":"large-model"}`, nil)))
+	st2, err := s.Store.Load(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st2.ContextBudget != 150_000 {
+		t.Errorf("turn 2 ContextBudget after model switch = %d, want 150000", st2.ContextBudget)
+	}
+
+	// Turn 3: same model (no model in request) -> preserves 150000.
+	_ = events(t, bodyOf(t, post(t, s, ts, `{"run_id":"`+runID+`","message":"continue"}`, nil)))
+	st3, err := s.Store.Load(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st3.ContextBudget != 150_000 {
+		t.Errorf("turn 3 ContextBudget = %d, want 150000 preserved", st3.ContextBudget)
+	}
+
+	// Explicit budget overrides dynamic resolution and is preserved on switch.
+	sExp, tsExp := newTestServer(t, endResponse("turn 1"), endResponse("turn 2"))
+	sExp.Models = models
+	sExp.ExplicitBudget = 12345
+
+	evsExp1 := events(t, bodyOf(t, post(t, sExp, tsExp, `{"message":"hello"}`, nil)))
+	runIDExp := evsExp1[len(evsExp1)-1].Data["run_id"].(string)
+
+	stExp1, err := sExp.Store.Load(runIDExp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stExp1.ContextBudget != 12345 {
+		t.Errorf("explicit budget turn 1 = %d, want 12345", stExp1.ContextBudget)
+	}
+
+	_ = events(t, bodyOf(t, post(t, sExp, tsExp, `{"run_id":"`+runIDExp+`","message":"switch","model":"large-model"}`, nil)))
+	stExp2, err := sExp.Store.Load(runIDExp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stExp2.ContextBudget != 12345 {
+		t.Errorf("explicit budget turn 2 after switch = %d, want 12345", stExp2.ContextBudget)
+	}
+}

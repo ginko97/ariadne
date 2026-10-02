@@ -3,6 +3,26 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## v0.6.14 — 2026-10-03 — context budget follows model, 400 recovery, stream retries, and repeat refusal
+
+- **Context budget follows the model.** When `-context-budget` is not explicitly
+  passed, ariadne dynamically targets 75% of the model's `context_length` from the
+  catalogue (or 3,000 tokens for Ollama models). The budget updates automatically
+  when switching models across turns, and explicit `-context-budget` flag values
+  are preserved across turns and resumes.
+- **Recovery from context length exceeded.** If a provider returns HTTP 400 or 413
+  with `context_length_exceeded` or "maximum context length", the loop automatically
+  compacts the conversation history down to 60% of the estimate, emits a compact trace
+  event, checkpoints, and asks the model again. Tools are never re-run. If history
+  cannot be dropped further, it ends the turn cleanly with an actionable refusal.
+- **Retry in the page and stream resilience.** Streamed turns in the web UI and CLI
+  now automatically retry transient server errors (429, 500, 502, 503, 504, 529) and
+  connection drops before the first byte arrives, respecting server `Retry-After` headers
+  and exponential backoff ceilings.
+- **Repeated tool call refusal.** If a model attempts to call the exact same tool with
+  identical arguments three times within a single turn, the third attempt is refused
+  automatically before human approval, breaking infinite loops and wasted token spend.
+
 ## v0.6.13 — 2026-09-29 — redacted tool output in the page, and a server race fixed
 
 - **Fix: a tool's output in the page is redacted again.** Since v0.6.12 the

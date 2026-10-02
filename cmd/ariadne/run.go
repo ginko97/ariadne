@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/loop"
 	"github.com/ginko97/ariadne/internal/trace"
 )
@@ -123,6 +124,10 @@ func cmdRun(args []string) int {
 	}
 	defer closeTrace(tw)
 
+	models := llm.NewModelCache(*model)
+	unsupported, local := modelListFor(*baseURL)
+	models.Reconfigure(*model, unsupported, local)
+
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: *model, BaseURL: *baseURL, RunID: state.RunID,
 		MaxSteps: maxStepsFor(fs, *maxSteps, state), Budget: *budget, Stream: *stream, Memory: *remember, Exec: *allowExec, Trust: trusted,
@@ -131,10 +136,12 @@ func cmdRun(args []string) int {
 		Workspace: *workspace,
 		MCPTools:  mcpTools,
 		Store:     store, Trace: tw,
+		Models: models,
 	})
 	state.BaseURL = *baseURL
 	state.Workspace = *workspace
 	state.ContextBudget = *budget
+
 	state.Memory = *remember
 	fmt.Fprintf(os.Stderr, "run %s  model=%s\n", state.RunID, *model)
 
@@ -244,6 +251,10 @@ func cmdResume(args []string) int {
 	if mem {
 		state.Memory = true
 	}
+	models := llm.NewModelCache(state.Model)
+	unsupported, local := modelListFor(endpoint)
+	models.Reconfigure(state.Model, unsupported, local)
+
 	agent := newAgentFor(agentOpts{
 		Key: key, Model: state.Model, BaseURL: endpoint, RunID: state.RunID,
 		MaxSteps: maxStepsFor(fs, *maxSteps, state), Budget: budgetVal, Stream: *stream, Memory: mem, Exec: *allowExec, Trust: trusted,
@@ -252,6 +263,7 @@ func cmdResume(args []string) int {
 		Workspace: workspaceDir,
 		MCPTools:  mcpTools,
 		Store:     store, Trace: tw,
+		Models: models,
 	})
 
 	fmt.Fprintf(os.Stderr, "resume %s  model=%s  from step %d (%d messages)\n",

@@ -396,3 +396,41 @@ func TestLocalListKeepsTheConfiguredModelAndSaysWhy(t *testing.T) {
 		t.Errorf("unreachable: %v %q %q", rows, source, warning)
 	}
 }
+
+func TestModelCacheBudgetFor(t *testing.T) {
+	// Nil cache returns 0
+	var nilCache *ModelCache
+	if got := nilCache.BudgetFor("any"); got != 0 {
+		t.Errorf("nil cache budget = %d, want 0", got)
+	}
+
+	// Ollama (local) always returns 3000
+	ollamaCache := NewModelCache("qwen3:4b")
+	ollamaCache.Reconfigure("qwen3:4b", "", func(context.Context) ([]string, error) { return []string{"qwen3:4b"}, nil })
+	if got := ollamaCache.BudgetFor("qwen3:4b"); got != 3000 {
+		t.Errorf("ollama budget = %d, want 3000", got)
+	}
+	if got := ollamaCache.BudgetFor("other-model"); got != 3000 {
+		t.Errorf("ollama budget for other = %d, want 3000", got)
+	}
+
+	// OpenRouter catalogue row with ContextLength returns 75%
+	m := NewModelCache("configured/model")
+	m.rows = []ModelRow{
+		{ID: "anthropic/claude-3.5-sonnet", ContextLength: 200000},
+		{ID: "openai/gpt-4o", ContextLength: 128000},
+		{ID: "zero-context", ContextLength: 0},
+	}
+	if got := m.BudgetFor("anthropic/claude-3.5-sonnet"); got != 150000 {
+		t.Errorf("claude budget = %d, want 150000 (75%% of 200000)", got)
+	}
+	if got := m.BudgetFor("openai/gpt-4o"); got != 96000 {
+		t.Errorf("gpt-4o budget = %d, want 96000 (75%% of 128000)", got)
+	}
+	if got := m.BudgetFor("zero-context"); got != 0 {
+		t.Errorf("zero context budget = %d, want 0", got)
+	}
+	if got := m.BudgetFor("unknown/model"); got != 0 {
+		t.Errorf("unknown model budget = %d, want 0", got)
+	}
+}

@@ -3,8 +3,14 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 )
+
+// ErrContextLength is returned when a provider rejects a request because the
+// prompt exceeds the model's context window (HTTP 400 or 413 with
+// context_length_exceeded or "maximum context length").
+var ErrContextLength = errors.New("openai: maximum context length exceeded")
 
 type Usage struct {
 	InputTokens  int `json:"input_tokens"`

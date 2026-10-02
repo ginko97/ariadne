@@ -135,6 +135,7 @@ func cmdUI(args []string) int {
 			// overwritten, and leaving one would imply a fallback that does not
 			// exist.
 			Store: store, Trace: tw,
+			Models: srv.Models,
 		}
 	}
 
@@ -156,7 +157,9 @@ func cmdUI(args []string) int {
 	}
 
 	srv = server.New(store, newAgent, newRunID)
+	srv.ExplicitBudget = *budget
 	srv.MemoryStore = memory.Store{Path: memoryFile}
+
 	srv.Version = versionString()
 	srv.Home = homeDir
 	srv.Tools = probeTools(func(runID string) agentOpts { return optsFor(runID, nil, nil, nil) })

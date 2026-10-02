@@ -1,7 +1,9 @@
 package loop
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -119,6 +121,11 @@ type Agent struct {
 	// resume. Run clears it on the way in and on the way out.
 	grants map[string]bool
 
+	// callCounts tracks (tool, compactedArgs) occurrences within the turn in
+	// progress. Deliberately on the agent and not on State: like grants, it
+	// lasts one turn and Run clears it on entry and exit.
+	callCounts map[string]int
+
 	// Redact, if set, rewrites every tool result before anything else sees it:
 	// the fence, the trace, the checkpoint, and the model.
 	//
@@ -201,6 +208,11 @@ type Agent struct {
 	// Seeds State.ContextBudget and is not read after that, so a resumed run
 	// keeps the budget it started with. Run never writes this field.
 	ContextBudget int
+
+	// BudgetResolver resolves the context budget for a model when ContextBudget
+	// is 0. Used so the budget follows the model at the start and on a model
+	// switch at turn boundaries.
+	BudgetResolver func(model string) int
 }
 
 // Run drives the agent loop until the model stops, a limit trips, or ctx is cancelled.
@@ -212,7 +224,11 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 	// message starts with none, and on exit so nothing outlives the turn even
 	// if a caller inspects the agent afterwards.
 	a.grants = nil
-	defer func() { a.grants = nil }()
+	a.callCounts = nil
+	defer func() {
+		a.grants = nil
+		a.callCounts = nil
+	}()
 
 	a.memory = ""
 	if a.Memory != nil {
@@ -256,8 +272,12 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 	// would still be set for the next run started from the same agent, and a
 	// job nobody gave a budget would silently begin dropping history. That is
 	// the shared-mutable-field bug this project has already paid for once.
-	if s.ContextBudget == 0 && a.ContextBudget > 0 {
-		s.ContextBudget = a.ContextBudget
+	if s.ContextBudget == 0 {
+		if a.ContextBudget > 0 {
+			s.ContextBudget = a.ContextBudget
+		} else if a.BudgetResolver != nil {
+			s.ContextBudget = a.BudgetResolver(s.Model)
+		}
 	}
 
 	a.emit(trace.Event{
@@ -278,7 +298,9 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		return "", a.endRun(s, err)
 	}
 
+	recoveredStep := -1
 	for {
+
 		// --- guards: top of every iteration, before any work ---
 		if err := ctx.Err(); err != nil {
 			return "", a.endRun(s, err)
@@ -360,6 +382,36 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 				Kind: trace.KindResponse, Step: s.Steps + 1,
 				LatencyMS: latency, Error: err.Error(),
 			})
+			if errors.Is(err, llm.ErrContextLength) {
+				if recoveredStep != s.Steps {
+					recoveredStep = s.Steps
+					have := totalSize(s.Messages)
+					want := int(float64(have) * compactTarget)
+					if n := compactTo(s, want); n > 0 {
+						est := estimatedTokens(s)
+						if est <= 0 {
+							est = have
+						}
+						a.emit(trace.Event{
+							Kind:     trace.KindCompact,
+							Step:     s.Steps,
+							InTokens: est,
+							Messages: len(s.Messages),
+							Content:  fmt.Sprintf("dropped %d messages (%d total) on context length exceeded", n, s.Dropped),
+						})
+						afterChars := totalSize(s.Messages)
+						if have > 0 && s.InputTokens > 0 {
+							s.InputTokens = int(float64(s.InputTokens) * float64(afterChars) / float64(have))
+						}
+						s.InputChars = afterChars
+						if cpErr := a.checkpoint(s); cpErr != nil {
+							return "", a.endRun(s, cpErr)
+						}
+						continue
+					}
+				}
+				return "", a.endRun(s, fmt.Errorf("this conversation is too long for %s; start a new one or choose a model with more context", s.Model))
+			}
 			return "", a.endRun(s, err)
 		}
 
@@ -499,6 +551,18 @@ func (a *Agent) runCalls(ctx context.Context, s *State, calls []llm.ToolCall) er
 			}
 			continue
 		}
+
+		// A tool call with the same arguments a third time in one turn is
+		// refused immediately without asking the operator or counting toward
+		// the approval denial limit.
+		if a.callCount(c) >= maxRepeatedToolCalls {
+			err := a.deny(s, i, c, fmt.Sprintf("you already called %s with these arguments twice this turn and have its result; use it, or change the arguments", c.Name))
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		a.recordCall(c)
 
 		// Permitted is not the same as wanted. The allow-list was decided before
 		// the run, by someone who could not know what the arguments would be;
@@ -784,6 +848,39 @@ func (a *Agent) askApproval(ctx context.Context, c llm.ToolCall) (bool, error) {
 		return false, nil
 	}
 	return a.Approve(ctx, c)
+}
+
+// maxRepeatedToolCalls is the maximum number of times a tool may be invoked
+// with identical arguments in a single turn before being refused.
+const maxRepeatedToolCalls = 2
+
+func (a *Agent) callCount(c llm.ToolCall) int {
+	if a.callCounts == nil {
+		return 0
+	}
+	return a.callCounts[toolCallKey(c)]
+}
+
+func (a *Agent) recordCall(c llm.ToolCall) {
+	if a.callCounts == nil {
+		a.callCounts = make(map[string]int)
+	}
+	a.callCounts[toolCallKey(c)]++
+}
+
+func toolCallKey(c llm.ToolCall) string {
+	return c.Name + "\x00" + compactJSON(c.Args)
+}
+
+func compactJSON(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, raw); err != nil {
+		return string(raw)
+	}
+	return buf.String()
 }
 
 func (a *Agent) checkpoint(s *State) error {

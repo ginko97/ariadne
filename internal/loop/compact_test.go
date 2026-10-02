@@ -767,3 +767,216 @@ func TestCompactedCallsOnAnUncompactedRun(t *testing.T) {
 		t.Errorf("a run with no digest reported calls: %v", got)
 	}
 }
+
+func TestContextLengthExceededRecoversViaCompaction(t *testing.T) {
+	fake := &llm.Fake{
+		Errs: []error{llm.ErrContextLength, nil},
+		Responses: []llm.Response{
+			{}, // Call 0 returns Errs[0]
+			endResponse("recovered response", 100, 10),
+		},
+	}
+	var events []trace.Event
+	var checkpointed bool
+	a := &Agent{
+		Provider: fake,
+		Model:    "test-model",
+		MaxSteps: 5,
+		Trace:    func(e trace.Event) { events = append(events, e) },
+		Checkpoint: func(st *State) error {
+			checkpointed = true
+			return nil
+		},
+	}
+
+	s := conversation("summarise lots of info", 10)
+	beforeMsgs := len(s.Messages)
+
+	ans, err := a.Run(context.Background(), s)
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if ans != "recovered response" {
+		t.Errorf("got %q, want 'recovered response'", ans)
+	}
+	if s.Dropped == 0 {
+		t.Errorf("s.Dropped = 0, want > 0")
+	}
+	if len(s.Messages) >= beforeMsgs {
+		t.Errorf("messages not compacted: len was %d, now %d", beforeMsgs, len(s.Messages))
+	}
+	if !checkpointed {
+		t.Errorf("compaction was not checkpointed")
+	}
+	if len(fake.Calls) != 2 {
+		t.Errorf("fake.Calls = %d, want 2", len(fake.Calls))
+	}
+
+	var sawCompact bool
+	for _, e := range events {
+		if e.Kind == trace.KindCompact {
+			sawCompact = true
+			if !strings.Contains(e.Content, "context length exceeded") {
+				t.Errorf("trace event content does not mention context length exceeded: %s", e.Content)
+			}
+		}
+	}
+	if !sawCompact {
+		t.Errorf("expected trace.KindCompact event")
+	}
+	assertWellFormed(t, s.Messages)
+}
+
+func TestContextLengthExceededCannotDropFailsWithExactMessage(t *testing.T) {
+	fake := &llm.Fake{
+		Errs: []error{llm.ErrContextLength},
+	}
+	a := &Agent{
+		Provider: fake,
+		Model:    "small-model",
+		MaxSteps: 5,
+	}
+
+	s := NewState("run_short", "hello")
+	_, err := a.Run(context.Background(), s)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	want := "this conversation is too long for small-model; start a new one or choose a model with more context"
+	if err.Error() != want {
+		t.Errorf("got err %q, want %q", err.Error(), want)
+	}
+}
+
+func TestContextLengthExceededRetriedOnlyOncePerStep(t *testing.T) {
+	fake := &llm.Fake{
+		Errs: []error{llm.ErrContextLength, llm.ErrContextLength},
+	}
+	a := &Agent{
+		Provider: fake,
+		Model:    "fixed-model",
+		MaxSteps: 10,
+	}
+
+	s := conversation("long task", 10)
+	_, err := a.Run(context.Background(), s)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	want := "this conversation is too long for fixed-model; start a new one or choose a model with more context"
+	if err.Error() != want {
+		t.Errorf("got err %q, want %q", err.Error(), want)
+	}
+	if len(fake.Calls) != 2 {
+		t.Errorf("fake.Calls = %d, want 2 (one attempt + one retry)", len(fake.Calls))
+	}
+}
+
+func TestBudgetFollowsModelAtStart(t *testing.T) {
+	fake := &llm.Fake{
+		Responses: []llm.Response{endResponse("ok", 10, 10)},
+	}
+	resolverCalled := false
+	a := &Agent{
+		Provider: fake,
+		Model:    "test-model",
+		MaxSteps: 5,
+		BudgetResolver: func(model string) int {
+			resolverCalled = true
+			if model == "test-model" {
+				return 60000
+			}
+			return 0
+		},
+	}
+
+	s := NewState("run_budget", "test")
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !resolverCalled {
+		t.Errorf("BudgetResolver was not called")
+	}
+	if s.ContextBudget != 60000 {
+		t.Errorf("s.ContextBudget = %d, want 60000", s.ContextBudget)
+	}
+
+	fake2 := &llm.Fake{
+		Responses: []llm.Response{endResponse("ok", 10, 10)},
+	}
+	aExplicit := &Agent{
+		Provider:      fake2,
+		Model:         "test-model",
+		ContextBudget: 12345,
+		BudgetResolver: func(model string) int {
+			return 60000
+		},
+	}
+	s2 := NewState("run_budget_exp", "test")
+	if _, err := aExplicit.Run(context.Background(), s2); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if s2.ContextBudget != 12345 {
+		t.Errorf("s2.ContextBudget = %d, want 12345 (explicit override)", s2.ContextBudget)
+	}
+}
+
+func TestBudgetFollowsModelOnModelSwitch(t *testing.T) {
+	fake := &llm.Fake{
+		Responses: []llm.Response{
+			endResponse("first", 10, 10),
+			endResponse("second", 10, 10),
+		},
+	}
+	budgetMap := map[string]int{
+		"model-a": 40000,
+		"model-b": 90000,
+	}
+	a := &Agent{
+		Provider: fake,
+		Model:    "model-a",
+		MaxSteps: 5,
+		BudgetResolver: func(model string) int {
+			return budgetMap[model]
+		},
+	}
+
+	s := NewState("run_switch", "turn 1")
+	if _, err := a.Run(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	if s.ContextBudget != 40000 {
+		t.Errorf("turn 1 budget = %d, want 40000", s.ContextBudget)
+	}
+
+	a.Model = "model-b"
+	if _, err := a.ChatTurn(context.Background(), s, "turn 2"); err != nil {
+		t.Fatal(err)
+	}
+	if s.ContextBudget != 90000 {
+		t.Errorf("turn 2 budget after model switch = %d, want 90000", s.ContextBudget)
+	}
+
+	fake2 := &llm.Fake{
+		Responses: []llm.Response{
+			endResponse("turn 2", 10, 10),
+		},
+	}
+	aExplicit := &Agent{
+		Provider:      fake2,
+		Model:         "model-b",
+		ContextBudget: 5555,
+		BudgetResolver: func(model string) int {
+			return 90000
+		},
+	}
+	sExplicit := NewState("run_exp", "turn 1")
+	sExplicit.ContextBudget = 5555
+	aExplicit.Model = "model-a"
+	if _, err := aExplicit.ChatTurn(context.Background(), sExplicit, "turn 2"); err != nil {
+		t.Fatal(err)
+	}
+	if sExplicit.ContextBudget != 5555 {
+		t.Errorf("explicit budget was overwritten: got %d, want 5555", sExplicit.ContextBudget)
+	}
+}
