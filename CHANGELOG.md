@@ -3,7 +3,7 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
-## Unreleased
+## v0.6.15 — 2026-10-03 — OpenRouter error messages, and the context budget in the terminal
 
 - **Fix: OpenRouter's error messages are shown again.** Since v0.6.14 an error
   whose `code` is a number, which is how OpenRouter sends it, failed to decode, and the
