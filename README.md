@@ -92,6 +92,15 @@ ariadne resume run_20260913T064046_9ffee0
 In the browser the same thing is **Resume turn**, and **Try again** when the connection
 dropped before an answer arrived.
 
+### Long conversations
+
+When a conversation outgrows the model, the oldest turns are dropped and a short digest of
+them is kept. The limit is 75% of the model's context on OpenRouter, from its model list,
+and 3,000 tokens on Ollama. Ollama's default context is 4,096 tokens, and it cuts a longer
+prompt without saying so. Other providers publish no context size, so nothing is dropped
+there until the provider says the conversation is too long. Then the oldest turns go and
+the question is asked once more. `-context-budget` sets the limit yourself.
+
 ## What it can do
 
 | | |

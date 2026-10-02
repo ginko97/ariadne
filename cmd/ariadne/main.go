@@ -213,7 +213,9 @@ flags:
   -allow          comma-separated tools this run may call (default: all)
   -workspace      directory the file tools are confined to (default workspace)
   -approve        tools needing a yes before each call (terminal; the browser under ui)
-  -context-budget compact the conversation past this many prompt tokens (0: never)
+  -context-budget compact the conversation past this many prompt tokens
+                  (default: 75% of the model's context, 3000 on Ollama;
+                  off where the provider lists no context size; eval: off)
   -stream         print tokens and tool calls as they arrive
   -remember       let the run read and append to MEMORY.md (off by default)
   -exec           offer exec: run a program (argv, no shell) in the workspace;

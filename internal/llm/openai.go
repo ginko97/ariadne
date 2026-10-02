@@ -172,9 +172,7 @@ func isContextLengthError(code int, body []byte) bool {
 	if code != http.StatusBadRequest && code != http.StatusRequestEntityTooLarge {
 		return false
 	}
-	lower := strings.ToLower(string(body))
-	return strings.Contains(lower, "context_length_exceeded") ||
-		strings.Contains(lower, "maximum context length")
+	return mentionsContextLength(string(body))
 }
 
 // send posts payload to /chat/completions, retrying transport failures and

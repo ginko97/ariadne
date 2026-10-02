@@ -39,7 +39,7 @@ func cmdUI(args []string) int {
 	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
 	workspace := fs.String("workspace", "", "default folder for new conversations; the page can choose another, and an existing conversation always keeps its own")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
-	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
+	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: 75% of the model's context, 3000 on Ollama)")
 	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")
 	httpTimeout := fs.Duration("http-timeout", defaultHTTPTimeout, "bound one provider request, body included (0: only the context)")
 

@@ -232,18 +232,25 @@ func (m *ModelCache) Configured() string {
 // 75% of the model's ContextLength if known from the catalogue,
 // 3000 for Ollama (whose default num_ctx is 4096 and cuts longer prompts silently),
 // or 0 (leave it off) if unknown or unlisted.
+//
+// Through Get, not the rows already held: in the terminal nothing else asks
+// for the list unless /models is typed, so reading only what was fetched gave
+// every OpenRouter conversation there a budget of 0. Get fetches once per TTL,
+// bounded by the cache's own timeout, backs off after a failure, and answers
+// a provider with no list without touching the network.
 func (m *ModelCache) BudgetFor(model string) int {
 	if m == nil {
 		return 0
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.Local != nil {
+	local := m.Local != nil
+	m.mu.Unlock()
+	if local {
 		return 3000
 	}
 
-	for _, row := range m.rows {
+	rows, _, _ := m.Get(context.Background())
+	for _, row := range rows {
 		if row.ID == model && row.ContextLength > 0 {
 			return int(float64(row.ContextLength) * 0.75)
 		}

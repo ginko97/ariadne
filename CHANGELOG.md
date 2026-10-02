@@ -3,6 +3,18 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## Unreleased
+
+- **Fix: OpenRouter's error messages are shown again.** Since v0.6.14 an error
+  whose `code` is a number, which is how OpenRouter sends it, failed to decode, and the
+  page or terminal showed "cannot unmarshal number" instead of the provider's message.
+- **Fix: in the terminal the context budget follows the model.** In v0.6.14,
+  `run`, `chat` and `resume` on OpenRouter got no budget unless `/models` had
+  been typed, because the model list was never fetched. It is now fetched once
+  when the conversation starts: one small request, which gives up after 10 seconds
+  and leaves the budget off if OpenRouter's list cannot be reached.
+- `--help` and the README say what `-context-budget` does when it is not set.
+
 ## v0.6.14 — 2026-10-03 — context budget follows model, 400 recovery, stream retries, and repeat refusal
 
 - **Context budget follows the model.** When `-context-budget` is not explicitly

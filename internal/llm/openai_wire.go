@@ -133,7 +133,24 @@ func (u oaUsage) usage() Usage {
 type oaError struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
-	Code    string `json:"code,omitempty"`
+	// Code is raw because providers disagree on its type: OpenAI sends a
+	// string ("context_length_exceeded"), OpenRouter a number (502). As a
+	// string field, a number failed the whole decode, and the provider's
+	// message was replaced by "cannot unmarshal number".
+	Code json.RawMessage `json:"code,omitempty"`
+}
+
+// contextLength reports whether the error says the prompt was too long.
+func (e *oaError) contextLength() bool {
+	return mentionsContextLength(e.Message + " " + string(e.Code))
+}
+
+// mentionsContextLength is the one test for a provider saying the prompt
+// does not fit, over an error body, message or code.
+func mentionsContextLength(s string) bool {
+	lower := strings.ToLower(s)
+	return strings.Contains(lower, "context_length_exceeded") ||
+		strings.Contains(lower, "maximum context length")
 }
 
 // ErrNoChoices is returned when a well-formed response carries no choices.
@@ -223,8 +240,7 @@ func fromWire(body []byte) (Response, error) {
 
 	// First, because gateways return this envelope with HTTP 200.
 	if raw.Error != nil {
-		lower := strings.ToLower(raw.Error.Message + " " + raw.Error.Code)
-		if strings.Contains(lower, "context_length_exceeded") || strings.Contains(lower, "maximum context length") {
+		if raw.Error.contextLength() {
 			return Response{}, fmt.Errorf("openai: %s: %w", raw.Error.Message, ErrContextLength)
 		}
 		// Type is optional and frequently absent — a gateway relaying an

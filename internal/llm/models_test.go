@@ -397,6 +397,21 @@ func TestLocalListKeepsTheConfiguredModelAndSaysWhy(t *testing.T) {
 	}
 }
 
+// In the terminal nothing fetches the list before the first turn; BudgetFor
+// has to, or a conversation there starts with no budget at all. Once, then
+// from the cache.
+func TestBudgetForFetchesAnEmptyCache(t *testing.T) {
+	ts, hits := upstream(t, modelsFixture, http.StatusOK)
+	m := newCache(t, ts.URL)
+	if got := m.BudgetFor("b/tools-two"); got != 96000 {
+		t.Errorf("budget = %d, want 96000 (75%% of 128000) from a cache never fetched before", got)
+	}
+	m.BudgetFor("a/tools-one")
+	if n := hits.Load(); n != 1 {
+		t.Errorf("%d fetches, want 1", n)
+	}
+}
+
 func TestModelCacheBudgetFor(t *testing.T) {
 	// Nil cache returns 0
 	var nilCache *ModelCache
@@ -421,6 +436,8 @@ func TestModelCacheBudgetFor(t *testing.T) {
 		{ID: "openai/gpt-4o", ContextLength: 128000},
 		{ID: "zero-context", ContextLength: 0},
 	}
+	// Fresh, or BudgetFor's Get would refresh it from the real catalogue.
+	m.fetched = time.Now()
 	if got := m.BudgetFor("anthropic/claude-3.5-sonnet"); got != 150000 {
 		t.Errorf("claude budget = %d, want 150000 (75%% of 200000)", got)
 	}

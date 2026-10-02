@@ -29,7 +29,7 @@ func cmdChat(args []string) int {
 	approve := fs.String("approve", "", "tools needing a yes on the terminal before each call (resume can only add)")
 	trust := fs.String("trust", "", "MCP tools, or a gated built-in (web_fetch, edit_file, write_file), that run without approval; every other one asks first")
 	allowExec := fs.Bool("exec", false, "offer the exec tool: runs a program in the workspace, and every call asks first")
-	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: never)")
+	budget := fs.Int("context-budget", 0, "compact the conversation past this many prompt tokens (0: 75% of the model's context, 3000 on Ollama)")
 	stream := fs.Bool("stream", false, "print tokens and tool calls as they arrive")
 	remember := fs.Bool("remember", false, "let the run read and append to `MEMORY.md`")
 	toolTimeout := fs.Duration("tool-timeout", defaultToolTimeout, "abandon a tool call that runs longer than this (0: never)")

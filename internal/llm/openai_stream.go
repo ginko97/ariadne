@@ -86,8 +86,7 @@ func (o *OpenAI) Stream(ctx context.Context, req Request) (iter.Seq2[Chunk, erro
 				return
 			}
 			if raw.Error != nil {
-				lower := strings.ToLower(raw.Error.Message + " " + raw.Error.Code)
-				if strings.Contains(lower, "context_length_exceeded") || strings.Contains(lower, "maximum context length") {
+				if raw.Error.contextLength() {
 					yield(Chunk{}, fmt.Errorf("openai: stream error: %s: %w", raw.Error.Message, ErrContextLength))
 					return
 				}
