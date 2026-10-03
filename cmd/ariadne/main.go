@@ -210,6 +210,7 @@ flags:
   -model          model id                   (env ARIADNE_MODEL)
   -base-url       OpenAI-compatible endpoint (env ARIADNE_BASE_URL)
   -max-steps      ceiling on loop iterations per turn (default 10; 25 for a brief)
+  -max-cost       stop the run if cumulative cost reaches this many USD (0: unlimited)
   -allow          comma-separated tools this run may call (default: all)
   -workspace      directory the file tools are confined to (default workspace)
   -approve        tools needing a yes before each call (terminal; the browser under ui)

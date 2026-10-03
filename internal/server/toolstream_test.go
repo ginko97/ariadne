@@ -117,3 +117,34 @@ func TestSSEWriterDropsEventsOnceClosed(t *testing.T) {
 		t.Errorf("an event was written after close:\n%s", rec.Body.String())
 	}
 }
+
+// A tool denied by policy (such as not being in the agent's allow-list) emits a
+// tool_result event with is_error=true carrying the refusal text, ensuring the
+// Web UI updates rather than hanging on calling...
+func TestDeniedToolEmitsToolResultWithError(t *testing.T) {
+	s, ts := toolServer(t,
+		func(context.Context, llm.ToolCall) (llm.ToolResult, error) {
+			t.Fatal("RunTool must not be called for a denied tool")
+			return llm.ToolResult{}, nil
+		},
+		func(a *loop.Agent) {
+			a.Allow = []string{"fetch"}
+		})
+
+	body := bodyOf(t, post(t, s, ts, `{"message":"run disallowed tool"}`, nil))
+	results := toolResultEvents(t, body)
+	if len(results) != 1 {
+		t.Fatalf("tool_result events = %v, want 1 event for denied tool", results)
+	}
+	r := results[0]
+	if r["id"] != "c1" || r["name"] != "calc" {
+		t.Errorf("got id=%v, name=%v; want id=c1, name=calc", r["id"], r["name"])
+	}
+	if r["is_error"] != true {
+		t.Errorf("got is_error=%v, want true", r["is_error"])
+	}
+	text, _ := r["text"].(string)
+	if !strings.Contains(text, "not permitted") {
+		t.Errorf("text = %q, want notice containing 'not permitted'", text)
+	}
+}

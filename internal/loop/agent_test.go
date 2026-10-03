@@ -449,6 +449,39 @@ func TestPriceUsesReportedCost(t *testing.T) {
 	}
 }
 
+func TestPriceResolverComputesCostWhenPriceEmpty(t *testing.T) {
+	fake := &llm.Fake{Responses: []llm.Response{
+		endResponse("done", 1_000_000, 0),
+	}}
+
+	resolved := false
+	a := &Agent{
+		Provider: fake, Model: "dynamic-model", MaxSteps: 2,
+		PriceResolver: func(model string) Price {
+			if model == "dynamic-model" {
+				resolved = true
+				return Price{InputPerMTok: 5, OutputPerMTok: 10}
+			}
+			return Price{}
+		},
+	}
+
+	state := NewState("r1", "hi")
+	_, err := a.Run(context.Background(), state)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !resolved {
+		t.Error("PriceResolver was not invoked")
+	}
+	if state.Cost != 5.0 {
+		t.Errorf("state.Cost = %v, want 5.0", state.Cost)
+	}
+	if state.UnpricedSteps != 0 {
+		t.Errorf("state.UnpricedSteps = %d, want 0", state.UnpricedSteps)
+	}
+}
+
 // A trace has to describe the whole run, in order, with the facts that error
 // analysis needs: which tool, which arguments, what came back, what it cost.
 func TestTraceRecordsWholeRun(t *testing.T) {

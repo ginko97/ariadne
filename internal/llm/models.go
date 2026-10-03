@@ -258,6 +258,32 @@ func (m *ModelCache) BudgetFor(model string) int {
 	return 0
 }
 
+// PriceFor resolves the token price in dollars per million tokens for a model.
+// Through Get, bounded by the cache's TTL and timeout, returning (0, 0, false)
+// for local providers, missing entries, or unquoted pricing.
+func (m *ModelCache) PriceFor(model string) (promptPerMTok, completionPerMTok float64, ok bool) {
+	if m == nil {
+		return 0, 0, false
+	}
+	m.mu.Lock()
+	local := m.Local != nil
+	m.mu.Unlock()
+	if local {
+		return 0, 0, false
+	}
+
+	rows, _, _ := m.Get(context.Background())
+	for _, row := range rows {
+		if row.ID == model {
+			if row.PromptPerMTok > 0 || row.CompletionPerMTok > 0 {
+				return row.PromptPerMTok, row.CompletionPerMTok, true
+			}
+			return 0, 0, false
+		}
+	}
+	return 0, 0, false
+}
+
 // fallbackRows is the configured model alone: the one model known to work,
 // because every turn in this process already uses it.
 func (m *ModelCache) fallbackRows() []ModelRow {

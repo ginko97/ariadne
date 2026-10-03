@@ -924,7 +924,7 @@ async function send(text, opts = {}) {
 
   let answer = null, resp, stopped = false, failed = '';
   const liveTools = new Map();
-  let pendingTool = null;
+  const pendingTools = [];
   turn = new AbortController();
   try {
     resp = await api('/api/chat', {
@@ -996,38 +996,47 @@ async function send(text, opts = {}) {
         } else if (name === 'brief') {
           renderBrief(d);
         } else if (name === 'tool') {
-          pendingTool = toolBlock('', d.name, '');
+          const el = toolBlock('', d.name, '');
+          pendingTools.push({ el, name: d.name, index: d.index });
           working('calling ' + d.name);
           answer = null;
         } else if (name === 'tool_start') {
           working('calling ' + d.name);
           answer = null;
-          if (pendingTool) {
-            pendingTool.dataset.callId = d.id;
-            const s = pendingTool.querySelector('summary');
+          let idx = pendingTools.findIndex(p => p.name === d.name);
+          if (idx === -1 && pendingTools.length > 0) idx = 0;
+          if (idx !== -1) {
+            const p = pendingTools.splice(idx, 1)[0];
+            p.el.dataset.callId = d.id;
+            const s = p.el.querySelector('summary');
             if (s) s.textContent = d.args ? `→ ${d.name}(${d.args})` : `→ ${d.name}`;
-            liveTools.set(d.id, { el: pendingTool, name: d.name, args: d.args });
-            pendingTool = null;
+            liveTools.set(d.id, { el: p.el, name: d.name, args: d.args });
           } else {
             const el = toolBlock(d.id, d.name, d.args);
             liveTools.set(d.id, { el, name: d.name, args: d.args });
           }
         } else if (name === 'tool_result') {
-          const item = liveTools.get(d.id) || (pendingTool ? { el: pendingTool, name: d.name, args: '' } : null);
+          let item = liveTools.get(d.id);
           if (item) {
-            updateToolResult(item.el, d.text, d.is_error, item.name || d.name, item.args);
             liveTools.delete(d.id);
-            if (pendingTool === item.el) pendingTool = null;
+            updateToolResult(item.el, d.text, d.is_error, item.name || d.name, item.args);
           } else {
-            entry('tool_result', `← ${d.text}`, d.is_error ? 'is_error' : '');
+            let idx = pendingTools.findIndex(p => p.name === d.name);
+            if (idx === -1 && pendingTools.length > 0) idx = 0;
+            if (idx !== -1) {
+              const p = pendingTools.splice(idx, 1)[0];
+              updateToolResult(p.el, d.text, d.is_error, p.name || d.name, '');
+            } else {
+              entry('tool_result', `← ${d.text}`, d.is_error ? 'is_error' : '');
+            }
           }
         } else if (name === 'token') {
-          pendingTool = null;
+          pendingTools.length = 0;
           if (!answer) { answer = entry('answer', ''); working('writing the answer'); }
           answer.textContent += d.text;
           log.scrollTop = log.scrollHeight;
         } else if (name === 'done') {
-          pendingTool = null;
+          pendingTools.length = 0;
           liveTools.clear();
           // The streamed text and the final answer are the same words; replace
           // rather than append, so a provider that does not stream still shows one.

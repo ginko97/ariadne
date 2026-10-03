@@ -591,16 +591,20 @@ func TestDeltaEventsAnnounceEachToolOnceAndResetBetweenTurns(t *testing.T) {
 	emit(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c1", Name: "calc"}})
 	emit(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, Args: `{"expr"`}})
 	emit(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, Args: `:"2+2"}`}})
+	emit(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 1, ID: "c2", Name: "fetch"}})
 	emit(llm.Chunk{Stop: llm.StopToolUse})
 	// Turn two: the provider reuses index 0 for a different tool.
-	emit(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c2", Name: "fetch"}})
+	emit(llm.Chunk{ToolCall: &llm.ToolDelta{Index: 0, ID: "c3", Name: "fetch"}})
 
 	body := rec.Body.String()
 	if n := strings.Count(body, `"name":"calc"`); n != 1 {
 		t.Errorf("calc announced %d times, want 1:\n%s", n, body)
 	}
-	if n := strings.Count(body, `"name":"fetch"`); n != 1 {
-		t.Errorf("fetch announced %d times, want 1 — the turn reset did not happen:\n%s", n, body)
+	if n := strings.Count(body, `"name":"fetch"`); n != 2 {
+		t.Errorf("fetch announced %d times, want 2:\n%s", n, body)
+	}
+	if !strings.Contains(body, `"index":0`) || !strings.Contains(body, `"index":1`) {
+		t.Errorf("tool events missing index:\n%s", body)
 	}
 	if strings.Contains(body, `expr`) {
 		t.Errorf("argument fragments were streamed:\n%s", body)

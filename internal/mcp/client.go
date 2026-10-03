@@ -8,12 +8,19 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"unicode/utf8"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/tool"
 )
+
+// MaxMCPOutputBytes is the maximum bytes of text an MCP tool call may return.
+// Bounded like fetch (1 MB) and web_fetch (2 MB): an MCP server is external
+// code and can return arbitrary megabytes, which exhausts memory and blows the
+// context window.
+const MaxMCPOutputBytes = 1 << 20 // 1 MB
 
 const clientName = "ariadne"
 
@@ -138,7 +145,8 @@ func (r *remoteTool) Call(ctx context.Context, callID string, args json.RawMessa
 	}, nil
 }
 
-// flattenText keeps the text parts of an MCP result and drops everything else.
+// flattenText keeps the text parts of an MCP result, truncates output exceeding
+// MaxMCPOutputBytes on a UTF-8 boundary with a notice, and drops non-text parts.
 //
 // CallToolResult.Content is []Content — TextContent, ImageContent, AudioContent,
 // ResourceLink, EmbeddedResource. llm.ToolResult.Content is a string, because
@@ -151,5 +159,13 @@ func flattenText(content []mcpsdk.Content) string {
 			parts = append(parts, tc.Text)
 		}
 	}
-	return strings.Join(parts, "\n")
+	text := strings.Join(parts, "\n")
+	if len(text) > MaxMCPOutputBytes {
+		limit := MaxMCPOutputBytes
+		for limit > 0 && !utf8.RuneStart(text[limit]) {
+			limit--
+		}
+		text = text[:limit] + fmt.Sprintf("\n... [output truncated at %d bytes]", MaxMCPOutputBytes)
+	}
+	return text
 }

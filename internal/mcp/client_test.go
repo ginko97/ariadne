@@ -3,9 +3,11 @@ package mcp_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ginko97/ariadne/internal/llm"
 	"github.com/ginko97/ariadne/internal/mcp"
@@ -178,5 +180,48 @@ func TestConnectPrefixesToolsWithTheServerName(t *testing.T) {
 	}
 	if res.IsError || res.Content != "HELLO" {
 		t.Errorf("prefixed call = %+v, want HELLO from the server's own upper", res)
+	}
+}
+
+// Output over MaxMCPOutputBytes is truncated with a notice and clean UTF-8.
+func TestRemoteToolTruncatesLargeOutput(t *testing.T) {
+	s := dial(t)
+	tools, err := s.Tools(context.Background())
+	if err != nil {
+		t.Fatalf("Tools: %v", err)
+	}
+	reg := tool.New(tools...)
+
+	// Under limit: returned in full with no truncation note.
+	short := "hello world under the limit"
+	res, err := reg.Call(context.Background(), llmToolCall("call_short", "echo", fmt.Sprintf(`{"text":%q}`, short)))
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if res.Content != short {
+		t.Errorf("content = %q, want %q", res.Content, short)
+	}
+
+	// Over limit: truncated at MaxMCPOutputBytes with notice, clean UTF-8.
+	// Position a multi-byte UTF-8 character across the boundary to test boundary walk.
+	prefix := strings.Repeat("x", mcp.MaxMCPOutputBytes-1)
+	input := prefix + "日本語" + strings.Repeat("y", 1000)
+	res, err = reg.Call(context.Background(), llmToolCall("call_large", "echo", fmt.Sprintf(`{"text":%q}`, input)))
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	wantNotice := fmt.Sprintf("\n... [output truncated at %d bytes]", mcp.MaxMCPOutputBytes)
+	if !strings.Contains(res.Content, wantNotice) {
+		t.Fatalf("output missing truncation notice: %s", res.Content[len(res.Content)-100:])
+	}
+	if !utf8.ValidString(res.Content) {
+		t.Error("truncated output contains invalid UTF-8")
+	}
+	body, _, ok := strings.Cut(res.Content, wantNotice)
+	if !ok {
+		t.Fatal("cut failed")
+	}
+	if len(body) != mcp.MaxMCPOutputBytes-1 {
+		t.Errorf("len(body) = %d, want %d", len(body), mcp.MaxMCPOutputBytes-1)
 	}
 }

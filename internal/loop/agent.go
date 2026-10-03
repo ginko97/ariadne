@@ -213,6 +213,11 @@ type Agent struct {
 	// is 0. Used so the budget follows the model at the start and on a model
 	// switch at turn boundaries.
 	BudgetResolver func(model string) int
+
+	// PriceResolver resolves token pricing for a model when Price is zero.
+	// Used so cost tracking follows the model at the start and on a model
+	// switch at turn boundaries.
+	PriceResolver func(model string) Price
 }
 
 // Run drives the agent loop until the model stops, a limit trips, or ctx is cancelled.
@@ -417,7 +422,11 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 
 		// Charged whether or not the turn was useful.
 		s.Steps++
-		cost, known := a.Price.Cost(resp.Usage)
+		price := a.Price
+		if price.InputPerMTok == 0 && price.OutputPerMTok == 0 && a.PriceResolver != nil {
+			price = a.PriceResolver(s.Model)
+		}
+		cost, known := price.Cost(resp.Usage)
 		s.Cost += cost
 		if !known {
 			s.UnpricedSteps++

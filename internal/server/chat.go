@@ -299,7 +299,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		if origTrace != nil {
 			origTrace(e)
 		}
-		if e.Kind == trace.KindToolResult {
+		if e.Kind == trace.KindToolResult || e.Kind == trace.KindToolDenied {
 			out.event("tool_result", map[string]any{
 				"id":       e.CallID,
 				"name":     e.Tool,
@@ -380,7 +380,7 @@ func deltaEvents(out *sseWriter) func(llm.Chunk) {
 		}
 		if d := c.ToolCall; d != nil && d.Name != "" && !announced[d.Index] {
 			announced[d.Index] = true
-			out.event("tool", map[string]any{"name": d.Name})
+			out.event("tool", map[string]any{"name": d.Name, "index": d.Index})
 		}
 		if c.Stop != "" || c.Usage.Reported() {
 			clear(announced)

@@ -98,6 +98,27 @@ func TestModelsReportsPricePerMillionTokens(t *testing.T) {
 	}
 }
 
+func TestModelCachePriceFor(t *testing.T) {
+	ts, _ := upstream(t, modelsFixture, http.StatusOK)
+	m := newCache(t, ts.URL)
+
+	prompt, comp, ok := m.PriceFor("b/tools-two")
+	if !ok || prompt != 3 || comp != 15 {
+		t.Errorf("PriceFor(b/tools-two) = (%v, %v, %v), want (3, 15, true)", prompt, comp, ok)
+	}
+
+	// Unknown model
+	if _, _, ok := m.PriceFor("nonexistent"); ok {
+		t.Error("PriceFor(nonexistent) returned ok=true")
+	}
+
+	// Nil cache
+	var nilCache *ModelCache
+	if _, _, ok := nilCache.PriceFor("b/tools-two"); ok {
+		t.Error("nilCache.PriceFor returned ok=true")
+	}
+}
+
 func TestModelsCachesWithinTTLAndRefetchesAfter(t *testing.T) {
 	ts, hits := upstream(t, modelsFixture, http.StatusOK)
 	m := newCache(t, ts.URL)

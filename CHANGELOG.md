@@ -3,6 +3,27 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## v0.6.16 — 2026-10-03 — spending cap flag, MCP output truncation, live tool denial in UI, and parallel tool streaming fix
+
+- **Spending cap CLI flag (`-max-cost`).** Added `-max-cost` flag to `run`, `resume`, `chat`,
+  and `ui`. Cumulative spend is bounded across steps and turns, tripping `ErrCostLimit`
+  when the dollar threshold is reached and providing actionable hints for resuming with
+  a raised budget. Token prices are resolved via live provider usage reports or dynamic
+  per-model catalog lookup (`PriceResolver` / `ModelCache.PriceFor`).
+- **MCP tool output size limit (1 MB).** Remote MCP tool results are now capped at 1 MB
+  (`MaxMCPOutputBytes`), bounded identically to `fetch` (1 MB) and `web_fetch` (2 MB).
+  Outputs exceeding 1 MB are cleanly truncated on a valid UTF-8 rune boundary with an
+  explicit notice, preventing memory exhaustion and context window blowup from oversized
+  MCP server responses.
+- **Live tool denial updates in Web UI.** When a tool call is refused by policy (disallowed
+  by allow-list, exceeding max denials, or rejected by human approval), the server emits
+  a `tool_result` SSE event with `is_error: true`. The Web UI immediately transitions
+  the placeholder card from `calling…` to an expanded error state with the refusal message.
+- **Parallel tool streaming placeholder collision fix.** Added `index` to the streamed
+  `tool` SSE event and converted single `pendingTool` tracking in the Web UI to a queue-aware
+  `pendingTools` collection, eliminating placeholder overwrites and orphaned cards when
+  the model invokes multiple tools concurrently.
+
 ## v0.6.15 — 2026-10-03 — OpenRouter error messages, and the context budget in the terminal
 
 - **Fix: OpenRouter's error messages are shown again.** Since v0.6.14 an error

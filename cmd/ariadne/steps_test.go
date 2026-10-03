@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -81,5 +82,58 @@ func TestABriefGetsMoreStepsUnlessMaxStepsIsGiven(t *testing.T) {
 	cmdChat([]string{"-base-url", srv.URL + "/v1", "-model", "m", "-workspace", t.TempDir(), "-task", brief})
 	if got := calls.Load(); got != briefMaxSteps {
 		t.Errorf("chat -task: %d model calls, want %d", got, briefMaxSteps)
+	}
+}
+
+func endlessToolsWithCost(t *testing.T, stepCost float64) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[` +
+			`{"id":"c","type":"function","function":{"name":"calc","arguments":"{\"expr\":\"1+1\"}"}}]},` +
+			`"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":5,"cost":` +
+			fmt.Sprintf("%f", stepCost) + `}}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &calls
+}
+
+func TestRunStopsAtMaxCost(t *testing.T) {
+	t.Setenv("ARIADNE_API_KEY", "test-key-1234567890")
+	oldRuns := runsDir
+	runsDir = t.TempDir()
+	t.Cleanup(func() { runsDir = oldRuns })
+
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devNull.Close()
+	oldOut, oldErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = devNull, devNull
+	t.Cleanup(func() { os.Stdout, os.Stderr = oldOut, oldErr })
+
+	// Each step costs $0.05. Cap is $0.12.
+	// Step 1 costs $0.05 (total $0.05 < $0.12, continues).
+	// Step 2 costs $0.05 (total $0.10 < $0.12, continues).
+	// Step 3 costs $0.05 (total $0.15 >= $0.12, trips ErrCostLimit).
+	srv, calls := endlessToolsWithCost(t, 0.05)
+	args := []string{
+		"-base-url", srv.URL + "/v1",
+		"-model", "m",
+		"-workspace", t.TempDir(),
+		"-max-cost", "0.12",
+		"-max-steps", "10",
+		"do something",
+	}
+	code := cmdRun(args)
+	if code != exitFail {
+		t.Errorf("cmdRun exit code = %d, want %d (failure due to cost limit)", code, exitFail)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Errorf("model calls = %d, want 3", got)
 	}
 }

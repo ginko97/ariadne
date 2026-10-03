@@ -111,6 +111,7 @@ type agentOpts struct {
 	RunID   string
 
 	MaxSteps    int
+	MaxCost     float64
 	Budget      int
 	ToolTimeout time.Duration
 	HTTPTimeout time.Duration
@@ -247,9 +248,18 @@ func newAgentFor(o agentOpts) *loop.Agent {
 		Today:    time.Now,
 		Memory:   memoryFor(o.Memory),
 
-		RunTool:       reg.Call,
-		Checkpoint:    o.Store.Save,
-		MaxSteps:      o.MaxSteps,
+		RunTool:    reg.Call,
+		Checkpoint: o.Store.Save,
+		MaxSteps:   o.MaxSteps,
+		MaxCost:    o.MaxCost,
+		PriceResolver: func(model string) loop.Price {
+			if o.Models != nil {
+				if prompt, comp, ok := o.Models.PriceFor(model); ok {
+					return loop.Price{InputPerMTok: prompt, OutputPerMTok: comp}
+				}
+			}
+			return loop.Price{}
+		},
 		ContextBudget: o.Budget,
 		BudgetResolver: func(model string) int {
 			if o.Models != nil {
@@ -258,9 +268,6 @@ func newAgentFor(o agentOpts) *loop.Agent {
 			return 0
 		},
 		ToolTimeout: o.ToolTimeout,
-
-		// MaxCost stays 0 (unlimited) until Price is a per-model table —
-		// a ceiling with no prices behind it would be theatre.
 	}
 }
 
