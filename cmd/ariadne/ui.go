@@ -33,7 +33,7 @@ func cmdUI(args []string) int {
 	model := fs.String("model", envOr("ARIADNE_MODEL", ""), "model id (default depends on -base-url)")
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	maxSteps := fs.Int("max-steps", defaultMaxSteps, maxStepsHelp)
-	maxCost := fs.Float64("max-cost", 0, "stop a conversation if cumulative cost reaches this many USD (0: unlimited)")
+	maxCost := fs.Float64("max-cost", 0, "stop a conversation if cumulative cost reaches this many USD, or as soon as a cost is unknown (0: unlimited)")
 	allow := fs.String("allow", "", "comma-separated tools a conversation may call (default: all)")
 	approve := fs.String("approve", "", "tools needing approval in the browser before each call")
 	trust := fs.String("trust", "", "MCP tools, or a gated built-in (web_fetch, edit_file, write_file), that run without approval; every other one asks first")

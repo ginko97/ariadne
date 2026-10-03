@@ -223,6 +223,10 @@ func (f Fetch) Call(ctx context.Context, _ string, args json.RawMessage) (llm.To
 // breaks a context window.
 const maxFetchBytes = 256 << 10
 
+// MaxTextBytes is how much text one tool result gives the model: fetch and
+// web_fetch cut there, and MCP results are held to the same.
+const MaxTextBytes = maxFetchBytes
+
 // isBinary reports whether data looks like something no model can read.
 //
 // A NUL byte in the first few kilobytes, which is the heuristic git uses and is

@@ -17,8 +17,11 @@ import (
 
 // Sentinel errors, so tests and callers use errors.Is instead of matching strings.
 var (
-	ErrStepLimit    = errors.New("loop: step limit exceeded")
-	ErrCostLimit    = errors.New("loop: cost limit exceeded")
+	ErrStepLimit = errors.New("loop: step limit exceeded")
+	ErrCostLimit = errors.New("loop: cost limit exceeded")
+	// ErrCostUnknown: MaxCost is set, but a step's cost is not known, so the
+	// total the limit compares against is not either.
+	ErrCostUnknown  = errors.New("loop: cost unknown, so the spending limit cannot be enforced")
 	ErrTruncated    = errors.New("loop: model output truncated")
 	ErrNoToolRunner = errors.New("loop: model requested a tool but no ToolRunner is configured")
 	ErrEmptyToolUse = errors.New("loop: stop=tool_use but response carried no tool_use blocks")
@@ -326,6 +329,15 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		}
 		if a.MaxCost > 0 && s.Cost >= a.MaxCost {
 			return "", a.endRun(s, fmt.Errorf("%w: $%.4f spent", ErrCostLimit, s.Cost))
+		}
+		// A step with no price adds nothing to s.Cost, so a limit over an
+		// unknown total never trips: a $0.01 limit let twelve million tokens
+		// through without a word. Stop instead, before the next call, so at
+		// most the one call that revealed it is spent; the step itself is kept
+		// and its tools have run, so nothing paid for is lost.
+		if a.MaxCost > 0 && s.UnpricedSteps > 0 {
+			return "", a.endRun(s, fmt.Errorf("%w: %s reported no cost for %d of %d steps, and no price for it is known",
+				ErrCostUnknown, s.Model, s.UnpricedSteps, s.Steps))
 		}
 
 		// Compacted here, and nowhere else, because this is the one line in the

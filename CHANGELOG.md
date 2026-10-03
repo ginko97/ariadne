@@ -3,6 +3,21 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## Unreleased
+
+- **Fix: `-max-cost` stops when it cannot count.** In v0.6.16 a provider that
+  reports tokens but no cost, with no known price for the model (Ollama,
+  OpenAI direct, Gemini, Hugging Face), added nothing to the total, so the limit
+  never tripped: a $0.01 limit let millions of tokens through without a word.
+  With `-max-cost` set, the run now stops after the first step whose cost is
+  unknown, keeping that step and the tools it ran, and says so. Without
+  `-max-cost` nothing changes.
+- **Fix: MCP results give the model 256KB, like `fetch` and `web_fetch`.**
+  v0.6.16 allowed 1MB, about 250k tokens, and described `fetch` and
+  `web_fetch` as 1MB and 2MB; both give the model 256KB. 2MB is what
+  `web_fetch` downloads, not what it passes on.
+- An error response from a provider is read only up to 64KB, not 16MB.
+
 ## v0.6.16 — 2026-10-03 — spending cap flag, MCP output truncation, live tool denial in UI, and parallel tool streaming fix
 
 - **Spending cap CLI flag (`-max-cost`).** Added `-max-cost` flag to `run`, `resume`, `chat`,

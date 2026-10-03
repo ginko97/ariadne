@@ -23,7 +23,7 @@ func cmdChat(args []string) int {
 	model := fs.String("model", envOr("ARIADNE_MODEL", ""), "model id (default depends on -base-url)")
 	baseURL := fs.String("base-url", "", "OpenAI-compatible endpoint (fresh: default "+defaultBaseURL+"; resumed: checkpoint's unless overridden)")
 	maxSteps := fs.Int("max-steps", defaultMaxSteps, maxStepsHelp)
-	maxCost := fs.Float64("max-cost", 0, "stop the conversation if cumulative cost reaches this many USD (0: unlimited)")
+	maxCost := fs.Float64("max-cost", 0, "stop the conversation if cumulative cost reaches this many USD, or as soon as a cost is unknown (0: unlimited)")
 	allow := fs.String("allow", "", "comma-separated tools this run may call (resume can only narrow it)")
 	workspace := fs.String("workspace", "", "directory the file tools are confined to (fresh: default workspace; resumed: checkpoint's unless overridden)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")

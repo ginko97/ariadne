@@ -183,6 +183,26 @@ func TestConnectPrefixesToolsWithTheServerName(t *testing.T) {
 	}
 }
 
+// An MCP result gives the model no more than a fetched page does. 300KB is
+// under the 1MB v0.6.16 shipped with and over the 256KB fetch and web_fetch
+// keep, so this fails if the two drift apart again.
+func TestRemoteToolGivesNoMoreThanFetch(t *testing.T) {
+	s := dial(t)
+	tools, err := s.Tools(context.Background())
+	if err != nil {
+		t.Fatalf("Tools: %v", err)
+	}
+	input := strings.Repeat("z", 300<<10)
+	res, err := tool.New(tools...).Call(context.Background(), llmToolCall("call_300k", "echo", fmt.Sprintf(`{"text":%q}`, input)))
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if !strings.Contains(res.Content, "[output truncated at") || len(res.Content) > tool.MaxTextBytes+100 {
+		t.Errorf("a 300KB result reached the model as %d bytes, want at most %d and a truncation note",
+			len(res.Content), tool.MaxTextBytes)
+	}
+}
+
 // Output over MaxMCPOutputBytes is truncated with a notice and clean UTF-8.
 func TestRemoteToolTruncatesLargeOutput(t *testing.T) {
 	s := dial(t)

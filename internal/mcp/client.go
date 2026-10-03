@@ -16,11 +16,11 @@ import (
 	"github.com/ginko97/ariadne/internal/tool"
 )
 
-// MaxMCPOutputBytes is the maximum bytes of text an MCP tool call may return.
-// Bounded like fetch (1 MB) and web_fetch (2 MB): an MCP server is external
-// code and can return arbitrary megabytes, which exhausts memory and blows the
-// context window.
-const MaxMCPOutputBytes = 1 << 20 // 1 MB
+// MaxMCPOutputBytes is the most text an MCP tool call gives the model: the
+// same as fetch and web_fetch (tool.MaxTextBytes, 256KB). An MCP server is
+// external code and can return arbitrary megabytes; a megabyte is about 250k
+// tokens, more than most models' whole context.
+const MaxMCPOutputBytes = tool.MaxTextBytes
 
 const clientName = "ariadne"
 

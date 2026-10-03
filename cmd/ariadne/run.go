@@ -21,7 +21,7 @@ func cmdRun(args []string) int {
 	model := fs.String("model", envOr("ARIADNE_MODEL", ""), "model id (default depends on -base-url)")
 	baseURL := fs.String("base-url", envOr("ARIADNE_BASE_URL", defaultBaseURL), "OpenAI-compatible endpoint")
 	maxSteps := fs.Int("max-steps", defaultMaxSteps, maxStepsHelp)
-	maxCost := fs.Float64("max-cost", 0, "stop the run if cumulative cost reaches this many USD (0: unlimited)")
+	maxCost := fs.Float64("max-cost", 0, "stop the run if cumulative cost reaches this many USD, or as soon as a cost is unknown (0: unlimited)")
 	allow := fs.String("allow", "", "comma-separated tools this run may call (default: all)")
 	workspace := fs.String("workspace", defaultWorkspace, "directory the file tools are confined to")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
@@ -158,7 +158,7 @@ func cmdResume(args []string) int {
 	fs.SetOutput(os.Stderr)
 	baseURL := fs.String("base-url", "", "OpenAI-compatible endpoint (defaults to endpoint from checkpoint)")
 	maxSteps := fs.Int("max-steps", defaultMaxSteps, maxStepsHelp)
-	maxCost := fs.Float64("max-cost", 0, "stop the run if cumulative cost reaches this many USD (0: unlimited)")
+	maxCost := fs.Float64("max-cost", 0, "stop the run if cumulative cost reaches this many USD, or as soon as a cost is unknown (0: unlimited)")
 	allow := fs.String("allow", "", "narrow the tools this run may call; it can never widen the grant in the checkpoint")
 	workspace := fs.String("workspace", "", "directory the file tools are confined to (defaults to the checkpoint's)")
 	mcpConfig := fs.String("mcp-config", envOr("ARIADNE_MCP_CONFIG", ""), "JSON file listing MCP servers to start")
@@ -289,6 +289,8 @@ func execute(ctx context.Context, agent *loop.Agent, state *loop.State, streamed
 			// The ceiling is per call, so a plain resume grants a fresh budget;
 			// raising it is for a single turn that genuinely needs more room.
 			fmt.Fprintf(os.Stderr, "hint: ariadne resume %s\n", state.RunID)
+		case errors.Is(err, loop.ErrCostUnknown):
+			fmt.Fprintf(os.Stderr, "hint: this provider does not say what a request costs; to continue without a limit: ariadne resume %s\n", state.RunID)
 		case errors.Is(err, loop.ErrCostLimit):
 			fmt.Fprintf(os.Stderr, "hint: resume with higher cap: ariadne resume -max-cost <limit> %s\n", state.RunID)
 		case errors.Is(err, context.Canceled):
