@@ -38,6 +38,10 @@ const (
 	// step, with nothing on the command line having asked for that.
 	maxTotalBackoff  = 90 * time.Second
 	maxErrBodyLength = 512
+	// maxErrBodyRead bounds how much of an error response is read: enough for
+	// a Gemini RetryInfo or a context-length message in the details, nowhere
+	// near the 16MB a completion may take. Only maxErrBodyLength of it is shown.
+	maxErrBodyRead = 64 << 10
 
 	// maxResponseBytes caps a non-streaming completion body. A long answer is
 	// hundreds of kilobytes of JSON; sixteen megabytes is room for any real one
@@ -260,7 +264,7 @@ func (o *OpenAI) send(ctx context.Context, payload []byte, isStream bool) (*http
 		}
 
 		if isRetryableStatus(resp.StatusCode) {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBodyRead))
 			resp.Body.Close()
 
 			if attempt < maxRetries {
@@ -297,7 +301,7 @@ func (o *OpenAI) send(ctx context.Context, payload []byte, isStream bool) (*http
 		}
 
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBodyRead))
 			resp.Body.Close()
 			if isContextLengthError(resp.StatusCode, body) {
 				return nil, fmt.Errorf("openai: %s: %s: %w", resp.Status, truncate(body, maxErrBodyLength), ErrContextLength)
@@ -326,6 +330,12 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (Response, error) {
 	defer resp.Body.Close()
 
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	// Not retried, unlike a connection that never completed. A failed body
+	// read means the response *was* produced, and dogfooding showed it
+	// recurring rather than passing: a prompt too large for the timeout fails
+	// the same way every time, so retrying just spends the wait three times
+	// before failing anyway. The fix there was a bigger timeout, not more
+	// attempts.
 	if readErr != nil {
 		return Response{}, fmt.Errorf("openai: read response: %w", readErr)
 	}
