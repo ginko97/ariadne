@@ -3,7 +3,7 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
-## Unreleased
+## v0.6.17 — 2026-10-03 — the spending limit stops when it cannot count, and MCP results held to 256KB
 
 - **Fix: `-max-cost` stops when it cannot count.** In v0.6.16 a provider that
   reports tokens but no cost, with no known price for the model (Ollama,
