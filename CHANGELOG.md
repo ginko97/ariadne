@@ -3,7 +3,7 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
-## Unreleased
+## v0.6.18 — 2026-10-04 — -max-cost no longer stops Ollama, and how to check what built your download
 
 - **Fix: `-max-cost` no longer stops Ollama.** A model Ollama runs on your
   machine costs nothing per token, but Ollama reports no cost, so v0.6.17
