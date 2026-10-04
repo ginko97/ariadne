@@ -35,6 +35,10 @@ const maxToolDenials = 3
 type Price struct {
 	InputPerMTok  float64
 	OutputPerMTok float64
+	// Free is a model that runs on this machine: a call costs nothing per
+	// token, and that is known, not missing. Without it a local model's steps
+	// count as unpriced, and -max-cost stops a run that cannot spend money.
+	Free bool
 }
 
 // Cost is what this turn cost, in USD.
@@ -51,6 +55,9 @@ type Price struct {
 func (p Price) Cost(u llm.Usage) (usd float64, known bool) {
 	if u.CostReported || u.Cost > 0 {
 		return u.Cost, true
+	}
+	if p.Free {
+		return 0, true
 	}
 	if p.InputPerMTok == 0 && p.OutputPerMTok == 0 {
 		return 0, false

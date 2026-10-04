@@ -253,6 +253,12 @@ func newAgentFor(o agentOpts) *loop.Agent {
 		MaxSteps:   o.MaxSteps,
 		MaxCost:    o.MaxCost,
 		PriceResolver: func(model string) loop.Price {
+			// Ollama runs the model here: nothing per token. A model Ollama
+			// relays to its own cloud is paid through Ollama's plan, not per
+			// call, so -max-cost cannot see it either way.
+			if providerID(o.BaseURL) == "ollama" {
+				return loop.Price{Free: true}
+			}
 			if o.Models != nil {
 				if prompt, comp, ok := o.Models.PriceFor(model); ok {
 					return loop.Price{InputPerMTok: prompt, OutputPerMTok: comp}

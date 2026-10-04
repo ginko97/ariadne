@@ -212,6 +212,7 @@ flags:
   -max-steps      ceiling on loop iterations per turn (default 10; 25 for a brief)
   -max-cost       stop the run if cumulative cost reaches this many USD (0: unlimited);
                   also stops when the provider reports no cost and no price is known
+                  (a model run by Ollama counts as free)
   -allow          comma-separated tools this run may call (default: all)
   -workspace      directory the file tools are confined to (default workspace)
   -approve        tools needing a yes before each call (terminal; the browser under ui)

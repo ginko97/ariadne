@@ -36,6 +36,20 @@ and Linux, amd64 and arm64 — unpack it, and put `ariadne` on your `PATH`. Or, 
 go install github.com/ginko97/ariadne/cmd/ariadne@latest
 ```
 
+Every archive carries a build attestation. With the [GitHub CLI](https://cli.github.com),
+check that the file you downloaded was built by this repository's release workflow from
+its release tag, and not changed since (use the name of the archive you downloaded):
+
+```bash
+gh attestation verify ariadne_0.6.17_windows_amd64.zip -R ginko97/ariadne
+```
+
+A checksum only says the file matches the release page; this says what built it. It is
+not a code signature, so Windows still warns on first run (below).
+
+**Dependencies:** one direct dependency, the official MCP Go SDK, which brings eight
+more modules (`go.mod`). Everything else is the Go standard library.
+
 <details>
 <summary><b>On Windows, the first run warns you</b></summary>
 

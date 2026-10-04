@@ -3,6 +3,21 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## Unreleased
+
+- **Fix: `-max-cost` no longer stops Ollama.** A model Ollama runs on your
+  machine costs nothing per token, but Ollama reports no cost, so v0.6.17
+  stopped every Ollama run with `-max-cost` after one step as "cost unknown".
+  Ollama now counts as free. Any other endpoint with no reported cost and no
+  known price still stops, including one on your own machine, which can be a
+  proxy to a paid API.
+- **README: check what built your download.** Every release archive carries a
+  build attestation; `gh attestation verify <archive> -R ginko97/ariadne` checks
+  that this repository's release workflow built it from its tag. It is not a
+  code signature, and the SmartScreen warning stays.
+- **README: dependencies.** One direct dependency, the MCP Go SDK, which
+  brings eight more modules; everything else is the standard library.
+
 ## v0.6.17 — 2026-10-03 — the spending limit stops when it cannot count, and MCP results held to 256KB
 
 - **Fix: `-max-cost` stops when it cannot count.** In v0.6.16 a provider that
