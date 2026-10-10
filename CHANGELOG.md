@@ -17,6 +17,10 @@ carry the longer story for each release.
 - **Fix: a page cannot end the untrusted marking early.** A closing marker
   inside fetched text (`</untrusted>`, in any case or spacing) is broken before
   the text reaches the model.
+- **Built with Go 1.26.9.** Go 1.26.6, which built v0.6.18 and earlier, has
+  twelve vulnerabilities in its standard library (`net/http`, `crypto/tls`,
+  `html/template`, `net/textproto`, `os`; GO-2026-6599 to GO-2026-6617) that
+  ariadne's code reaches. 1.26.9 fixes them.
 - **Fix: Stop is not held up by the model list.** Looking up a model's context
   size or price could wait up to 10 seconds for OpenRouter's model list inside
   a turn, and Stop could not interrupt it. The price is now looked up only when
