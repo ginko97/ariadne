@@ -102,19 +102,19 @@ func TestModelCachePriceFor(t *testing.T) {
 	ts, _ := upstream(t, modelsFixture, http.StatusOK)
 	m := newCache(t, ts.URL)
 
-	prompt, comp, ok := m.PriceFor("b/tools-two")
+	prompt, comp, ok := m.PriceFor(context.Background(), "b/tools-two")
 	if !ok || prompt != 3 || comp != 15 {
 		t.Errorf("PriceFor(b/tools-two) = (%v, %v, %v), want (3, 15, true)", prompt, comp, ok)
 	}
 
 	// Unknown model
-	if _, _, ok := m.PriceFor("nonexistent"); ok {
+	if _, _, ok := m.PriceFor(context.Background(), "nonexistent"); ok {
 		t.Error("PriceFor(nonexistent) returned ok=true")
 	}
 
 	// Nil cache
 	var nilCache *ModelCache
-	if _, _, ok := nilCache.PriceFor("b/tools-two"); ok {
+	if _, _, ok := nilCache.PriceFor(context.Background(), "b/tools-two"); ok {
 		t.Error("nilCache.PriceFor returned ok=true")
 	}
 }
@@ -424,10 +424,10 @@ func TestLocalListKeepsTheConfiguredModelAndSaysWhy(t *testing.T) {
 func TestBudgetForFetchesAnEmptyCache(t *testing.T) {
 	ts, hits := upstream(t, modelsFixture, http.StatusOK)
 	m := newCache(t, ts.URL)
-	if got := m.BudgetFor("b/tools-two"); got != 96000 {
+	if got := m.BudgetFor(context.Background(), "b/tools-two"); got != 96000 {
 		t.Errorf("budget = %d, want 96000 (75%% of 128000) from a cache never fetched before", got)
 	}
-	m.BudgetFor("a/tools-one")
+	m.BudgetFor(context.Background(), "a/tools-one")
 	if n := hits.Load(); n != 1 {
 		t.Errorf("%d fetches, want 1", n)
 	}
@@ -436,17 +436,17 @@ func TestBudgetForFetchesAnEmptyCache(t *testing.T) {
 func TestModelCacheBudgetFor(t *testing.T) {
 	// Nil cache returns 0
 	var nilCache *ModelCache
-	if got := nilCache.BudgetFor("any"); got != 0 {
+	if got := nilCache.BudgetFor(context.Background(), "any"); got != 0 {
 		t.Errorf("nil cache budget = %d, want 0", got)
 	}
 
 	// Ollama (local) always returns 3000
 	ollamaCache := NewModelCache("qwen3:4b")
 	ollamaCache.Reconfigure("qwen3:4b", "", func(context.Context) ([]string, error) { return []string{"qwen3:4b"}, nil })
-	if got := ollamaCache.BudgetFor("qwen3:4b"); got != 3000 {
+	if got := ollamaCache.BudgetFor(context.Background(), "qwen3:4b"); got != 3000 {
 		t.Errorf("ollama budget = %d, want 3000", got)
 	}
-	if got := ollamaCache.BudgetFor("other-model"); got != 3000 {
+	if got := ollamaCache.BudgetFor(context.Background(), "other-model"); got != 3000 {
 		t.Errorf("ollama budget for other = %d, want 3000", got)
 	}
 
@@ -459,16 +459,16 @@ func TestModelCacheBudgetFor(t *testing.T) {
 	}
 	// Fresh, or BudgetFor's Get would refresh it from the real catalogue.
 	m.fetched = time.Now()
-	if got := m.BudgetFor("anthropic/claude-3.5-sonnet"); got != 150000 {
+	if got := m.BudgetFor(context.Background(), "anthropic/claude-3.5-sonnet"); got != 150000 {
 		t.Errorf("claude budget = %d, want 150000 (75%% of 200000)", got)
 	}
-	if got := m.BudgetFor("openai/gpt-4o"); got != 96000 {
+	if got := m.BudgetFor(context.Background(), "openai/gpt-4o"); got != 96000 {
 		t.Errorf("gpt-4o budget = %d, want 96000 (75%% of 128000)", got)
 	}
-	if got := m.BudgetFor("zero-context"); got != 0 {
+	if got := m.BudgetFor(context.Background(), "zero-context"); got != 0 {
 		t.Errorf("zero context budget = %d, want 0", got)
 	}
-	if got := m.BudgetFor("unknown/model"); got != 0 {
+	if got := m.BudgetFor(context.Background(), "unknown/model"); got != 0 {
 		t.Errorf("unknown model budget = %d, want 0", got)
 	}
 }

@@ -881,7 +881,7 @@ func TestBudgetFollowsModelAtStart(t *testing.T) {
 		Provider: fake,
 		Model:    "test-model",
 		MaxSteps: 5,
-		BudgetResolver: func(model string) int {
+		BudgetResolver: func(_ context.Context, model string) int {
 			resolverCalled = true
 			if model == "test-model" {
 				return 60000
@@ -908,7 +908,7 @@ func TestBudgetFollowsModelAtStart(t *testing.T) {
 		Provider:      fake2,
 		Model:         "test-model",
 		ContextBudget: 12345,
-		BudgetResolver: func(model string) int {
+		BudgetResolver: func(_ context.Context, model string) int {
 			return 60000
 		},
 	}
@@ -936,7 +936,7 @@ func TestBudgetFollowsModelOnModelSwitch(t *testing.T) {
 		Provider: fake,
 		Model:    "model-a",
 		MaxSteps: 5,
-		BudgetResolver: func(model string) int {
+		BudgetResolver: func(_ context.Context, model string) int {
 			return budgetMap[model]
 		},
 	}
@@ -966,7 +966,7 @@ func TestBudgetFollowsModelOnModelSwitch(t *testing.T) {
 		Provider:      fake2,
 		Model:         "model-b",
 		ContextBudget: 5555,
-		BudgetResolver: func(model string) int {
+		BudgetResolver: func(_ context.Context, model string) int {
 			return 90000
 		},
 	}

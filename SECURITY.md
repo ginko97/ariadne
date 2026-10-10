@@ -72,7 +72,11 @@ plainly, what protects you and what does not.
   are `http(s)` only, show their address, and send no referrer.
 - **Untrusted text is marked.** What `fetch`, `web_fetch`, MCP tools and `exec`
   return is wrapped as data, and the model is told not to follow instructions
-  inside it.
+  inside it. A closing marker inside the text is broken, so a page cannot end
+  the wrapping early. When a long conversation drops its oldest turns, an
+  untrusted result is recorded only by its tool and size, never quoted into
+  the summary that stays in your first message. (Before v0.6.19 the start of
+  it was.)
 
 ## What does not
 

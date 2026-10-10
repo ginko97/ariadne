@@ -233,12 +233,15 @@ func (m *ModelCache) Configured() string {
 // 3000 for Ollama (whose default num_ctx is 4096 and cuts longer prompts silently),
 // or 0 (leave it off) if unknown or unlisted.
 //
+// ctx is the turn's: a refresh can take the cache's whole timeout, and Stop
+// must not wait for it.
+//
 // Through Get, not the rows already held: in the terminal nothing else asks
 // for the list unless /models is typed, so reading only what was fetched gave
 // every OpenRouter conversation there a budget of 0. Get fetches once per TTL,
 // bounded by the cache's own timeout, backs off after a failure, and answers
 // a provider with no list without touching the network.
-func (m *ModelCache) BudgetFor(model string) int {
+func (m *ModelCache) BudgetFor(ctx context.Context, model string) int {
 	if m == nil {
 		return 0
 	}
@@ -249,7 +252,7 @@ func (m *ModelCache) BudgetFor(model string) int {
 		return 3000
 	}
 
-	rows, _, _ := m.Get(context.Background())
+	rows, _, _ := m.Get(ctx)
 	for _, row := range rows {
 		if row.ID == model && row.ContextLength > 0 {
 			return int(float64(row.ContextLength) * 0.75)
@@ -261,7 +264,7 @@ func (m *ModelCache) BudgetFor(model string) int {
 // PriceFor resolves the token price in dollars per million tokens for a model.
 // Through Get, bounded by the cache's TTL and timeout, returning (0, 0, false)
 // for local providers, missing entries, or unquoted pricing.
-func (m *ModelCache) PriceFor(model string) (promptPerMTok, completionPerMTok float64, ok bool) {
+func (m *ModelCache) PriceFor(ctx context.Context, model string) (promptPerMTok, completionPerMTok float64, ok bool) {
 	if m == nil {
 		return 0, 0, false
 	}
@@ -272,7 +275,7 @@ func (m *ModelCache) PriceFor(model string) (promptPerMTok, completionPerMTok fl
 		return 0, 0, false
 	}
 
-	rows, _, _ := m.Get(context.Background())
+	rows, _, _ := m.Get(ctx)
 	for _, row := range rows {
 		if row.ID == model {
 			if row.PromptPerMTok > 0 || row.CompletionPerMTok > 0 {

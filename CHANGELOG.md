@@ -3,6 +3,25 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## Unreleased
+
+- **Fix: untrusted text no longer reaches your own message when a long
+  conversation is shortened.** When the oldest turns were dropped, the digest
+  kept in your first message quoted the start of each tool result. For a web
+  page that meant text such as "SYSTEM: ignore the task…" sat in your own
+  message, outside the untrusted marking, along with the model's earlier
+  replies. A web page or other untrusted result is now recorded only by its tool
+  and size. The model's replies are labelled as its own, and the digest says it
+  is a record, not instructions. A conversation shortened by an earlier version
+  is cleaned the next time it is shortened.
+- **Fix: a page cannot end the untrusted marking early.** A closing marker
+  inside fetched text (`</untrusted>`, in any case or spacing) is broken before
+  the text reaches the model.
+- **Fix: Stop is not held up by the model list.** Looking up a model's context
+  size or price could wait up to 10 seconds for OpenRouter's model list inside
+  a turn, and Stop could not interrupt it. The price is now looked up only when
+  the provider did not report the cost itself.
+
 ## v0.6.18 — 2026-10-04 — -max-cost no longer stops Ollama, and how to check what built your download
 
 - **Fix: `-max-cost` no longer stops Ollama.** A model Ollama runs on your

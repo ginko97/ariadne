@@ -252,7 +252,7 @@ func newAgentFor(o agentOpts) *loop.Agent {
 		Checkpoint: o.Store.Save,
 		MaxSteps:   o.MaxSteps,
 		MaxCost:    o.MaxCost,
-		PriceResolver: func(model string) loop.Price {
+		PriceResolver: func(ctx context.Context, model string) loop.Price {
 			// Ollama runs the model here: nothing per token. A model Ollama
 			// relays to its own cloud is paid through Ollama's plan, not per
 			// call, so -max-cost cannot see it either way.
@@ -260,16 +260,16 @@ func newAgentFor(o agentOpts) *loop.Agent {
 				return loop.Price{Free: true}
 			}
 			if o.Models != nil {
-				if prompt, comp, ok := o.Models.PriceFor(model); ok {
+				if prompt, comp, ok := o.Models.PriceFor(ctx, model); ok {
 					return loop.Price{InputPerMTok: prompt, OutputPerMTok: comp}
 				}
 			}
 			return loop.Price{}
 		},
 		ContextBudget: o.Budget,
-		BudgetResolver: func(model string) int {
+		BudgetResolver: func(ctx context.Context, model string) int {
 			if o.Models != nil {
-				return o.Models.BudgetFor(model)
+				return o.Models.BudgetFor(ctx, model)
 			}
 			return 0
 		},

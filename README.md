@@ -109,7 +109,9 @@ dropped before an answer arrived.
 ### Long conversations
 
 When a conversation outgrows the model, the oldest turns are dropped and a short digest of
-them is kept. The limit is 75% of the model's context on OpenRouter, from its model list,
+them is kept: your questions, the model's answers, and the tools it called. A web page or
+other untrusted result is recorded only by its size, never quoted, so the model fetches it
+again if it needs the text. The limit is 75% of the model's context on OpenRouter, from its model list,
 and 3,000 tokens on Ollama. Ollama's default context is 4,096 tokens, and it cuts a longer
 prompt without saying so. Other providers publish no context size, so nothing is dropped
 there until the provider says the conversation is too long. Then the oldest turns go and

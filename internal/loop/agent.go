@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -222,12 +223,12 @@ type Agent struct {
 	// BudgetResolver resolves the context budget for a model when ContextBudget
 	// is 0. Used so the budget follows the model at the start and on a model
 	// switch at turn boundaries.
-	BudgetResolver func(model string) int
+	BudgetResolver func(ctx context.Context, model string) int
 
 	// PriceResolver resolves token pricing for a model when Price is zero.
 	// Used so cost tracking follows the model at the start and on a model
 	// switch at turn boundaries.
-	PriceResolver func(model string) Price
+	PriceResolver func(ctx context.Context, model string) Price
 }
 
 // Run drives the agent loop until the model stops, a limit trips, or ctx is cancelled.
@@ -291,7 +292,7 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		if a.ContextBudget > 0 {
 			s.ContextBudget = a.ContextBudget
 		} else if a.BudgetResolver != nil {
-			s.ContextBudget = a.BudgetResolver(s.Model)
+			s.ContextBudget = a.BudgetResolver(ctx, s.Model)
 		}
 	}
 
@@ -442,8 +443,12 @@ func (a *Agent) Run(ctx context.Context, s *State) (string, error) {
 		// Charged whether or not the turn was useful.
 		s.Steps++
 		price := a.Price
-		if price.InputPerMTok == 0 && price.OutputPerMTok == 0 && a.PriceResolver != nil {
-			price = a.PriceResolver(s.Model)
+		// Looked up only when the provider did not say what the step cost:
+		// its own figure wins in Cost anyway, and the lookup can mean a
+		// catalogue fetch inside the step.
+		reported := resp.Usage.CostReported || resp.Usage.Cost > 0
+		if !reported && price.InputPerMTok == 0 && price.OutputPerMTok == 0 && !price.Free && a.PriceResolver != nil {
+			price = a.PriceResolver(ctx, s.Model)
 		}
 		cost, known := price.Cost(resp.Usage)
 		s.Cost += cost
@@ -995,6 +1000,9 @@ func withSystem(system string, msgs []llm.Message) []llm.Message {
 	return append(out, msgs...)
 }
 
+// closingMarker is the fence's end tag as a model might read it.
+var closingMarker = regexp.MustCompile(`(?i)<\s*/\s*untrusted`)
+
 // fence wraps untrusted content so the model can see where it starts and stops.
 //
 // This is a marker, not a sandbox. Content inside the fence is still text the
@@ -1008,7 +1016,16 @@ func withSystem(system string, msgs []llm.Message) []llm.Message {
 // as edit_file's old_text — copied that newline too and could never match.
 // Seen in run_20260920T070511_e1059b: three edit_file attempts, each refused
 // with "old_text was not found", all differing from the file by one \n.
+//
+// A closing marker inside the content is broken with a zero-width space, so
+// a page cannot end the fence itself and write "instructions" after it. Any
+// spelling a model might read as one counts: case, and spaces inside the tag.
+// The cost is that a file which really contains "</untrusted" cannot be
+// matched by edit_file through text copied from the fence.
 func fence(toolName, content string) string {
+	content = closingMarker.ReplaceAllStringFunc(content, func(m string) string {
+		return "<\u200b" + m[1:]
+	})
 	end := "\n"
 	if strings.HasSuffix(content, "\n") {
 		end = ""

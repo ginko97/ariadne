@@ -457,7 +457,7 @@ func TestPriceResolverComputesCostWhenPriceEmpty(t *testing.T) {
 	resolved := false
 	a := &Agent{
 		Provider: fake, Model: "dynamic-model", MaxSteps: 2,
-		PriceResolver: func(model string) Price {
+		PriceResolver: func(_ context.Context, model string) Price {
 			if model == "dynamic-model" {
 				resolved = true
 				return Price{InputPerMTok: 5, OutputPerMTok: 10}

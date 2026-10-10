@@ -31,7 +31,7 @@ func TestFreeModelIsNotAnUnknownCost(t *testing.T) {
 					step(endResponse("done", 0, 0)),
 				}},
 				Model: "free", MaxSteps: 10, MaxCost: 0.01,
-				PriceResolver: func(string) Price { return price },
+				PriceResolver: func(context.Context, string) Price { return price },
 				RunTool: func(context.Context, llm.ToolCall) (llm.ToolResult, error) {
 					return llm.ToolResult{Content: "1"}, nil
 				},

@@ -87,7 +87,7 @@ func (a *Agent) ChatTurn(ctx context.Context, s *State, text string) (string, er
 			return "", err
 		}
 		if a.ContextBudget == 0 && a.BudgetResolver != nil {
-			s.ContextBudget = a.BudgetResolver(a.Model)
+			s.ContextBudget = a.BudgetResolver(ctx, a.Model)
 		}
 	}
 	if err := s.AddUserMessage(text); err != nil {
@@ -119,7 +119,7 @@ func (a *Agent) Retry(ctx context.Context, s *State) (string, error) {
 			return "", err
 		}
 		if a.ContextBudget == 0 && a.BudgetResolver != nil {
-			s.ContextBudget = a.BudgetResolver(a.Model)
+			s.ContextBudget = a.BudgetResolver(ctx, a.Model)
 		}
 	}
 	return a.Run(ctx, s)
