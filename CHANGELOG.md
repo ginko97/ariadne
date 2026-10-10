@@ -3,7 +3,7 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
-## Unreleased
+## v0.6.19 — 2026-10-10 — untrusted text stays out of your own message, and built with Go 1.26.9
 
 - **Fix: untrusted text no longer reaches your own message when a long
   conversation is shortened.** When the oldest turns were dropped, the digest
