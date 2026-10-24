@@ -3,6 +3,13 @@
 What changed for someone using ariadne. The tag messages (`git show v0.3.0`)
 carry the longer story for each release.
 
+## Unreleased
+
+- **Built with Go 1.26.10.** Go 1.26.9, which built v0.6.19, has a
+  vulnerability in `crypto/x509` (GO-2026-6809) that ariadne's code reaches.
+  1.26.10 fixes it.
+- The release workflow uses goreleaser-action v7.3.0.
+
 ## v0.6.19 — 2026-10-10 — untrusted text stays out of your own message, and built with Go 1.26.9
 
 - **Fix: untrusted text no longer reaches your own message when a long
